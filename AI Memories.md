@@ -78,6 +78,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 ### Current Behavioral Rules
 
 - New geometry is created on the active layer.
+- `Rectangle` snapping is active on the visible drafting grid: rectangle draw and right-click subtract snap both corners to grid intersections, show a snap preview marker at the cursor, and produce bounds aligned exactly to cell multiples.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
 - Zoom is currently clamped between a minimum of `0.09` and a maximum of `2`.
 - The app maintains a global drafting angle separate from stored geometry.
@@ -111,4 +112,4 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 - Task: Design and implement snapping on the canvas, including how each snap mode should behave for the current toolset and drafting-angle workflow.
 - Status: In progress
-- Progress: The shape-based subtraction workflow was implemented and confirmed by the user. The first snapping pass is now in progress for `Rectangle`: pointer input snaps to every visible grid corner in drafting space, the cursor shows a snap preview marker, and both additive draw and right-click subtract produce rectangle bounds that land exactly on grid-corner multiples so adjacent fills and erasures align cleanly without per-cell leftovers. This is not yet moved to the permanent sections because it still needs browser testing and user confirmation before the snapping work expands to ellipse, strip, square brush, selection, and later editing interactions.
+- Progress: Rectangle snapping has now been implemented, browser-tested, and confirmed by the user. Rectangles snap to drafting-grid corners, show a cursor snap preview, and use the same exact cell-multiple geometry for both additive draw and right-click subtract so adjacent fills and erasures align cleanly. The remaining snapping work is still open for the other tools and interactions, especially ellipse, stroke rect, square brush, selection, and later editing behaviors.

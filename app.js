@@ -30,6 +30,7 @@ const state = {
   nextShapeId: 1,
   dragging: false,
   panning: false,
+  pointerInCanvas: false,
   spacePressed: false,
   start: { x: 0, y: 0 },
   current: { x: 0, y: 0 },
@@ -60,6 +61,10 @@ const maxZoom = 2;
 const ellipseSegments = 96;
 const squareBrushSpacingRatio = 0.35;
 const draftRotationStep = Math.PI / 36;
+const gridCellSize = 24;
+const gridMidCellInterval = 10;
+const gridMajorCellInterval = 20;
+const snapPreviewSize = 8;
 const layerPalette = ["#93c5fd", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#fdba74", "#67e8f9"];
 
 function updateZoomLabel() {
@@ -104,6 +109,26 @@ function syncDrawSizeInput() {
   drawSizeInput.disabled = !usesSize;
   drawSizeInput.title = usesSize ? label : "This shape does not use the size control";
   drawSizeInput.setAttribute("aria-label", usesSize ? label : "Tool size");
+}
+
+function isRectangleShapeType(shapeType = state.shapeType) {
+  return shapeType === "rect";
+}
+
+function snapValueToGrid(value, step = gridCellSize) {
+  return Math.round(value / step) * step;
+}
+
+function snapDraftPointToGrid(point) {
+  return {
+    x: snapValueToGrid(point.x),
+    y: snapValueToGrid(point.y),
+  };
+}
+
+function getDraftInputPoint(point, shapeType = state.shapeType) {
+  if (isRectangleShapeType(shapeType)) return snapDraftPointToGrid(point);
+  return { x: point.x, y: point.y };
 }
 
 function deepCopyGeometry(geometry) {
@@ -440,6 +465,9 @@ function extendSquareBrushStroke(point) {
 }
 
 function makeDraftShape(a, b) {
+  const start = isRectangleShapeType() ? snapDraftPointToGrid(a) : a;
+  const end = isRectangleShapeType() ? snapDraftPointToGrid(b) : b;
+
   if (state.shapeType === "strip") {
     const strip = createStripGeometry(a, b, state.drawSize);
     const geometry = draftGeometryToWorld(strip.geometry);
@@ -450,7 +478,7 @@ function makeDraftShape(a, b) {
     };
   }
 
-  const rect = normalizeRect(a, b);
+  const rect = normalizeRect(start, end);
   const draftGeometry = state.shapeType === "ellipse" ? createEllipseGeometry(rect) : createRectGeometry(rect);
   const geometry = draftGeometryToWorld(draftGeometry);
   return {
@@ -831,9 +859,9 @@ function drawGrid() {
   const draftRight = (width - state.camera.x) / zoom;
   const draftTop = (0 - state.camera.y) / zoom;
   const draftBottom = (height - state.camera.y) / zoom;
-  const minorStep = 24;
-  const midStep = minorStep * 10;
-  const majorStep = minorStep * 20;
+  const minorStep = gridCellSize;
+  const midStep = minorStep * gridMidCellInterval;
+  const majorStep = minorStep * gridMajorCellInterval;
   const epsilon = 1e-9;
 
   function isAxisCoordinate(value) {
@@ -897,6 +925,29 @@ function drawGrid() {
   ctx.restore();
 }
 
+function drawSnapPreview() {
+  if (!state.pointerInCanvas || state.panning || state.spacePressed) return;
+  if (state.tool !== "draw" || !isRectangleShapeType()) return;
+
+  const activeLayer = getActiveLayer();
+  if (!activeLayer || !activeLayer.visible || activeLayer.locked) return;
+
+  const snapPoint = snapDraftPointToGrid(state.draftCurrent);
+  const screenPoint = draftToScreen(snapPoint);
+  const size = snapPreviewSize;
+  const isSubtract = state.dragging && state.drawOperation === "subtract";
+
+  ctx.save();
+  ctx.fillStyle = isSubtract ? "#dc2626" : previewStrokeColor;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.rect(screenPoint.x - size / 2, screenPoint.y - size / 2, size, size);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function render() {
   ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
   drawGrid();
@@ -913,12 +964,15 @@ function render() {
   }
 
   renderSelectOverlay();
+  drawSnapPreview();
 }
 
 canvas.addEventListener("pointerdown", (e) => {
   const screen = getPos(e);
-  const draft = screenToDraft(screen);
-  const world = screenToWorld(screen);
+  const rawDraft = screenToDraft(screen);
+  const draft = state.tool === "draw" ? getDraftInputPoint(rawDraft) : rawDraft;
+  const world = draftToWorld(draft);
+  state.pointerInCanvas = true;
   state.current = world;
   state.draftCurrent = draft;
   const wantsPan = e.button === 1 || state.spacePressed || (e.button === 2 && state.tool !== "draw");
@@ -978,8 +1032,10 @@ canvas.addEventListener("pointerdown", (e) => {
 
 canvas.addEventListener("pointermove", (e) => {
   const screen = getPos(e);
-  state.draftCurrent = screenToDraft(screen);
-  state.current = screenToWorld(screen);
+  const rawDraft = screenToDraft(screen);
+  state.pointerInCanvas = true;
+  state.draftCurrent = state.tool === "draw" ? getDraftInputPoint(rawDraft) : rawDraft;
+  state.current = draftToWorld(state.draftCurrent);
 
   if (state.panning) {
     state.camera.x = state.panOrigin.x + (screen.x - state.panStart.x);
@@ -1068,6 +1124,10 @@ function finishDrag() {
 
 canvas.addEventListener("pointerup", finishDrag);
 canvas.addEventListener("pointerleave", finishDrag);
+canvas.addEventListener("pointerleave", () => {
+  state.pointerInCanvas = false;
+  render();
+});
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener(

@@ -35,6 +35,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
   - `geometry`
   - `bounds`
 - Boolean union is handled through `polygon-clipping`.
+- Boolean subtraction is also handled through `polygon-clipping.difference`.
 - Layer geometry is rebuilt by unioning the shapes that belong to the layer.
 
 ### Important Geometry Note
@@ -68,9 +69,8 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ### Tools And Interaction
 
-- `Draw`: creates rectangle, ellipse, strip, or square-brush geometry.
+- `Draw`: creates rectangle, ellipse, strip, or square-brush geometry with left click, and subtracts with the same geometry modes using right click.
 - `Select`: selects and moves whole merged shapes.
-- `Eraser`: removes shapes by hit-testing against their merged geometry.
 - `Mouse wheel`: zooms at cursor position.
 - `Space + drag` or middle/right mouse: pans the camera.
 - `Space + mouse wheel`: rotates the drafting angle around the world origin `0,0`.
@@ -83,7 +83,9 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The app maintains a global drafting angle separate from stored geometry.
 - Existing geometry is displayed relative to the current drafting angle, while the visible grid remains horizontal and vertical on screen.
 - New drawing input is created in drafting coordinates and converted back into world geometry before boolean union with the layer.
+- Right click in `Draw` uses the current shape mode as subtraction geometry and applies boolean difference against the active layer's merged vector geometry.
 - After drawing, the new geometry is inserted into the layer and the layer is rebuilt through boolean union.
+- After subtractive drawing, the active layer is replaced with the resulting difference geometry instead of deleting whole merged objects by hit-test.
 - After moving a selected shape, the layer is rebuilt again so intersections and merges stay correct.
 - Hidden layers are not rendered.
 - Locked layers do not accept edits.
@@ -107,6 +109,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Redesign the eraser so right click performs shape-based boolean subtraction using the current draw mode geometry instead of deleting whole merged objects.
+- Task: Design and implement snapping on the canvas, including how each snap mode should behave for the current toolset and drafting-angle workflow.
 - Status: In progress
-- Progress: Implemented a first working shape-based subtraction flow. The standalone Eraser button was removed, Draw now uses left click for additive geometry and right click for subtractive geometry, and subtraction is committed with `polygon-clipping.difference` against the active layer's merged vector geometry using the current shape mode (rectangle, ellipse, strip, or square brush). Syntax and local boolean-difference smoke checks passed, and the task is waiting for user testing in the browser.
+- Progress: The shape-based subtraction workflow was implemented and confirmed by the user. The next task is to define a snapping system that fits the fixed visible grid, drafting-angle rotation model, and current tools, including per-tool snap behavior for rectangle, ellipse, strip, square brush, selection, and future editing interactions.

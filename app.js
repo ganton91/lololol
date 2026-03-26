@@ -749,41 +749,67 @@ function drawGrid() {
   const worldTop = (0 - state.camera.y) / zoom;
   const worldBottom = (height - state.camera.y) / zoom;
   const minorStep = 24;
-  const majorStep = minorStep * 5;
+  const midStep = minorStep * 10;
+  const majorStep = minorStep * 20;
+  const epsilon = 1e-9;
+
+  function isAxisCoordinate(value) {
+    return Math.abs(value) <= epsilon;
+  }
+
+  function drawVerticalLines(step, strokeStyle, shouldSkip = null) {
+    ctx.beginPath();
+    ctx.strokeStyle = strokeStyle;
+    const startX = Math.floor(worldLeft / step) * step;
+    for (let x = startX; x <= worldRight; x += step) {
+      if (shouldSkip && shouldSkip(x)) continue;
+      const sx = worldToScreen({ x, y: 0 }).x;
+      ctx.moveTo(sx, 0);
+      ctx.lineTo(sx, height);
+    }
+    ctx.stroke();
+  }
+
+  function drawHorizontalLines(step, strokeStyle, shouldSkip = null) {
+    ctx.beginPath();
+    ctx.strokeStyle = strokeStyle;
+    const startY = Math.floor(worldTop / step) * step;
+    for (let y = startY; y <= worldBottom; y += step) {
+      if (shouldSkip && shouldSkip(y)) continue;
+      const sy = worldToScreen({ x: 0, y }).y;
+      ctx.moveTo(0, sy);
+      ctx.lineTo(width, sy);
+    }
+    ctx.stroke();
+  }
+
+  function isMidOrMajorCoordinate(value) {
+    const cellIndex = Math.round(value / minorStep);
+    return cellIndex % 10 === 0;
+  }
+
+  function isMajorCoordinate(value) {
+    const cellIndex = Math.round(value / minorStep);
+    return cellIndex % 20 === 0;
+  }
 
   ctx.save();
   ctx.lineWidth = 1;
+  drawVerticalLines(minorStep, "#e9edf3", (x) => isAxisCoordinate(x) || isMidOrMajorCoordinate(x));
+  drawHorizontalLines(minorStep, "#e9edf3", (y) => isAxisCoordinate(y) || isMidOrMajorCoordinate(y));
+  drawVerticalLines(midStep, "#cfd7e4", (x) => isAxisCoordinate(x) || isMajorCoordinate(x));
+  drawHorizontalLines(midStep, "#cfd7e4", (y) => isAxisCoordinate(y) || isMajorCoordinate(y));
+  drawVerticalLines(majorStep, "#b2bfd2", isAxisCoordinate);
+  drawHorizontalLines(majorStep, "#b2bfd2", isAxisCoordinate);
 
   ctx.beginPath();
-  ctx.strokeStyle = "#e7ebf1";
-  const startMinorX = Math.floor(worldLeft / minorStep) * minorStep;
-  const startMinorY = Math.floor(worldTop / minorStep) * minorStep;
-  for (let x = startMinorX; x <= worldRight; x += minorStep) {
-    const sx = worldToScreen({ x, y: 0 }).x;
-    ctx.moveTo(sx, 0);
-    ctx.lineTo(sx, height);
-  }
-  for (let y = startMinorY; y <= worldBottom; y += minorStep) {
-    const sy = worldToScreen({ x: 0, y }).y;
-    ctx.moveTo(0, sy);
-    ctx.lineTo(width, sy);
-  }
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.strokeStyle = "#d5dce7";
-  const startMajorX = Math.floor(worldLeft / majorStep) * majorStep;
-  const startMajorY = Math.floor(worldTop / majorStep) * majorStep;
-  for (let x = startMajorX; x <= worldRight; x += majorStep) {
-    const sx = worldToScreen({ x, y: 0 }).x;
-    ctx.moveTo(sx, 0);
-    ctx.lineTo(sx, height);
-  }
-  for (let y = startMajorY; y <= worldBottom; y += majorStep) {
-    const sy = worldToScreen({ x: 0, y }).y;
-    ctx.moveTo(0, sy);
-    ctx.lineTo(width, sy);
-  }
+  ctx.strokeStyle = "#475569";
+  const originScreenX = worldToScreen({ x: 0, y: 0 }).x;
+  const originScreenY = worldToScreen({ x: 0, y: 0 }).y;
+  ctx.moveTo(originScreenX, 0);
+  ctx.lineTo(originScreenX, height);
+  ctx.moveTo(0, originScreenY);
+  ctx.lineTo(width, originScreenY);
   ctx.stroke();
   ctx.restore();
 }

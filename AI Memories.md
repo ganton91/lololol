@@ -98,6 +98,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: None
-- Status: Idle
-- Progress: No active task right now.
+- Task: Upgrade the canvas grid so it shows minor, mid, and major lines plus a visible world-origin axis crossing at 0,0.
+- Status: In progress
+- Progress: Updated the canvas grid renderer so it now draws minor lines at every cell, mid lines every 10 cells, major lines every 20 cells, and dedicated X/Y axis lines at the world origin. A syntax smoke check passed, and the task is now waiting for user visual testing in the browser.

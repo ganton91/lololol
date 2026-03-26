@@ -34,12 +34,15 @@ const state = {
   spacePressed: false,
   start: { x: 0, y: 0 },
   current: { x: 0, y: 0 },
+  draftStart: { x: 0, y: 0 },
+  draftCurrent: { x: 0, y: 0 },
   panStart: { x: 0, y: 0 },
   panOrigin: { x: 0, y: 0 },
   eraserRadius: 16,
   drawSize: 24,
   draftShape: null,
   brushLastPoint: null,
+  draftAngle: 0,
   camera: { x: 0, y: 0, zoom: 1 },
   selection: {
     shapeId: null,
@@ -57,6 +60,7 @@ const minZoom = 0.09;
 const maxZoom = 2;
 const ellipseSegments = 96;
 const squareBrushSpacingRatio = 0.35;
+const draftRotationStep = Math.PI / 36;
 const layerPalette = ["#93c5fd", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#fdba74", "#67e8f9"];
 
 function updateZoomLabel() {
@@ -105,6 +109,34 @@ function syncDrawSizeInput() {
 
 function deepCopyGeometry(geometry) {
   return geometry.map((polygon) => polygon.map((ring) => ring.map((point) => [point[0], point[1]])));
+}
+
+function rotatePoint(point, angle) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos,
+  };
+}
+
+function normalizeAngle(angle) {
+  const fullTurn = Math.PI * 2;
+  let nextAngle = angle % fullTurn;
+  if (nextAngle <= -Math.PI) nextAngle += fullTurn;
+  if (nextAngle > Math.PI) nextAngle -= fullTurn;
+  return nextAngle;
+}
+
+function transformGeometry(geometry, transformer) {
+  return geometry.map((polygon) =>
+    polygon.map((ring) =>
+      ring.map((point) => {
+        const nextPoint = transformer({ x: point[0], y: point[1] });
+        return [nextPoint.x, nextPoint.y];
+      })
+    )
+  );
 }
 
 function normalizeRing(ring) {
@@ -167,6 +199,22 @@ function unionGeometryList(geometries) {
   if (cleanGeometries.length === 1) return deepCopyGeometry(cleanGeometries[0]);
 
   return sanitizeGeometry(polygonBoolean.union(cleanGeometries[0], ...cleanGeometries.slice(1)));
+}
+
+function worldToDraft(point) {
+  return rotatePoint(point, -state.draftAngle);
+}
+
+function draftToWorld(point) {
+  return rotatePoint(point, state.draftAngle);
+}
+
+function worldGeometryToDraft(geometry) {
+  return transformGeometry(geometry, worldToDraft);
+}
+
+function draftGeometryToWorld(geometry) {
+  return transformGeometry(geometry, draftToWorld);
 }
 
 function forEachRing(geometry, visitor) {
@@ -346,7 +394,7 @@ function resetDrawSession() {
 
 function startSquareBrushStroke(point) {
   state.brushLastPoint = { x: point.x, y: point.y };
-  setDraftShapeFromGeometry(createSquareBrushDabGeometry(point, state.drawSize));
+  setDraftShapeFromGeometry(draftGeometryToWorld(createSquareBrushDabGeometry(point, state.drawSize)));
 }
 
 function extendSquareBrushStroke(point) {
@@ -365,12 +413,14 @@ function extendSquareBrushStroke(point) {
   for (let i = 1; i <= steps; i += 1) {
     const t = distance ? i / steps : 1;
     dabs.push(
-      createSquareBrushDabGeometry(
-        {
-          x: state.brushLastPoint.x + dx * t,
-          y: state.brushLastPoint.y + dy * t,
-        },
-        state.drawSize
+      draftGeometryToWorld(
+        createSquareBrushDabGeometry(
+          {
+            x: state.brushLastPoint.x + dx * t,
+            y: state.brushLastPoint.y + dy * t,
+          },
+          state.drawSize
+        )
       )
     );
   }
@@ -383,15 +433,17 @@ function extendSquareBrushStroke(point) {
 function makeDraftShape(a, b) {
   if (state.shapeType === "strip") {
     const strip = createStripGeometry(a, b, state.drawSize);
+    const geometry = draftGeometryToWorld(strip.geometry);
     return {
-      geometry: strip.geometry,
-      bounds: getGeometryBounds(strip.geometry),
+      geometry,
+      bounds: getGeometryBounds(geometry),
       small: strip.length < 2,
     };
   }
 
   const rect = normalizeRect(a, b);
-  const geometry = state.shapeType === "ellipse" ? createEllipseGeometry(rect) : createRectGeometry(rect);
+  const draftGeometry = state.shapeType === "ellipse" ? createEllipseGeometry(rect) : createRectGeometry(rect);
+  const geometry = draftGeometryToWorld(draftGeometry);
   return {
     geometry,
     bounds: getGeometryBounds(geometry),
@@ -597,18 +649,32 @@ function getPos(e) {
   return { x: e.clientX - rect.left, y: e.clientY - rect.top };
 }
 
-function screenToWorld(point) {
+function screenToDraft(point) {
   return {
     x: (point.x - state.camera.x) / state.camera.zoom,
     y: (point.y - state.camera.y) / state.camera.zoom,
   };
 }
 
-function worldToScreen(point) {
+function draftToScreen(point) {
   return {
     x: point.x * state.camera.zoom + state.camera.x,
     y: point.y * state.camera.zoom + state.camera.y,
   };
+}
+
+function screenToWorld(point) {
+  return draftToWorld(screenToDraft(point));
+}
+
+function worldToScreen(point) {
+  return draftToScreen(worldToDraft(point));
+}
+
+function applyWorldCameraTransform(targetCtx) {
+  targetCtx.translate(state.camera.x, state.camera.y);
+  targetCtx.scale(state.camera.zoom, state.camera.zoom);
+  targetCtx.rotate(-state.draftAngle);
 }
 
 function zoomAtScreenPoint(nextZoom, screenPoint) {
@@ -616,10 +682,16 @@ function zoomAtScreenPoint(nextZoom, screenPoint) {
   if (targetZoom === state.camera.zoom) return;
 
   const worldPoint = screenToWorld(screenPoint);
+  const draftPoint = worldToDraft(worldPoint);
   state.camera.zoom = targetZoom;
-  state.camera.x = screenPoint.x - worldPoint.x * targetZoom;
-  state.camera.y = screenPoint.y - worldPoint.y * targetZoom;
+  state.camera.x = screenPoint.x - draftPoint.x * targetZoom;
+  state.camera.y = screenPoint.y - draftPoint.y * targetZoom;
   updateZoomLabel();
+  render();
+}
+
+function rotateDraftAngle(deltaAngle) {
+  state.draftAngle = normalizeAngle(state.draftAngle + deltaAngle);
   render();
 }
 
@@ -677,8 +749,7 @@ function renderSelectOverlay() {
   if (!selectedLayer || !selectedLayer.visible) return;
 
   ctx.save();
-  ctx.translate(state.camera.x, state.camera.y);
-  ctx.scale(state.camera.zoom, state.camera.zoom);
+  applyWorldCameraTransform(ctx);
   ctx.beginPath();
   traceGeometryPath(ctx, selectedShape.geometry);
   ctx.strokeStyle = selectionStrokeColor;
@@ -689,8 +760,7 @@ function renderSelectOverlay() {
 
 function drawLayerPreview(shape, layer) {
   ctx.save();
-  ctx.translate(state.camera.x, state.camera.y);
-  ctx.scale(state.camera.zoom, state.camera.zoom);
+  applyWorldCameraTransform(ctx);
   ctx.beginPath();
   traceGeometryPath(ctx, shape.geometry);
   ctx.fillStyle = layer.fillColor;
@@ -709,8 +779,7 @@ function drawLayerMerged(layer) {
   if (!layerShapes.length) return;
 
   ctx.save();
-  ctx.translate(state.camera.x, state.camera.y);
-  ctx.scale(state.camera.zoom, state.camera.zoom);
+  applyWorldCameraTransform(ctx);
 
   for (const shape of layerShapes) {
     ctx.beginPath();
@@ -744,10 +813,10 @@ function drawGrid() {
   const zoom = state.camera.zoom;
   const width = window.innerWidth;
   const height = window.innerHeight;
-  const worldLeft = (0 - state.camera.x) / zoom;
-  const worldRight = (width - state.camera.x) / zoom;
-  const worldTop = (0 - state.camera.y) / zoom;
-  const worldBottom = (height - state.camera.y) / zoom;
+  const draftLeft = (0 - state.camera.x) / zoom;
+  const draftRight = (width - state.camera.x) / zoom;
+  const draftTop = (0 - state.camera.y) / zoom;
+  const draftBottom = (height - state.camera.y) / zoom;
   const minorStep = 24;
   const midStep = minorStep * 10;
   const majorStep = minorStep * 20;
@@ -760,10 +829,10 @@ function drawGrid() {
   function drawVerticalLines(step, strokeStyle, shouldSkip = null) {
     ctx.beginPath();
     ctx.strokeStyle = strokeStyle;
-    const startX = Math.floor(worldLeft / step) * step;
-    for (let x = startX; x <= worldRight; x += step) {
+    const startX = Math.floor(draftLeft / step) * step;
+    for (let x = startX; x <= draftRight; x += step) {
       if (shouldSkip && shouldSkip(x)) continue;
-      const sx = worldToScreen({ x, y: 0 }).x;
+      const sx = draftToScreen({ x, y: 0 }).x;
       ctx.moveTo(sx, 0);
       ctx.lineTo(sx, height);
     }
@@ -773,10 +842,10 @@ function drawGrid() {
   function drawHorizontalLines(step, strokeStyle, shouldSkip = null) {
     ctx.beginPath();
     ctx.strokeStyle = strokeStyle;
-    const startY = Math.floor(worldTop / step) * step;
-    for (let y = startY; y <= worldBottom; y += step) {
+    const startY = Math.floor(draftTop / step) * step;
+    for (let y = startY; y <= draftBottom; y += step) {
       if (shouldSkip && shouldSkip(y)) continue;
-      const sy = worldToScreen({ x: 0, y }).y;
+      const sy = draftToScreen({ x: 0, y }).y;
       ctx.moveTo(0, sy);
       ctx.lineTo(width, sy);
     }
@@ -804,8 +873,8 @@ function drawGrid() {
 
   ctx.beginPath();
   ctx.strokeStyle = "#475569";
-  const originScreenX = worldToScreen({ x: 0, y: 0 }).x;
-  const originScreenY = worldToScreen({ x: 0, y: 0 }).y;
+  const originScreenX = draftToScreen({ x: 0, y: 0 }).x;
+  const originScreenY = draftToScreen({ x: 0, y: 0 }).y;
   ctx.moveTo(originScreenX, 0);
   ctx.lineTo(originScreenX, height);
   ctx.moveTo(0, originScreenY);
@@ -845,8 +914,10 @@ function render() {
 
 canvas.addEventListener("pointerdown", (e) => {
   const screen = getPos(e);
+  const draft = screenToDraft(screen);
   const world = screenToWorld(screen);
   state.current = world;
+  state.draftCurrent = draft;
   const wantsPan = e.button === 1 || e.button === 2 || state.spacePressed;
 
   if (wantsPan) {
@@ -883,14 +954,15 @@ canvas.addEventListener("pointerdown", (e) => {
 
   state.dragging = true;
   state.start = world;
+  state.draftStart = draft;
   resetDrawSession();
 
   if (state.tool === "draw") {
     if (isSquareBrushShapeType()) {
-      startSquareBrushStroke(world);
+      startSquareBrushStroke(draft);
       render();
     } else {
-      state.draftShape = makeDraftShape(state.start, state.current);
+      state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
     }
   }
 
@@ -904,6 +976,7 @@ canvas.addEventListener("pointerdown", (e) => {
 
 canvas.addEventListener("pointermove", (e) => {
   const screen = getPos(e);
+  state.draftCurrent = screenToDraft(screen);
   state.current = screenToWorld(screen);
 
   if (state.panning) {
@@ -935,9 +1008,9 @@ canvas.addEventListener("pointermove", (e) => {
 
   if (state.tool === "draw") {
     if (isSquareBrushShapeType()) {
-      extendSquareBrushStroke(state.current);
+      extendSquareBrushStroke(state.draftCurrent);
     } else {
-      state.draftShape = makeDraftShape(state.start, state.current);
+      state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
     }
   }
 
@@ -998,6 +1071,11 @@ canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
+    if (state.spacePressed) {
+      rotateDraftAngle(e.deltaY < 0 ? draftRotationStep : -draftRotationStep);
+      return;
+    }
+
     const screen = getPos(e);
     const delta = e.deltaY < 0 ? 1.1 : 0.9;
     zoomAtScreenPoint(state.camera.zoom * delta, screen);

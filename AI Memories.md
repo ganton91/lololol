@@ -101,6 +101,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Design camera rotation so holding `Space` and using the mouse wheel rotates the whole world view around the world origin `0,0` instead of zooming.
+- Task: Design a drafting/workplane rotation mode where holding `Space` and using the mouse wheel changes the drawing angle around the world origin `0,0` while the visible grid remains screen-aligned.
 - Status: In progress
-- Progress: The zoom range tuning task was completed and confirmed by the user. The next step is to plan a camera-rotation model that rotates everything visually around the fixed world origin `0,0`, while keeping the underlying vector geometry unchanged and preserving correct selection, drawing, panning, and grid rendering behavior.
+- Progress: Implemented a first working drafting-angle system. The app now keeps the visible grid screen-aligned while world content renders through a global `draftAngle` transform around `0,0`; draw tools build geometry in drafting coordinates and convert it back to stored world geometry before union; selection, movement, erasing, and zoom use the new screen/draft/world transforms; and `Space + Wheel` now rotates the drafting angle instead of zooming. A syntax smoke check passed, and the task is waiting for user testing in the browser.

@@ -109,4 +109,4 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 - Task: Redesign the eraser so right click performs shape-based boolean subtraction using the current draw mode geometry instead of deleting whole merged objects.
 - Status: In progress
-- Progress: The drafting/workplane rotation feature was implemented and confirmed by the user. The next task is to replace the current hit-test object delete behavior with a right-click eraser that uses rectangle, ellipse, strip, or square-brush geometry as subtraction input against the merged vector geometry.
+- Progress: Implemented a first working shape-based subtraction flow. The standalone Eraser button was removed, Draw now uses left click for additive geometry and right click for subtractive geometry, and subtraction is committed with `polygon-clipping.difference` against the active layer's merged vector geometry using the current shape mode (rectangle, ellipse, strip, or square brush). Syntax and local boolean-difference smoke checks passed, and the task is waiting for user testing in the browser.

@@ -8,7 +8,6 @@ const canvas = document.getElementById("cad-canvas");
 const ctx = canvas.getContext("2d");
 const selectBtn = document.getElementById("select-tool");
 const drawBtn = document.getElementById("draw-tool");
-const eraserBtn = document.getElementById("eraser-tool");
 const shapeSelect = document.getElementById("shape-select");
 const drawSizeInput = document.getElementById("draw-size");
 const zoomOutBtn = document.getElementById("zoom-out");
@@ -38,10 +37,10 @@ const state = {
   draftCurrent: { x: 0, y: 0 },
   panStart: { x: 0, y: 0 },
   panOrigin: { x: 0, y: 0 },
-  eraserRadius: 16,
   drawSize: 24,
   draftShape: null,
   brushLastPoint: null,
+  drawOperation: "add",
   draftAngle: 0,
   camera: { x: 0, y: 0, zoom: 1 },
   selection: {
@@ -78,7 +77,7 @@ function updateCursor() {
     return;
   }
 
-  canvas.style.cursor = state.tool === "eraser" ? "cell" : "crosshair";
+  canvas.style.cursor = "crosshair";
 }
 
 function getLayerById(id) {
@@ -199,6 +198,16 @@ function unionGeometryList(geometries) {
   if (cleanGeometries.length === 1) return deepCopyGeometry(cleanGeometries[0]);
 
   return sanitizeGeometry(polygonBoolean.union(cleanGeometries[0], ...cleanGeometries.slice(1)));
+}
+
+function differenceGeometry(subjectGeometry, clipGeometry) {
+  const cleanSubject = sanitizeGeometry(subjectGeometry);
+  const cleanClip = sanitizeGeometry(clipGeometry);
+
+  if (!cleanSubject.length) return [];
+  if (!cleanClip.length) return deepCopyGeometry(cleanSubject);
+
+  return sanitizeGeometry(polygonBoolean.difference(cleanSubject, cleanClip));
 }
 
 function worldToDraft(point) {
@@ -514,10 +523,8 @@ function hitsShape(shape, x, y, radius) {
   return distanceToShapeBoundary(shape, x, y) <= radius;
 }
 
-function buildUnionShapes(layerId, sourceShapes) {
-  if (!sourceShapes.length) return [];
-
-  const multipolygon = unionGeometryList(sourceShapes.map((shape) => shape.geometry));
+function createLayerShapeRecordsFromGeometry(layerId, geometry) {
+  const multipolygon = sanitizeGeometry(geometry);
   const nextShapes = [];
 
   for (const polygon of multipolygon) {
@@ -534,6 +541,11 @@ function buildUnionShapes(layerId, sourceShapes) {
   return nextShapes;
 }
 
+function buildUnionShapes(layerId, sourceShapes) {
+  if (!sourceShapes.length) return [];
+  return createLayerShapeRecordsFromGeometry(layerId, unionGeometryList(sourceShapes.map((shape) => shape.geometry)));
+}
+
 function replaceLayerShapes(layerId, nextLayerShapes) {
   const otherShapes = state.shapes.filter((shape) => shape.layerId !== layerId);
   state.shapes = [...otherShapes, ...nextLayerShapes];
@@ -547,6 +559,22 @@ function rebuildLayerShapes(layerId) {
 function insertShapeToLayer(layerId, shape) {
   state.shapes.push(shape);
   rebuildLayerShapes(layerId);
+}
+
+function subtractGeometryFromLayer(layerId, subtractionGeometry) {
+  const layerShapes = state.shapes.filter((shape) => shape.layerId === layerId);
+  if (!layerShapes.length) return;
+
+  const selectedShape = state.shapes.find((shape) => shape.id === state.selection.shapeId) || null;
+  const affectsSelection = selectedShape && selectedShape.layerId === layerId;
+  const nextGeometry = differenceGeometry(
+    unionGeometryList(layerShapes.map((shape) => shape.geometry)),
+    subtractionGeometry
+  );
+
+  replaceLayerShapes(layerId, createLayerShapeRecordsFromGeometry(layerId, nextGeometry));
+
+  if (affectsSelection) clearSelection();
 }
 
 function renderLayersPanel() {
@@ -620,7 +648,6 @@ function setTool(tool) {
   state.tool = tool;
   selectBtn.classList.toggle("active", tool === "select");
   drawBtn.classList.toggle("active", tool === "draw");
-  eraserBtn.classList.toggle("active", tool === "eraser");
   if (tool !== "draw") resetDrawSession();
   updateCursor();
   render();
@@ -758,16 +785,18 @@ function renderSelectOverlay() {
   ctx.restore();
 }
 
-function drawLayerPreview(shape, layer) {
+function drawLayerPreview(shape, layer, operation = "add") {
+  const isSubtract = operation === "subtract";
+
   ctx.save();
   applyWorldCameraTransform(ctx);
   ctx.beginPath();
   traceGeometryPath(ctx, shape.geometry);
-  ctx.fillStyle = layer.fillColor;
-  ctx.globalAlpha = 0.28;
+  ctx.fillStyle = isSubtract ? "#ef4444" : layer.fillColor;
+  ctx.globalAlpha = isSubtract ? 0.18 : 0.28;
   ctx.fill("evenodd");
   ctx.globalAlpha = 1;
-  ctx.strokeStyle = previewStrokeColor;
+  ctx.strokeStyle = isSubtract ? "#dc2626" : previewStrokeColor;
   ctx.lineWidth = previewStrokeWidth / state.camera.zoom;
   ctx.setLineDash([6 / state.camera.zoom, 6 / state.camera.zoom]);
   ctx.stroke();
@@ -792,21 +821,6 @@ function drawLayerMerged(layer) {
   }
 
   ctx.restore();
-}
-
-function eraseAt(x, y) {
-  const worldRadius = state.eraserRadius / state.camera.zoom;
-  let removedSelected = false;
-
-  state.shapes = state.shapes.filter((shape) => {
-    const layer = getLayerById(shape.layerId);
-    if (!layer || !layer.visible || layer.locked) return true;
-    const keep = !hitsShape(shape, x, y, worldRadius);
-    if (!keep && shape.id === state.selection.shapeId) removedSelected = true;
-    return keep;
-  });
-
-  if (removedSelected) clearSelection();
 }
 
 function drawGrid() {
@@ -895,18 +909,7 @@ function render() {
   const activeLayer = getActiveLayer();
   if (state.dragging && state.tool === "draw" && activeLayer.visible && !activeLayer.locked) {
     const draft = state.draftShape;
-    if (draft && !draft.small) drawLayerPreview(draft, activeLayer);
-  }
-
-  if (state.tool === "eraser") {
-    const eraserScreen = worldToScreen(state.current);
-    ctx.save();
-    ctx.strokeStyle = "#ef4444";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(eraserScreen.x, eraserScreen.y, state.eraserRadius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+    if (draft && !draft.small) drawLayerPreview(draft, activeLayer, state.drawOperation);
   }
 
   renderSelectOverlay();
@@ -918,7 +921,7 @@ canvas.addEventListener("pointerdown", (e) => {
   const world = screenToWorld(screen);
   state.current = world;
   state.draftCurrent = draft;
-  const wantsPan = e.button === 1 || e.button === 2 || state.spacePressed;
+  const wantsPan = e.button === 1 || state.spacePressed || (e.button === 2 && state.tool !== "draw");
 
   if (wantsPan) {
     state.panning = true;
@@ -929,9 +932,11 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
 
-  if (e.button !== 0) return;
+  if (e.button !== 0 && e.button !== 2) return;
 
   if (state.tool === "select") {
+    if (e.button !== 0) return;
+
     const pick = pickSelectableAt(world);
     if (!pick) {
       clearSelection();
@@ -955,6 +960,7 @@ canvas.addEventListener("pointerdown", (e) => {
   state.dragging = true;
   state.start = world;
   state.draftStart = draft;
+  state.drawOperation = e.button === 2 ? "subtract" : "add";
   resetDrawSession();
 
   if (state.tool === "draw") {
@@ -963,12 +969,8 @@ canvas.addEventListener("pointerdown", (e) => {
       render();
     } else {
       state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
+      render();
     }
-  }
-
-  if (state.tool === "eraser") {
-    eraseAt(world.x, world.y);
-    render();
   }
 
   canvas.setPointerCapture(e.pointerId);
@@ -1014,10 +1016,6 @@ canvas.addEventListener("pointermove", (e) => {
     }
   }
 
-  if (state.tool === "eraser") {
-    eraseAt(state.current.x, state.current.y);
-  }
-
   render();
 });
 
@@ -1053,12 +1051,17 @@ function finishDrag() {
 
   if (state.tool === "draw") {
     if (state.draftShape && !state.draftShape.small) {
-      const shape = createShapeRecord(state.activeLayerId, state.draftShape.geometry);
-      if (shape) insertShapeToLayer(state.activeLayerId, shape);
+      if (state.drawOperation === "subtract") {
+        subtractGeometryFromLayer(state.activeLayerId, state.draftShape.geometry);
+      } else {
+        const shape = createShapeRecord(state.activeLayerId, state.draftShape.geometry);
+        if (shape) insertShapeToLayer(state.activeLayerId, shape);
+      }
     }
   }
 
   state.dragging = false;
+  state.drawOperation = "add";
   resetDrawSession();
   render();
 }
@@ -1085,7 +1088,6 @@ canvas.addEventListener(
 
 selectBtn.addEventListener("click", () => setTool("select"));
 drawBtn.addEventListener("click", () => setTool("draw"));
-eraserBtn.addEventListener("click", () => setTool("eraser"));
 zoomInBtn.addEventListener("click", () => {
   zoomAtScreenPoint(state.camera.zoom * 1.15, {
     x: window.innerWidth / 2,
@@ -1147,7 +1149,6 @@ layerDownBtn.addEventListener("click", () => moveActiveLayer(-1));
 window.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() === "s") setTool("select");
   if (e.key.toLowerCase() === "d") setTool("draw");
-  if (e.key.toLowerCase() === "e") setTool("eraser");
   if (e.code === "Space") {
     e.preventDefault();
     state.spacePressed = true;

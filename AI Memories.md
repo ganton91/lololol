@@ -1,0 +1,103 @@
+# AI Memories
+
+> Rule for Codex: Keep this file updated automatically whenever the application's behavior, architecture, dependencies, or active task changes. Use clear headings, preserve existing decisions unless they were replaced, keep the "Current Task" section updated while work is in progress, and move a task's final outcome into the permanent sections below only after the user has tested it and explicitly confirmed that it is complete.
+
+## Project Snapshot
+
+- Last updated: 2026-03-26
+- Project type: small browser-based CAD/drawing editor
+- Entry file: `index.html`
+- Main logic file: `app.js`
+- Main geometry dependency: `polygon-clipping`
+
+## What The Application Currently Is
+
+This application is a single-page 2D vector drawing tool that opens directly from `index.html` in the browser. The UI is defined in `index.html`, while the application logic lives in `app.js`.
+
+The editor supports drawing, selecting, moving, erasing, zooming, panning, and layer management. Every new shape drawn into a layer is merged into that layer with boolean union logic.
+
+## Current Architecture
+
+### UI Structure
+
+- `index.html` contains the canvas, toolbar, zoom controls, hint area, and layers panel.
+- `app.js` reads those DOM elements and drives the whole interaction loop.
+- The app still runs as a plain browser project without a bundler.
+
+### Geometry Model
+
+- The app is now vector-based.
+- Shapes are stored as polygon or multipolygon geometry, not as primitive compounds.
+- Square brush strokes are built from accumulated square polygon dabs and then stored like any other merged polygon geometry.
+- A shape record currently stores:
+  - `id`
+  - `layerId`
+  - `geometry`
+  - `bounds`
+- Boolean union is handled through `polygon-clipping`.
+- Layer geometry is rebuilt by unioning the shapes that belong to the layer.
+
+### Important Geometry Note
+
+- Ellipses are currently represented as polygon approximations, not as exact analytic ellipse entities.
+- This means the app is fully vector-based, but it is a polygon vector pipeline, not a curve-kernel CAD engine.
+- This is good for clean boolean union behavior now, but it may need a future architectural upgrade if the project later requires exact curved elevations, sections, exports, or CAD-grade curve persistence.
+
+### Rendering Model
+
+- Rendering is direct vector drawing on the main canvas.
+- There is no raster-mask union pipeline anymore.
+- Each visible layer is drawn from its current merged vector shapes.
+- Selection highlighting is drawn by tracing the selected shape geometry.
+
+### Layer Model
+
+Each layer currently has:
+
+- `id`
+- `name`
+- `visible`
+- `locked`
+- `fillColor`
+
+Layer order controls draw order. The active layer receives new geometry when the user draws.
+
+### Tools And Interaction
+
+- `Draw`: creates rectangle, ellipse, strip, or square-brush geometry.
+- `Select`: selects and moves whole merged shapes.
+- `Eraser`: removes shapes by hit-testing against their merged geometry.
+- `Mouse wheel`: zooms at cursor position.
+- `Space + drag` or middle/right mouse: pans the camera.
+
+### Current Behavioral Rules
+
+- New geometry is created on the active layer.
+- Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
+- After drawing, the new geometry is inserted into the layer and the layer is rebuilt through boolean union.
+- After moving a selected shape, the layer is rebuilt again so intersections and merges stay correct.
+- Hidden layers are not rendered.
+- Locked layers do not accept edits.
+
+## Dependency Notes
+
+### `polygon-clipping`
+
+- Installed through `npm`.
+- Stored under `node_modules`.
+- Used for polygon boolean union.
+- Current package file: `package.json`
+
+## Working Agreement For Future Changes
+
+- This file should describe the real current behavior of the app, not plans disguised as facts.
+- When a feature changes the way the program works, update the relevant architecture or behavior section immediately.
+- If a task is still in progress, track it only in the "Current Task" section until the user has tested it and confirmed it is complete.
+- Before user confirmation, update only the "Progress" inside "Current Task" rather than moving unfinished work into the permanent sections.
+- Once the user confirms the task is complete, move the lasting result into the permanent sections above and clear the task section.
+
+## Current Task
+
+- Task: None
+- Status: Idle
+- Progress: No active task right now.

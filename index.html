@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="el">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CAD Starter</title>
+    <style>
+      :root {
+        --bg: #f4f5f8;
+        --panel: #ffffff;
+        --ink: #0f172a;
+        --muted: #475569;
+        --line: #e2e8f0;
+        --accent: #0ea5e9;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: "Segoe UI", Arial, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+      }
+
+      #app {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      #cad-canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        cursor: crosshair;
+      }
+
+      .toolbar {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--panel) 90%, transparent);
+        backdrop-filter: blur(6px);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+      }
+
+      .tool-btn,
+      .shape-select {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--ink);
+        font-size: 14px;
+        padding: 8px 10px;
+        transition: 120ms ease;
+      }
+
+      .shape-select {
+        min-width: 120px;
+      }
+
+      .tool-size {
+        width: 74px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--ink);
+        font-size: 14px;
+        padding: 8px 10px;
+      }
+
+      .tool-size:disabled {
+        background: #f8fafc;
+        color: #94a3b8;
+        cursor: not-allowed;
+      }
+
+      .tool-btn {
+        cursor: pointer;
+      }
+
+      .tool-btn:hover,
+      .shape-select:hover {
+        border-color: #cbd5e1;
+      }
+
+      .tool-btn.active {
+        border-color: var(--accent);
+        background: #e0f2fe;
+        color: #0c4a6e;
+      }
+
+      .hint {
+        position: absolute;
+        bottom: 14px;
+        left: 16px;
+        z-index: 9;
+        font-size: 12px;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 10px;
+      }
+
+      .layers-panel {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        z-index: 10;
+        width: 248px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--panel) 92%, transparent);
+        backdrop-filter: blur(6px);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+      }
+
+      .layers-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .layer-fill-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 500;
+        font-size: 11px;
+        color: #475569;
+      }
+
+      .layer-fill {
+        width: 28px;
+        height: 20px;
+        padding: 0;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+      }
+
+      .layers-list {
+        max-height: 260px;
+        overflow: auto;
+        padding: 8px;
+      }
+
+      .layer-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 6px;
+        align-items: center;
+        width: 100%;
+        border: 1px solid #dde3ec;
+        border-radius: 8px;
+        padding: 6px 8px;
+        background: #fff;
+        margin-bottom: 6px;
+        cursor: pointer;
+      }
+
+      .layer-row.active {
+        border-color: var(--accent);
+        background: #e0f2fe;
+      }
+
+      .layer-name {
+        font-size: 13px;
+        color: #0f172a;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .layer-swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(15, 23, 42, 0.25);
+        display: inline-block;
+        margin-right: 6px;
+        vertical-align: -1px;
+      }
+
+      .layer-mini {
+        border: 1px solid #cbd5e1;
+        border-radius: 7px;
+        background: #fff;
+        font-size: 11px;
+        min-width: 30px;
+        height: 24px;
+        cursor: pointer;
+      }
+
+      .layer-mini.is-on {
+        border-color: #0284c7;
+        background: #e0f2fe;
+        color: #075985;
+      }
+
+      .layers-actions {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+        padding: 8px;
+        border-top: 1px solid var(--line);
+        background: #f8fafc;
+      }
+
+      .layer-action {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        background: #fff;
+        font-size: 12px;
+        padding: 6px 8px;
+        cursor: pointer;
+      }
+
+      .layer-action:hover {
+        border-color: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="cad-canvas"></canvas>
+
+      <div class="toolbar">
+        <button id="select-tool" class="tool-btn" type="button">Select</button>
+        <button id="draw-tool" class="tool-btn active" type="button">Draw</button>
+        <button id="eraser-tool" class="tool-btn" type="button">Eraser</button>
+
+        <select id="shape-select" class="shape-select" aria-label="Shape">
+          <option value="rect">Rectangle</option>
+          <option value="ellipse">Ellipse</option>
+          <option value="strip">Stroke Rect</option>
+          <option value="square-brush">Square Brush</option>
+        </select>
+        <input
+          id="draw-size"
+          class="tool-size"
+          type="number"
+          min="2"
+          max="300"
+          step="1"
+          value="24"
+          title="Tool size"
+          aria-label="Tool size"
+        />
+
+        <button id="zoom-out" class="tool-btn" type="button" aria-label="Zoom out">-</button>
+        <button id="zoom-in" class="tool-btn" type="button" aria-label="Zoom in">+</button>
+        <span id="zoom-level" style="font-size: 12px; color: #334155; min-width: 52px">100%</span>
+      </div>
+
+      <div class="hint">
+        Drag to draw. Select moves merged shapes. Eraser deletes shapes. Stroke Rect uses fixed width + drag length. Square Brush paints merged vector squares. <b>Wheel</b> zoom.
+      </div>
+
+      <aside class="layers-panel">
+        <div class="layers-head">
+          <span>Layers</span>
+          <label class="layer-fill-wrap">
+            Fill
+            <input id="layer-fill" class="layer-fill" type="color" value="#93c5fd" />
+          </label>
+        </div>
+        <div id="layers-list" class="layers-list"></div>
+        <div class="layers-actions">
+          <button id="layer-add" class="layer-action" type="button">+ Layer</button>
+          <button id="layer-delete" class="layer-action" type="button">Delete</button>
+          <button id="layer-up" class="layer-action" type="button">Move Up</button>
+          <button id="layer-down" class="layer-action" type="button">Move Down</button>
+        </div>
+      </aside>
+    </div>
+
+    <script src="./node_modules/polygon-clipping/dist/polygon-clipping.umd.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -136,6 +136,14 @@ function isRectangleShapeType(shapeType = state.shapeType) {
   return shapeType === "rect";
 }
 
+function isEllipseShapeType(shapeType = state.shapeType) {
+  return shapeType === "ellipse";
+}
+
+function isBoxSnapShapeType(shapeType = state.shapeType) {
+  return isRectangleShapeType(shapeType) || isEllipseShapeType(shapeType);
+}
+
 function isStripShapeType(shapeType = state.shapeType) {
   return shapeType === "strip";
 }
@@ -221,7 +229,7 @@ function getSnappedStripSegment(a, b, cellWidth = state.stripCellWidth) {
 }
 
 function getDraftInputPoint(point, shapeType = state.shapeType) {
-  if (isRectangleShapeType(shapeType)) return snapDraftPointToGrid(point);
+  if (isBoxSnapShapeType(shapeType)) return snapDraftPointToGrid(point);
   return { x: point.x, y: point.y };
 }
 
@@ -559,8 +567,8 @@ function extendSquareBrushStroke(point) {
 }
 
 function makeDraftShape(a, b) {
-  const start = isRectangleShapeType() ? snapDraftPointToGrid(a) : a;
-  const end = isRectangleShapeType() ? snapDraftPointToGrid(b) : b;
+  const start = isBoxSnapShapeType() ? snapDraftPointToGrid(a) : a;
+  const end = isBoxSnapShapeType() ? snapDraftPointToGrid(b) : b;
 
   if (isStripShapeType()) {
     const segment = getSnappedStripSegment(a, b);
@@ -1028,7 +1036,7 @@ function drawSnapPreview() {
   if (!activeLayer || !activeLayer.visible || activeLayer.locked) return;
 
   let snapPoint = null;
-  if (isRectangleShapeType()) {
+  if (isBoxSnapShapeType()) {
     snapPoint = snapDraftPointToGrid(state.draftCurrent);
   } else if (isStripShapeType()) {
     snapPoint =

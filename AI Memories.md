@@ -48,6 +48,8 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - Rendering is direct vector drawing on the main canvas.
 - The canvas background grid uses three line tiers: minor lines every cell, mid lines every 10 cells, and major lines every 20 cells.
 - The world origin is visualized with dedicated X=0 and Y=0 axis lines that cross at 0,0.
+- The visible grid stays screen-aligned even when the drafting angle changes.
+- World content is rendered through a global drafting/workplane rotation around `0,0`, so stored geometry stays in world coordinates while the user can draw against a rotated drafting frame.
 - There is no raster-mask union pipeline anymore.
 - Each visible layer is drawn from its current merged vector shapes.
 - Selection highlighting is drawn by tracing the selected shape geometry.
@@ -71,12 +73,16 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Eraser`: removes shapes by hit-testing against their merged geometry.
 - `Mouse wheel`: zooms at cursor position.
 - `Space + drag` or middle/right mouse: pans the camera.
+- `Space + mouse wheel`: rotates the drafting angle around the world origin `0,0`.
 
 ### Current Behavioral Rules
 
 - New geometry is created on the active layer.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
 - Zoom is currently clamped between a minimum of `0.09` and a maximum of `2`.
+- The app maintains a global drafting angle separate from stored geometry.
+- Existing geometry is displayed relative to the current drafting angle, while the visible grid remains horizontal and vertical on screen.
+- New drawing input is created in drafting coordinates and converted back into world geometry before boolean union with the layer.
 - After drawing, the new geometry is inserted into the layer and the layer is rebuilt through boolean union.
 - After moving a selected shape, the layer is rebuilt again so intersections and merges stay correct.
 - Hidden layers are not rendered.
@@ -101,6 +107,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Design a drafting/workplane rotation mode where holding `Space` and using the mouse wheel changes the drawing angle around the world origin `0,0` while the visible grid remains screen-aligned.
+- Task: Redesign the eraser so right click performs shape-based boolean subtraction using the current draw mode geometry instead of deleting whole merged objects.
 - Status: In progress
-- Progress: Implemented a first working drafting-angle system. The app now keeps the visible grid screen-aligned while world content renders through a global `draftAngle` transform around `0,0`; draw tools build geometry in drafting coordinates and convert it back to stored world geometry before union; selection, movement, erasing, and zoom use the new screen/draft/world transforms; and `Space + Wheel` now rotates the drafting angle instead of zooming. A syntax smoke check passed, and the task is waiting for user testing in the browser.
+- Progress: The drafting/workplane rotation feature was implemented and confirmed by the user. The next task is to replace the current hit-test object delete behavior with a right-click eraser that uses rectangle, ellipse, strip, or square-brush geometry as subtraction input against the merged vector geometry.

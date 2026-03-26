@@ -46,6 +46,8 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 ### Rendering Model
 
 - Rendering is direct vector drawing on the main canvas.
+- The canvas background grid uses three line tiers: minor lines every cell, mid lines every 10 cells, and major lines every 20 cells.
+- The world origin is visualized with dedicated X=0 and Y=0 axis lines that cross at 0,0.
 - There is no raster-mask union pipeline anymore.
 - Each visible layer is drawn from its current merged vector shapes.
 - Selection highlighting is drawn by tracing the selected shape geometry.
@@ -74,6 +76,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 - New geometry is created on the active layer.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
+- Zoom is currently clamped between a minimum of `0.09` and a maximum of `2`.
 - After drawing, the new geometry is inserted into the layer and the layer is rebuilt through boolean union.
 - After moving a selected shape, the layer is rebuilt again so intersections and merges stay correct.
 - Hidden layers are not rendered.
@@ -98,6 +101,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Upgrade the canvas grid so it shows minor, mid, and major lines plus a visible world-origin axis crossing at 0,0.
+- Task: Design camera rotation so holding `Space` and using the mouse wheel rotates the whole world view around the world origin `0,0` instead of zooming.
 - Status: In progress
-- Progress: Updated the canvas grid renderer so it now draws minor lines at every cell, mid lines every 10 cells, major lines every 20 cells, and dedicated X/Y axis lines at the world origin. A syntax smoke check passed, and the task is now waiting for user visual testing in the browser.
+- Progress: The zoom range tuning task was completed and confirmed by the user. The next step is to plan a camera-rotation model that rotates everything visually around the fixed world origin `0,0`, while keeping the underlying vector geometry unchanged and preserving correct selection, drawing, panning, and grid rendering behavior.

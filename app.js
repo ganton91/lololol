@@ -39,6 +39,7 @@ const state = {
   panStart: { x: 0, y: 0 },
   panOrigin: { x: 0, y: 0 },
   drawSize: 24,
+  stripCellWidth: 1,
   draftShape: null,
   brushLastPoint: null,
   drawOperation: "add",
@@ -104,25 +105,118 @@ function syncActiveLayerControls() {
 }
 
 function syncDrawSizeInput() {
-  const usesSize = state.shapeType === "strip" || state.shapeType === "square-brush";
-  const label = state.shapeType === "square-brush" ? "Square Brush size" : "Stroke Rect width";
-  drawSizeInput.disabled = !usesSize;
-  drawSizeInput.title = usesSize ? label : "This shape does not use the size control";
-  drawSizeInput.setAttribute("aria-label", usesSize ? label : "Tool size");
+  if (isStripShapeType()) {
+    drawSizeInput.disabled = false;
+    drawSizeInput.min = "1";
+    drawSizeInput.max = "50";
+    drawSizeInput.step = "1";
+    drawSizeInput.value = String(getStripCellWidth());
+    drawSizeInput.title = "Stroke Rect width in grid cells";
+    drawSizeInput.setAttribute("aria-label", "Stroke Rect width in grid cells");
+    return;
+  }
+
+  if (isSquareBrushShapeType()) {
+    drawSizeInput.disabled = false;
+    drawSizeInput.min = "2";
+    drawSizeInput.max = "300";
+    drawSizeInput.step = "1";
+    drawSizeInput.value = String(Math.round(state.drawSize));
+    drawSizeInput.title = "Square Brush size";
+    drawSizeInput.setAttribute("aria-label", "Square Brush size");
+    return;
+  }
+
+  drawSizeInput.disabled = true;
+  drawSizeInput.title = "This shape does not use the size control";
+  drawSizeInput.setAttribute("aria-label", "Tool size");
 }
 
 function isRectangleShapeType(shapeType = state.shapeType) {
   return shapeType === "rect";
 }
 
+function isStripShapeType(shapeType = state.shapeType) {
+  return shapeType === "strip";
+}
+
 function snapValueToGrid(value, step = gridCellSize) {
   return Math.round(value / step) * step;
+}
+
+function snapValueToGridWithOffset(value, offset = 0, step = gridCellSize) {
+  return snapValueToGrid(value - offset, step) + offset;
 }
 
 function snapDraftPointToGrid(point) {
   return {
     x: snapValueToGrid(point.x),
     y: snapValueToGrid(point.y),
+  };
+}
+
+function distanceBetweenPoints(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function getStripCellWidth(cellWidth = state.stripCellWidth) {
+  return Math.max(1, Math.min(50, Math.round(cellWidth)));
+}
+
+function getStripWidthInDraftUnits(cellWidth = state.stripCellWidth) {
+  return getStripCellWidth(cellWidth) * gridCellSize;
+}
+
+function getStripSnapOffset(cellWidth = state.stripCellWidth) {
+  return getStripCellWidth(cellWidth) % 2 === 0 ? 0 : gridCellSize / 2;
+}
+
+function getStripSnapCandidates(point, cellWidth = state.stripCellWidth) {
+  const offset = getStripSnapOffset(cellWidth);
+  if (!offset) {
+    return {
+      horizontal: snapDraftPointToGrid(point),
+      vertical: snapDraftPointToGrid(point),
+    };
+  }
+
+  return {
+    horizontal: {
+      x: snapValueToGrid(point.x),
+      y: snapValueToGridWithOffset(point.y, offset),
+    },
+    vertical: {
+      x: snapValueToGridWithOffset(point.x, offset),
+      y: snapValueToGrid(point.y),
+    },
+  };
+}
+
+function getStripPreferredSnapFamily(a, b, cellWidth = state.stripCellWidth) {
+  if (!getStripSnapOffset(cellWidth)) return null;
+  return Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? "horizontal" : "vertical";
+}
+
+function snapDraftPointToStripCenterline(point, preferredFamily = null, cellWidth = state.stripCellWidth) {
+  const candidates = getStripSnapCandidates(point, cellWidth);
+  if (preferredFamily === "horizontal" || preferredFamily === "vertical") {
+    return candidates[preferredFamily];
+  }
+
+  const horizontalCandidate = candidates.horizontal;
+  const verticalCandidate = candidates.vertical;
+
+  return distanceBetweenPoints(point, horizontalCandidate) <= distanceBetweenPoints(point, verticalCandidate)
+    ? horizontalCandidate
+    : verticalCandidate;
+}
+
+function getSnappedStripSegment(a, b, cellWidth = state.stripCellWidth) {
+  const preferredFamily = getStripPreferredSnapFamily(a, b, cellWidth);
+  return {
+    start: snapDraftPointToStripCenterline(a, preferredFamily, cellWidth),
+    end: snapDraftPointToStripCenterline(b, preferredFamily, cellWidth),
+    snapFamily: preferredFamily,
   };
 }
 
@@ -468,8 +562,9 @@ function makeDraftShape(a, b) {
   const start = isRectangleShapeType() ? snapDraftPointToGrid(a) : a;
   const end = isRectangleShapeType() ? snapDraftPointToGrid(b) : b;
 
-  if (state.shapeType === "strip") {
-    const strip = createStripGeometry(a, b, state.drawSize);
+  if (isStripShapeType()) {
+    const segment = getSnappedStripSegment(a, b);
+    const strip = createStripGeometry(segment.start, segment.end, getStripWidthInDraftUnits());
     const geometry = draftGeometryToWorld(strip.geometry);
     return {
       geometry,
@@ -927,12 +1022,23 @@ function drawGrid() {
 
 function drawSnapPreview() {
   if (!state.pointerInCanvas || state.panning || state.spacePressed) return;
-  if (state.tool !== "draw" || !isRectangleShapeType()) return;
+  if (state.tool !== "draw") return;
 
   const activeLayer = getActiveLayer();
   if (!activeLayer || !activeLayer.visible || activeLayer.locked) return;
 
-  const snapPoint = snapDraftPointToGrid(state.draftCurrent);
+  let snapPoint = null;
+  if (isRectangleShapeType()) {
+    snapPoint = snapDraftPointToGrid(state.draftCurrent);
+  } else if (isStripShapeType()) {
+    snapPoint =
+      state.dragging && state.draftStart
+        ? getSnappedStripSegment(state.draftStart, state.draftCurrent).end
+        : snapDraftPointToStripCenterline(state.draftCurrent);
+  }
+
+  if (!snapPoint) return;
+
   const screenPoint = draftToScreen(snapPoint);
   const size = snapPreviewSize;
   const isSubtract = state.dragging && state.drawOperation === "subtract";
@@ -1169,7 +1275,24 @@ shapeSelect.addEventListener("change", (e) => {
 drawSizeInput.addEventListener("input", (e) => {
   const value = Number(e.target.value);
   if (!Number.isFinite(value)) return;
-  state.drawSize = Math.max(2, Math.min(300, value));
+
+  if (isStripShapeType()) {
+    state.stripCellWidth = getStripCellWidth(value);
+    drawSizeInput.value = String(state.stripCellWidth);
+  } else if (isSquareBrushShapeType()) {
+    state.drawSize = Math.max(2, Math.min(300, value));
+    drawSizeInput.value = String(Math.round(state.drawSize));
+  } else {
+    return;
+  }
+
+  if (state.dragging && state.tool === "draw") {
+    if (!isSquareBrushShapeType()) {
+      state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
+    }
+  }
+
+  render();
 });
 
 layersList.addEventListener("click", (e) => {

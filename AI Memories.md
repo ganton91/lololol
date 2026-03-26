@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-03-26
+- Last updated: 2026-03-27
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -112,4 +112,4 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 - Task: Design and implement snapping on the canvas, including how each snap mode should behave for the current toolset and drafting-angle workflow.
 - Status: In progress
-- Progress: Rectangle snapping has now been implemented, browser-tested, and confirmed by the user. Rectangles snap to drafting-grid corners, show a cursor snap preview, and use the same exact cell-multiple geometry for both additive draw and right-click subtract so adjacent fills and erasures align cleanly. The remaining snapping work is still open for the other tools and interactions, especially ellipse, stroke rect, square brush, selection, and later editing behaviors.
+- Progress: Rectangle snapping has been implemented, browser-tested, and confirmed by the user. A first snapping pass is now in progress for `Stroke Rect`: its width control is expressed in whole grid cells instead of raw unit widths, the generated strip width is always an exact multiple of one cell, and the strip snap parity changes with thickness so odd cell widths use a half-cell centerline family while even cell widths stay on full grid intersections. The initial axis lock was then removed after review, so the strip can now be drawn at arbitrary angles while still preserving cell-multiple thickness and parity-aware snapping. This refinement is still waiting for browser validation before it is moved into the permanent sections. After that, the remaining snapping work is still open for ellipse, square brush, selection, and later editing behaviors.

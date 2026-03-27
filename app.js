@@ -61,7 +61,8 @@ const state = {
   squareBrushLockAnchorDraft: null,
   drawOperation: "add",
   draftOrigin: { x: 0, y: 0 },
-  draftAngle: 0,
+  draftAngleBase: 0,
+  draftAngleStepOffset: 0,
   camera: { x: 0, y: 0, zoom: 1 },
   selection: {
     shapeId: null,
@@ -80,7 +81,9 @@ const maxZoom = 2;
 const ellipseSegments = 96;
 const squareBrushAxisDecisionDistancePx = 18;
 const squareBrushAxisDecisionBiasPx = 8;
-const draftRotationStep = Math.PI / 36;
+const draftRotationStepDegrees = 1;
+const draftRotationStep = (Math.PI / 180) * draftRotationStepDegrees;
+const draftRotationStepsPerTurn = Math.round(360 / draftRotationStepDegrees);
 const gridCellSize = 24;
 const gridMidCellInterval = 10;
 const gridMajorCellInterval = 20;
@@ -100,10 +103,11 @@ function formatWorkplaneValue(value) {
 }
 
 function updateWorkplaneStatus() {
+  const draftAngle = getDraftAngle();
   const atWorldOrigin = Math.abs(state.draftOrigin.x) <= 1e-9 && Math.abs(state.draftOrigin.y) <= 1e-9;
-  const atWorldAngle = Math.abs(state.draftAngle) <= 1e-9;
+  const atWorldAngle = Math.abs(draftAngle) <= 1e-9;
   const planeLabel = atWorldOrigin && atWorldAngle ? "world" : "custom";
-  const angleDeg = (state.draftAngle * 180) / Math.PI;
+  const angleDeg = (draftAngle * 180) / Math.PI;
   workplaneStatus.textContent = `Plane: ${planeLabel} | Rot: ${formatWorkplaneValue(angleDeg)}deg | Origin: ${formatWorkplaneValue(state.draftOrigin.x)}, ${formatWorkplaneValue(state.draftOrigin.y)}`;
 }
 
@@ -441,6 +445,25 @@ function normalizeAngle(angle) {
   return nextAngle;
 }
 
+function normalizeRotationStepOffset(stepOffset) {
+  let nextStepOffset = Math.round(stepOffset);
+  if (!Number.isFinite(nextStepOffset)) return 0;
+  nextStepOffset %= draftRotationStepsPerTurn;
+  const halfTurnSteps = draftRotationStepsPerTurn / 2;
+  if (nextStepOffset <= -halfTurnSteps) nextStepOffset += draftRotationStepsPerTurn;
+  if (nextStepOffset > halfTurnSteps) nextStepOffset -= draftRotationStepsPerTurn;
+  return nextStepOffset;
+}
+
+function getDraftAngle() {
+  return normalizeAngle(state.draftAngleBase + state.draftAngleStepOffset * draftRotationStep);
+}
+
+function setDraftAngleBase(angle) {
+  state.draftAngleBase = normalizeAngle(angle);
+  state.draftAngleStepOffset = 0;
+}
+
 function worldToDraftWithPlane(point, origin, angle) {
   return rotatePoint(
     {
@@ -543,11 +566,11 @@ function differenceGeometry(subjectGeometry, clipGeometry) {
 }
 
 function worldToDraft(point) {
-  return worldToDraftWithPlane(point, state.draftOrigin, state.draftAngle);
+  return worldToDraftWithPlane(point, state.draftOrigin, getDraftAngle());
 }
 
 function draftToWorld(point) {
-  return draftToWorldWithPlane(point, state.draftOrigin, state.draftAngle);
+  return draftToWorldWithPlane(point, state.draftOrigin, getDraftAngle());
 }
 
 function worldGeometryToDraft(geometry) {
@@ -1210,9 +1233,10 @@ function worldToScreen(point) {
 }
 
 function applyWorldCameraTransform(targetCtx) {
+  const draftAngle = getDraftAngle();
   targetCtx.translate(state.camera.x, state.camera.y);
   targetCtx.scale(state.camera.zoom, state.camera.zoom);
-  targetCtx.rotate(-state.draftAngle);
+  targetCtx.rotate(-draftAngle);
   targetCtx.translate(-state.draftOrigin.x, -state.draftOrigin.y);
 }
 
@@ -1251,7 +1275,7 @@ function applyDraftAlignFromDrag() {
   if (distanceBetweenPoints(startSnap.world, endSnap.world) <= 1e-6) return false;
 
   state.draftOrigin = cloneDraftPoint(startSnap.world);
-  state.draftAngle = normalizeAngle(Math.atan2(endSnap.world.y - startSnap.world.y, endSnap.world.x - startSnap.world.x));
+  setDraftAngleBase(Math.atan2(endSnap.world.y - startSnap.world.y, endSnap.world.x - startSnap.world.x));
   updateWorkplaneStatus();
   return true;
 }
@@ -1269,12 +1293,13 @@ function zoomAtScreenPoint(nextZoom, screenPoint) {
   render();
 }
 
-function rotateDraftAngle(deltaAngle) {
-  state.draftAngle = normalizeAngle(state.draftAngle + deltaAngle);
+function rotateDraftAngle(stepDelta) {
+  if (!Number.isFinite(stepDelta) || !stepDelta) return;
+  state.draftAngleStepOffset = normalizeRotationStepOffset(state.draftAngleStepOffset + Math.trunc(stepDelta));
   if (state.draggingDraftOrigin) {
     state.draftOriginDragStartScreen = { x: state.pointerScreen.x, y: state.pointerScreen.y };
     state.draftOriginDragStartOrigin = { x: state.draftOrigin.x, y: state.draftOrigin.y };
-    state.draftOriginDragAngle = state.draftAngle;
+    state.draftOriginDragAngle = getDraftAngle();
   }
   refreshPointerDerivedState();
   updateWorkplaneStatus();
@@ -1663,7 +1688,7 @@ canvas.addEventListener("pointerdown", (e) => {
       state.draggingDraftOrigin = true;
       state.draftOriginDragStartScreen = { x: screen.x, y: screen.y };
       state.draftOriginDragStartOrigin = { x: state.draftOrigin.x, y: state.draftOrigin.y };
-      state.draftOriginDragAngle = state.draftAngle;
+      state.draftOriginDragAngle = getDraftAngle();
       updateCursor();
       canvas.setPointerCapture(e.pointerId);
     }
@@ -1881,7 +1906,7 @@ canvas.addEventListener(
     e.preventDefault();
     if (state.spacePressed) {
       if (state.draggingDraftAlign) return;
-      rotateDraftAngle(e.deltaY < 0 ? draftRotationStep : -draftRotationStep);
+      rotateDraftAngle(e.deltaY < 0 ? 1 : -1);
       return;
     }
 

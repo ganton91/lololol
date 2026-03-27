@@ -129,6 +129,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: None
-- Status: Idle
-- Progress: No active task. The recent drafting/workplane refinement work has been accepted by the user and its lasting behavior is now recorded in the permanent sections above.
+- Task: Measurement calibration and layer area reporting design
+- Status: In discussion
+- Progress: The next feature direction has been clarified but is intentionally still at discussion stage with no code changes yet. The agreed goal is to add document-level measurement settings with separate reporting units (`m`, `cm`, `mm`) and grid-cell real size input with its own unit selector, so a project can report in meters while each square grid cell represents a size such as `5 cm x 5 cm`. The grid remains square, internal geometry math should stay as-is, and the first planned implementation slice is settings UI plus per-layer area reporting based on calibrated real-world area.

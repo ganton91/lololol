@@ -65,10 +65,13 @@ const state = {
   draftAngleStepOffset: 0,
   camera: { x: 0, y: 0, zoom: 1 },
   selection: {
-    shapeId: null,
+    shapeIds: [],
     startWorld: null,
-    shapeSnapshot: null,
+    shapeSnapshots: null,
     modified: false,
+    mode: null,
+    boxStartDraft: null,
+    boxCurrentDraft: null,
   },
 };
 
@@ -857,6 +860,17 @@ function resetDrawSession() {
   clearSquareBrushAxisLock();
 }
 
+function cancelDrawInteraction() {
+  state.dragging = false;
+  state.drawOperation = "add";
+  resetDrawSession();
+}
+
+function cancelSelectionInteraction() {
+  state.dragging = false;
+  resetSelectionInteraction();
+}
+
 function rebuildSquareBrushDraftShape() {
   const draftGeometry = buildSquareBrushStrokeDraftGeometry(state.brushPoints, state.drawSize);
   setDraftShapeFromGeometry(draftGeometryToWorld(draftGeometry));
@@ -1068,6 +1082,192 @@ function hitsShape(shape, x, y, radius) {
   return distanceToShapeBoundary(shape, x, y) <= radius;
 }
 
+function pointInRect(point, rect, epsilon = 1e-6) {
+  return (
+    point.x >= rect.x - epsilon &&
+    point.x <= rect.x + rect.w + epsilon &&
+    point.y >= rect.y - epsilon &&
+    point.y <= rect.y + rect.h + epsilon
+  );
+}
+
+function rectContainsBounds(rect, bounds, epsilon = 1e-6) {
+  return (
+    bounds.x >= rect.x - epsilon &&
+    bounds.y >= rect.y - epsilon &&
+    bounds.x + bounds.w <= rect.x + rect.w + epsilon &&
+    bounds.y + bounds.h <= rect.y + rect.h + epsilon
+  );
+}
+
+function getSelectionBoxRect(startDraft, currentDraft) {
+  if (!startDraft || !currentDraft) return null;
+  return normalizeRect(startDraft, currentDraft);
+}
+
+function getSelectionBoxMode(startDraft, currentDraft) {
+  if (!startDraft || !currentDraft) return "window";
+  return currentDraft.x < startDraft.x ? "crossing" : "window";
+}
+
+function getSelectionBoxCorners(rect) {
+  return [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y + rect.h },
+    { x: rect.x, y: rect.y + rect.h },
+  ];
+}
+
+function pointOnSegment(point, a, b, epsilon = 1e-6) {
+  if (Math.abs(crossProduct(a, b, point)) > epsilon) return false;
+
+  return (
+    point.x >= Math.min(a.x, b.x) - epsilon &&
+    point.x <= Math.max(a.x, b.x) + epsilon &&
+    point.y >= Math.min(a.y, b.y) - epsilon &&
+    point.y <= Math.max(a.y, b.y) + epsilon
+  );
+}
+
+function segmentsIntersect(a, b, c, d, epsilon = 1e-6) {
+  const abC = crossProduct(a, b, c);
+  const abD = crossProduct(a, b, d);
+  const cdA = crossProduct(c, d, a);
+  const cdB = crossProduct(c, d, b);
+
+  if (Math.abs(abC) <= epsilon && pointOnSegment(c, a, b, epsilon)) return true;
+  if (Math.abs(abD) <= epsilon && pointOnSegment(d, a, b, epsilon)) return true;
+  if (Math.abs(cdA) <= epsilon && pointOnSegment(a, c, d, epsilon)) return true;
+  if (Math.abs(cdB) <= epsilon && pointOnSegment(b, c, d, epsilon)) return true;
+
+  const abStraddles = (abC > epsilon && abD < -epsilon) || (abC < -epsilon && abD > epsilon);
+  const cdStraddles = (cdA > epsilon && cdB < -epsilon) || (cdA < -epsilon && cdB > epsilon);
+
+  return abStraddles && cdStraddles;
+}
+
+function segmentTouchesRect(a, b, rect) {
+  if (pointInRect(a, rect) || pointInRect(b, rect)) return true;
+
+  const corners = getSelectionBoxCorners(rect);
+  const edges = [
+    [corners[0], corners[1]],
+    [corners[1], corners[2]],
+    [corners[2], corners[3]],
+    [corners[3], corners[0]],
+  ];
+
+  return edges.some(([start, end]) => segmentsIntersect(a, b, start, end));
+}
+
+function shapeGeometryIntersectsRect(geometry, rect) {
+  if (!geometry.length) return false;
+
+  const corners = getSelectionBoxCorners(rect);
+  if (corners.some((corner) => pointInShapeFill({ geometry }, corner.x, corner.y))) return true;
+
+  let hit = false;
+  forEachRing(geometry, (ring) => {
+    if (hit) return;
+
+    for (let i = 0; i < ring.length; i += 1) {
+      const a = { x: ring[i][0], y: ring[i][1] };
+      if (pointInRect(a, rect)) {
+        hit = true;
+        return;
+      }
+
+      const next = ring[(i + 1) % ring.length];
+      const b = { x: next[0], y: next[1] };
+      if (segmentTouchesRect(a, b, rect)) {
+        hit = true;
+        return;
+      }
+    }
+  });
+
+  return hit;
+}
+
+function shapeGeometryFitsRect(geometry, rect) {
+  if (!geometry.length) return false;
+
+  let hasPoint = false;
+  let fits = true;
+  forEachRing(geometry, (ring) => {
+    if (!fits) return;
+
+    for (const point of ring) {
+      hasPoint = true;
+      if (pointInRect({ x: point[0], y: point[1] }, rect)) continue;
+      fits = false;
+      return;
+    }
+  });
+
+  return hasPoint && fits;
+}
+
+function getShapeIdsInDraftSelectionBox(startDraft, currentDraft) {
+  const rect = getSelectionBoxRect(startDraft, currentDraft);
+  if (!rect || rect.w <= 1e-6 || rect.h <= 1e-6) return [];
+
+  const selectionMode = getSelectionBoxMode(startDraft, currentDraft);
+  const nextShapeIds = [];
+
+  for (const shape of state.shapes) {
+    const layer = getLayerById(shape.layerId);
+    if (!layer || !layer.visible || layer.locked) continue;
+
+    const draftGeometry = worldGeometryToDraft(shape.geometry);
+    const draftBounds = getGeometryBounds(draftGeometry);
+    const matches =
+      selectionMode === "crossing"
+        ? boundsTouch(draftBounds, rect) && shapeGeometryIntersectsRect(draftGeometry, rect)
+        : rectContainsBounds(rect, draftBounds) && shapeGeometryFitsRect(draftGeometry, rect);
+
+    if (matches) nextShapeIds.push(shape.id);
+  }
+
+  return nextShapeIds;
+}
+
+function geometriesOverlap(a, b) {
+  const cleanA = sanitizeGeometry(a);
+  const cleanB = sanitizeGeometry(b);
+  if (!cleanA.length || !cleanB.length) return false;
+
+  return sanitizeGeometry(polygonBoolean.intersection(cleanA, cleanB)).length > 0;
+}
+
+function collectSelectedGeometriesByLayer(shapeIds = state.selection.shapeIds) {
+  const selectedIds = new Set(shapeIds);
+  const geometriesByLayer = {};
+
+  for (const shape of state.shapes) {
+    if (!selectedIds.has(shape.id)) continue;
+    if (!geometriesByLayer[shape.layerId]) geometriesByLayer[shape.layerId] = [];
+    geometriesByLayer[shape.layerId].push(deepCopyGeometry(shape.geometry));
+  }
+
+  return geometriesByLayer;
+}
+
+function getShapeIdsIntersectingLayerGeometries(geometriesByLayer) {
+  const nextShapeIds = [];
+
+  for (const shape of state.shapes) {
+    const layerGeometries = geometriesByLayer[shape.layerId];
+    if (!layerGeometries) continue;
+    if (layerGeometries.some((geometry) => geometriesOverlap(shape.geometry, geometry))) {
+      nextShapeIds.push(shape.id);
+    }
+  }
+
+  return nextShapeIds;
+}
+
 function createLayerShapeRecordsFromGeometry(layerId, geometry) {
   const multipolygon = sanitizeGeometry(geometry);
   const nextShapes = [];
@@ -1110,8 +1310,7 @@ function subtractGeometryFromLayer(layerId, subtractionGeometry) {
   const layerShapes = state.shapes.filter((shape) => shape.layerId === layerId);
   if (!layerShapes.length) return;
 
-  const selectedShape = state.shapes.find((shape) => shape.id === state.selection.shapeId) || null;
-  const affectsSelection = selectedShape && selectedShape.layerId === layerId;
+  const affectsSelection = getSelectedShapes().some((shape) => shape.layerId === layerId);
   const nextGeometry = differenceGeometry(
     unionGeometryList(layerShapes.map((shape) => shape.geometry)),
     subtractionGeometry
@@ -1119,7 +1318,7 @@ function subtractGeometryFromLayer(layerId, subtractionGeometry) {
 
   replaceLayerShapes(layerId, createLayerShapeRecordsFromGeometry(layerId, nextGeometry));
 
-  if (affectsSelection) clearSelection();
+  if (affectsSelection) clearSelectionForLayer(layerId);
 }
 
 function renderLayersPanel() {
@@ -1141,11 +1340,60 @@ function renderLayersPanel() {
   syncActiveLayerControls();
 }
 
-function clearSelection() {
-  state.selection.shapeId = null;
+function normalizeSelectedShapeIds(shapeIds) {
+  const wanted = new Set(shapeIds);
+  const nextShapeIds = [];
+
+  for (const shape of state.shapes) {
+    if (!wanted.has(shape.id) || nextShapeIds.includes(shape.id)) continue;
+    nextShapeIds.push(shape.id);
+  }
+
+  return nextShapeIds;
+}
+
+function setSelectedShapeIds(shapeIds) {
+  state.selection.shapeIds = normalizeSelectedShapeIds(shapeIds);
+}
+
+function getSelectedShapes() {
+  const selectedIds = new Set(state.selection.shapeIds);
+  return state.shapes.filter((shape) => selectedIds.has(shape.id));
+}
+
+function isShapeSelected(shapeId) {
+  return state.selection.shapeIds.includes(shapeId);
+}
+
+function resetSelectionInteraction() {
   state.selection.startWorld = null;
-  state.selection.shapeSnapshot = null;
+  state.selection.shapeSnapshots = null;
   state.selection.modified = false;
+  state.selection.mode = null;
+  state.selection.boxStartDraft = null;
+  state.selection.boxCurrentDraft = null;
+}
+
+function clearSelection() {
+  state.selection.shapeIds = [];
+  resetSelectionInteraction();
+}
+
+function clearSelectionForLayer(layerId) {
+  setSelectedShapeIds(getSelectedShapes().filter((shape) => shape.layerId !== layerId).map((shape) => shape.id));
+  resetSelectionInteraction();
+}
+
+function createSelectionShapeSnapshotMap(shapeIds = state.selection.shapeIds) {
+  const selectedIds = new Set(shapeIds);
+  const snapshots = {};
+
+  for (const shape of state.shapes) {
+    if (!selectedIds.has(shape.id)) continue;
+    snapshots[shape.id] = cloneShape(shape);
+  }
+
+  return snapshots;
 }
 
 function addLayer() {
@@ -1190,10 +1438,13 @@ function moveActiveLayer(direction) {
 }
 
 function setTool(tool) {
+  const previousTool = state.tool;
+  if (previousTool === "draw" && tool !== "draw") cancelDrawInteraction();
+  if (previousTool === "select" && tool !== "select") cancelSelectionInteraction();
+
   state.tool = tool;
   selectBtn.classList.toggle("active", tool === "select");
   drawBtn.classList.toggle("active", tool === "draw");
-  if (tool !== "draw") resetDrawSession();
   updateCursor();
   render();
 }
@@ -1361,21 +1612,87 @@ function moveShapeBy(shape, dx, dy) {
   );
 }
 
+function startSelectionMove(worldPoint) {
+  const movableShapeIds = getSelectedShapes()
+    .filter((shape) => {
+      const layer = getLayerById(shape.layerId);
+      return layer && layer.visible && !layer.locked;
+    })
+    .map((shape) => shape.id);
+
+  setSelectedShapeIds(movableShapeIds);
+  state.selection.mode = "move";
+  state.selection.startWorld = cloneDraftPoint(worldPoint);
+  state.selection.shapeSnapshots = createSelectionShapeSnapshotMap();
+  state.selection.modified = false;
+  state.selection.boxStartDraft = null;
+  state.selection.boxCurrentDraft = null;
+}
+
+function startSelectionBox(draftPoint) {
+  state.selection.mode = "box";
+  state.selection.startWorld = null;
+  state.selection.shapeSnapshots = null;
+  state.selection.modified = false;
+  state.selection.boxStartDraft = cloneDraftPoint(draftPoint);
+  state.selection.boxCurrentDraft = cloneDraftPoint(draftPoint);
+}
+
+function updateSelectionBoxSelection(draftPoint) {
+  state.selection.boxCurrentDraft = cloneDraftPoint(draftPoint);
+  setSelectedShapeIds(getShapeIdsInDraftSelectionBox(state.selection.boxStartDraft, state.selection.boxCurrentDraft));
+}
+
 function renderSelectOverlay() {
-  if (state.tool !== "select" || !state.selection.shapeId) return;
+  if (state.tool !== "select" || !state.selection.shapeIds.length) return;
 
-  const selectedShape = state.shapes.find((shape) => shape.id === state.selection.shapeId);
-  if (!selectedShape) return;
-
-  const selectedLayer = getLayerById(selectedShape.layerId);
-  if (!selectedLayer || !selectedLayer.visible) return;
+  const selectedIds = new Set(state.selection.shapeIds);
+  let hasVisibleSelection = false;
 
   ctx.save();
   applyWorldCameraTransform(ctx);
   ctx.beginPath();
-  traceGeometryPath(ctx, selectedShape.geometry);
+
+  for (const shape of state.shapes) {
+    if (!selectedIds.has(shape.id)) continue;
+
+    const selectedLayer = getLayerById(shape.layerId);
+    if (!selectedLayer || !selectedLayer.visible) continue;
+
+    traceGeometryPath(ctx, shape.geometry);
+    hasVisibleSelection = true;
+  }
+
+  if (!hasVisibleSelection) {
+    ctx.restore();
+    return;
+  }
+
   ctx.strokeStyle = selectionStrokeColor;
   ctx.lineWidth = 2 / state.camera.zoom;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderSelectionBoxOverlay() {
+  if (state.tool !== "select" || state.selection.mode !== "box") return;
+
+  const rect = getSelectionBoxRect(state.selection.boxStartDraft, state.selection.boxCurrentDraft);
+  if (!rect) return;
+
+  const topLeft = draftToScreen({ x: rect.x, y: rect.y });
+  const width = rect.w * state.camera.zoom;
+  const height = rect.h * state.camera.zoom;
+  const selectionMode = getSelectionBoxMode(state.selection.boxStartDraft, state.selection.boxCurrentDraft);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(topLeft.x, topLeft.y, width, height);
+  ctx.fillStyle = selectionMode === "crossing" ? "rgba(14, 165, 233, 0.14)" : "rgba(14, 165, 233, 0.08)";
+  ctx.fill();
+  ctx.strokeStyle = selectionStrokeColor;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash(selectionMode === "crossing" ? [8, 4] : []);
   ctx.stroke();
   ctx.restore();
 }
@@ -1664,6 +1981,7 @@ function render() {
   }
 
   renderSelectOverlay();
+  renderSelectionBoxOverlay();
   drawDraftTransformPreview();
   drawSnapPreview();
 }
@@ -1725,14 +2043,19 @@ canvas.addEventListener("pointerdown", (e) => {
     const pick = pickSelectableAt(world);
     if (!pick) {
       clearSelection();
+      startSelectionBox(draft);
+      state.dragging = true;
+      canvas.setPointerCapture(e.pointerId);
       render();
       return;
     }
 
-    state.selection.shapeId = state.shapes[pick.shapeIndex].id;
-    state.selection.startWorld = world;
-    state.selection.shapeSnapshot = cloneShape(state.shapes[pick.shapeIndex]);
-    state.selection.modified = false;
+    const pickedShape = state.shapes[pick.shapeIndex];
+    if (!isShapeSelected(pickedShape.id)) {
+      setSelectedShapeIds([pickedShape.id]);
+    }
+
+    startSelectionMove(world);
     state.dragging = true;
     canvas.setPointerCapture(e.pointerId);
     render();
@@ -1800,14 +2123,26 @@ canvas.addEventListener("pointermove", (e) => {
   }
 
   if (state.tool === "select") {
-    const shapeIndex = state.shapes.findIndex((shape) => shape.id === state.selection.shapeId);
-    if (shapeIndex >= 0 && state.selection.shapeSnapshot && state.selection.startWorld) {
+    if (state.selection.mode === "box") {
+      updateSelectionBoxSelection(state.draftCurrent);
+      render();
+      return;
+    }
+
+    if (state.selection.mode === "move" && state.selection.shapeSnapshots && state.selection.startWorld) {
       const dx = state.current.x - state.selection.startWorld.x;
       const dy = state.current.y - state.selection.startWorld.y;
       const didChange = Math.abs(dx) > 1e-6 || Math.abs(dy) > 1e-6;
-      const nextShape = cloneShape(state.selection.shapeSnapshot);
-      moveShapeBy(nextShape, dx, dy);
-      state.shapes[shapeIndex] = nextShape;
+
+      state.shapes = state.shapes.map((shape) => {
+        const shapeSnapshot = state.selection.shapeSnapshots[shape.id];
+        if (!shapeSnapshot) return shape;
+
+        const nextShape = cloneShape(shapeSnapshot);
+        moveShapeBy(nextShape, dx, dy);
+        return nextShape;
+      });
+
       state.selection.modified = didChange;
     }
     render();
@@ -1867,19 +2202,26 @@ function finishDrag(e) {
   if (!state.dragging) return;
 
   if (state.tool === "select") {
-    const selectedShape = state.shapes.find((shape) => shape.id === state.selection.shapeId) || null;
-    const selectedLayerId = selectedShape ? selectedShape.layerId : null;
-    const needsUnionRefresh = state.selection.modified && selectedLayerId;
+    if (state.selection.mode === "box") {
+      updateSelectionBoxSelection(state.draftCurrent);
+      resetSelectionInteraction();
+      state.dragging = false;
+      render();
+      return;
+    }
 
-    state.selection.startWorld = null;
-    state.selection.shapeSnapshot = null;
-    state.selection.modified = false;
+    const movedGeometriesByLayer = state.selection.modified ? collectSelectedGeometriesByLayer() : null;
+    const affectedLayerIds = movedGeometriesByLayer ? Object.keys(movedGeometriesByLayer) : [];
+
+    resetSelectionInteraction();
     state.dragging = false;
 
-    if (needsUnionRefresh) {
-      rebuildLayerShapes(selectedLayerId);
-      const pickedShape = pickShapeInLayerAt(selectedLayerId, state.current);
-      state.selection.shapeId = pickedShape ? pickedShape.id : null;
+    if (affectedLayerIds.length) {
+      for (const layerId of affectedLayerIds) {
+        rebuildLayerShapes(layerId);
+      }
+
+      setSelectedShapeIds(getShapeIdsIntersectingLayerGeometries(movedGeometriesByLayer));
     }
 
     render();
@@ -2014,6 +2356,11 @@ layerUpBtn.addEventListener("click", () => moveActiveLayer(1));
 layerDownBtn.addEventListener("click", () => moveActiveLayer(-1));
 
 window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.tool === "draw") {
+    setTool("select");
+    return;
+  }
+
   if (e.key === "Shift") {
     state.shiftPressed = true;
     if (!state.spacePressed && state.pointerInCanvas && state.tool === "draw" && (isSquareBrushShapeType() || isStripShapeType())) {

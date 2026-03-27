@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-03-27
+- Last updated: 2026-03-28
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -134,4 +134,4 @@ Layer order controls draw order. The active layer receives new geometry when the
 ## Current Task
 
 - Refine the `Select` behavior.
-- Progress: task opened; current implementation review is the next step before proposing changes.
+- Progress: implementation review completed; pressing `Escape` while the active tool is `Draw` now switches to `Select`, and `Select` now supports marquee multi-selection in draft/screen space with direction-based rules: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed or intersect the box. Multi-selected shapes also move together when dragged from a selected shape. Pending user test/confirmation.

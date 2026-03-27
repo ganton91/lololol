@@ -85,6 +85,8 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Square Brush` size is expressed in whole grid cells and its preview is centered on the snapped pointer position.
 - `Square Brush` snapping is parity-aware: odd cell widths snap the brush center to cell centers, while even cell widths snap the brush center to grid intersections.
 - `Square Brush` records and rebuilds its path from snapped center point to snapped center point, using square-sweep geometry instead of dab-by-dab stamping.
+- `Square Brush` supports reference-style `Shift` axis lock behavior: pressing `Shift` during an active stroke resets the lock anchor to the current pointer position, the lock direction is chosen from client-space movement, and the chosen axis stays sticky until `Shift` is released.
+- `Square Brush` remembers the previous brush point between strokes, so starting a new square-brush stroke with `Shift` can continue immediately from that remembered point.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
 - Zoom is currently clamped between a minimum of `0.09` and a maximum of `2`.
 - The app maintains a global drafting angle separate from stored geometry.
@@ -116,6 +118,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Design and implement `Square Brush` behavior refinements, starting with modifier-key shortcuts and constrained drawing behavior.
+- Task: Design and implement `Stroke Rect` (`SquareRect`) behavior refinements, starting with modifier-key shortcuts and constrained drawing behavior.
 - Status: In progress
-- Progress: The current snapping phase for `Rectangle`, `Ellipse`, `Stroke Rect`, and `Square Brush` has been browser-tested and accepted by the user, so those rules are now part of the permanent behavior above. The next phase is to refine `Square Brush` interaction behavior one step at a time, starting with shortcut-driven constraints such as shift-based axis locking and related guided stroke behavior. No new brush behavior shortcuts have been implemented yet.
+- Progress: The recently added `Square Brush` behavior refinements, including the reference-style `Shift` axis lock workflow and remembered-point continuation between strokes, have been browser-tested and accepted by the user and are now part of the permanent behavior above. The next phase is to refine `Stroke Rect` behavior one step at a time, beginning with shortcut-driven constraints and related interaction polish. No new `Stroke Rect` behavior shortcuts have been implemented yet.

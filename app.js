@@ -31,7 +31,9 @@ const state = {
   dragging: false,
   panning: false,
   pointerInCanvas: false,
+  pointerScreen: { x: 0, y: 0 },
   spacePressed: false,
+  shiftPressed: false,
   start: { x: 0, y: 0 },
   current: { x: 0, y: 0 },
   draftStart: { x: 0, y: 0 },
@@ -43,6 +45,10 @@ const state = {
   draftShape: null,
   brushLastPoint: null,
   brushPoints: [],
+  squareBrushMemoryPoint: null,
+  squareBrushLockedAxis: null,
+  squareBrushLockAnchorScreen: null,
+  squareBrushLockAnchorDraft: null,
   drawOperation: "add",
   draftAngle: 0,
   camera: { x: 0, y: 0, zoom: 1 },
@@ -61,6 +67,8 @@ const previewStrokeWidth = 1.5;
 const minZoom = 0.09;
 const maxZoom = 2;
 const ellipseSegments = 96;
+const squareBrushAxisDecisionDistancePx = 18;
+const squareBrushAxisDecisionBiasPx = 8;
 const draftRotationStep = Math.PI / 36;
 const gridCellSize = 24;
 const gridMidCellInterval = 10;
@@ -199,6 +207,63 @@ function snapDraftPointToSquareBrushCenter(point, cellWidth = state.drawSize) {
   };
 }
 
+function clearSquareBrushAxisLock() {
+  state.squareBrushLockedAxis = null;
+  state.squareBrushLockAnchorScreen = null;
+  state.squareBrushLockAnchorDraft = null;
+}
+
+function resetSquareBrushAxisLockAnchor(screenPoint = state.pointerScreen) {
+  if (!screenPoint) return;
+
+  state.squareBrushLockAnchorScreen = {
+    x: screenPoint.x,
+    y: screenPoint.y,
+  };
+  state.squareBrushLockAnchorDraft = snapDraftPointToSquareBrushCenter(screenToDraft(screenPoint));
+  state.squareBrushLockedAxis = null;
+}
+
+function getSquareBrushLockedAxis(screenPoint, anchorScreen = state.squareBrushLockAnchorScreen) {
+  if (!anchorScreen) return null;
+
+  const dx = screenPoint.x - anchorScreen.x;
+  const dy = screenPoint.y - anchorScreen.y;
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+  const distance = Math.hypot(dx, dy);
+
+  if (distance < squareBrushAxisDecisionDistancePx) return null;
+  if (Math.abs(absDx - absDy) < squareBrushAxisDecisionBiasPx) return null;
+
+  return absDx >= absDy ? "x" : "y";
+}
+
+function constrainPointToAxis(point, anchor, axis) {
+  if (!anchor || !axis) return { x: point.x, y: point.y };
+  if (axis === "x") return { x: point.x, y: anchor.y };
+  if (axis === "y") return { x: anchor.x, y: point.y };
+  return { x: point.x, y: point.y };
+}
+
+function getSquareBrushInputPoint(point, shiftKey = false, screenPoint = state.pointerScreen) {
+  if (!shiftKey || !state.dragging) {
+    clearSquareBrushAxisLock();
+    return snapDraftPointToSquareBrushCenter(point);
+  }
+
+  if (!state.squareBrushLockAnchorScreen || !state.squareBrushLockAnchorDraft) {
+    resetSquareBrushAxisLockAnchor(screenPoint);
+  }
+
+  if (!state.squareBrushLockedAxis) {
+    state.squareBrushLockedAxis = getSquareBrushLockedAxis(screenPoint);
+  }
+
+  const constrainedPoint = constrainPointToAxis(point, state.squareBrushLockAnchorDraft, state.squareBrushLockedAxis);
+  return snapDraftPointToSquareBrushCenter(constrainedPoint);
+}
+
 function getStripSnapCandidates(point, cellWidth = state.stripCellWidth) {
   const offset = getStripSnapOffset(cellWidth);
   if (!offset) {
@@ -248,9 +313,9 @@ function getSnappedStripSegment(a, b, cellWidth = state.stripCellWidth) {
   };
 }
 
-function getDraftInputPoint(point, shapeType = state.shapeType) {
+function getDraftInputPoint(point, shapeType = state.shapeType, shiftKey = false, screenPoint = state.pointerScreen) {
   if (isBoxSnapShapeType(shapeType)) return snapDraftPointToGrid(point);
-  if (isSquareBrushShapeType(shapeType)) return snapDraftPointToSquareBrushCenter(point);
+  if (isSquareBrushShapeType(shapeType)) return getSquareBrushInputPoint(point, shiftKey, screenPoint);
   return { x: point.x, y: point.y };
 }
 
@@ -618,6 +683,10 @@ function buildSquareBrushStrokeDraftGeometry(points, size) {
   return unionGeometryList(sweeps);
 }
 
+function cloneDraftPoint(point) {
+  return point ? { x: point.x, y: point.y } : null;
+}
+
 function setDraftShapeFromGeometry(geometry) {
   const cleanGeometry = sanitizeGeometry(geometry);
   state.draftShape = {
@@ -631,6 +700,7 @@ function resetDrawSession() {
   state.draftShape = null;
   state.brushLastPoint = null;
   state.brushPoints = [];
+  clearSquareBrushAxisLock();
 }
 
 function rebuildSquareBrushDraftShape() {
@@ -638,9 +708,22 @@ function rebuildSquareBrushDraftShape() {
   setDraftShapeFromGeometry(draftGeometryToWorld(draftGeometry));
 }
 
-function startSquareBrushStroke(point) {
-  state.brushPoints = [{ x: point.x, y: point.y }];
-  state.brushLastPoint = { x: point.x, y: point.y };
+function rememberSquareBrushPoint(point) {
+  state.squareBrushMemoryPoint = cloneDraftPoint(point);
+}
+
+function startSquareBrushStroke(point, shiftKey = false) {
+  const strokePoints = [];
+  const rememberedPoint = state.squareBrushMemoryPoint;
+
+  if (shiftKey && rememberedPoint && distanceBetweenPoints(rememberedPoint, point) > 1e-6) {
+    strokePoints.push(cloneDraftPoint(rememberedPoint));
+  }
+
+  strokePoints.push(cloneDraftPoint(point));
+  state.brushPoints = strokePoints;
+  state.brushLastPoint = cloneDraftPoint(point);
+  rememberSquareBrushPoint(point);
   rebuildSquareBrushDraftShape();
 }
 
@@ -654,6 +737,7 @@ function appendSquareBrushPathPoints(point) {
 
   state.brushPoints.push({ x: point.x, y: point.y });
   state.brushLastPoint = { x: point.x, y: point.y };
+  rememberSquareBrushPoint(point);
   return true;
 }
 
@@ -1208,8 +1292,9 @@ function render() {
 
 canvas.addEventListener("pointerdown", (e) => {
   const screen = getPos(e);
+  state.pointerScreen = { x: screen.x, y: screen.y };
   const rawDraft = screenToDraft(screen);
-  const draft = state.tool === "draw" ? getDraftInputPoint(rawDraft) : rawDraft;
+  const draft = state.tool === "draw" ? getDraftInputPoint(rawDraft, state.shapeType, e.shiftKey, screen) : rawDraft;
   const world = draftToWorld(draft);
   state.pointerInCanvas = true;
   state.current = world;
@@ -1258,7 +1343,8 @@ canvas.addEventListener("pointerdown", (e) => {
 
   if (state.tool === "draw") {
     if (isSquareBrushShapeType()) {
-      startSquareBrushStroke(draft);
+      if (e.shiftKey) resetSquareBrushAxisLockAnchor(screen);
+      startSquareBrushStroke(draft, e.shiftKey);
       render();
     } else {
       state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
@@ -1271,9 +1357,10 @@ canvas.addEventListener("pointerdown", (e) => {
 
 canvas.addEventListener("pointermove", (e) => {
   const screen = getPos(e);
+  state.pointerScreen = { x: screen.x, y: screen.y };
   const rawDraft = screenToDraft(screen);
   state.pointerInCanvas = true;
-  state.draftCurrent = state.tool === "draw" ? getDraftInputPoint(rawDraft) : rawDraft;
+  state.draftCurrent = state.tool === "draw" ? getDraftInputPoint(rawDraft, state.shapeType, e.shiftKey, screen) : rawDraft;
   state.current = draftToWorld(state.draftCurrent);
 
   if (state.panning) {
@@ -1415,7 +1502,11 @@ drawSizeInput.addEventListener("input", (e) => {
   } else if (isSquareBrushShapeType()) {
     state.drawSize = getSquareBrushCellWidth(value);
     drawSizeInput.value = String(state.drawSize);
-    state.draftCurrent = snapDraftPointToSquareBrushCenter(state.draftCurrent);
+    if (state.pointerInCanvas) {
+      state.draftCurrent = getSquareBrushInputPoint(screenToDraft(state.pointerScreen), state.shiftPressed, state.pointerScreen);
+    } else {
+      state.draftCurrent = snapDraftPointToSquareBrushCenter(state.draftCurrent);
+    }
     state.current = draftToWorld(state.draftCurrent);
   } else {
     return;
@@ -1467,6 +1558,13 @@ layerUpBtn.addEventListener("click", () => moveActiveLayer(1));
 layerDownBtn.addEventListener("click", () => moveActiveLayer(-1));
 
 window.addEventListener("keydown", (e) => {
+  if (e.key === "Shift") {
+    state.shiftPressed = true;
+    if (state.pointerInCanvas && state.tool === "draw" && isSquareBrushShapeType()) {
+      if (state.dragging) resetSquareBrushAxisLockAnchor(state.pointerScreen);
+      render();
+    }
+  }
   if (e.key.toLowerCase() === "s") setTool("select");
   if (e.key.toLowerCase() === "d") setTool("draw");
   if (e.code === "Space") {
@@ -1477,6 +1575,13 @@ window.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("keyup", (e) => {
+  if (e.key === "Shift") {
+    state.shiftPressed = false;
+    clearSquareBrushAxisLock();
+    if (state.pointerInCanvas && state.tool === "draw" && isSquareBrushShapeType()) {
+      render();
+    }
+  }
   if (e.code === "Space") {
     state.spacePressed = false;
     updateCursor();

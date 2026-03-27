@@ -13,6 +13,7 @@ const drawSizeInput = document.getElementById("draw-size");
 const zoomOutBtn = document.getElementById("zoom-out");
 const zoomInBtn = document.getElementById("zoom-in");
 const zoomLevel = document.getElementById("zoom-level");
+const workplaneStatus = document.getElementById("workplane-status");
 const layersList = document.getElementById("layers-list");
 const layerAddBtn = document.getElementById("layer-add");
 const layerDeleteBtn = document.getElementById("layer-delete");
@@ -30,6 +31,7 @@ const state = {
   nextShapeId: 1,
   dragging: false,
   panning: false,
+  draggingDraftOrigin: false,
   pointerInCanvas: false,
   pointerScreen: { x: 0, y: 0 },
   spacePressed: false,
@@ -40,6 +42,9 @@ const state = {
   draftCurrent: { x: 0, y: 0 },
   panStart: { x: 0, y: 0 },
   panOrigin: { x: 0, y: 0 },
+  draftOriginDragStartScreen: { x: 0, y: 0 },
+  draftOriginDragStartOrigin: { x: 0, y: 0 },
+  draftOriginDragAngle: 0,
   drawSize: 1,
   stripCellWidth: 1,
   draftShape: null,
@@ -52,6 +57,7 @@ const state = {
   squareBrushLockAnchorScreen: null,
   squareBrushLockAnchorDraft: null,
   drawOperation: "add",
+  draftOrigin: { x: 0, y: 0 },
   draftAngle: 0,
   camera: { x: 0, y: 0, zoom: 1 },
   selection: {
@@ -82,9 +88,32 @@ function updateZoomLabel() {
   zoomLevel.textContent = Math.round(state.camera.zoom * 100) + "%";
 }
 
+function formatWorkplaneValue(value) {
+  const rounded = Math.round(value * 10) / 10;
+  return Math.abs(rounded) <= 1e-9 ? "0" : String(rounded);
+}
+
+function updateWorkplaneStatus() {
+  const atWorldOrigin = Math.abs(state.draftOrigin.x) <= 1e-9 && Math.abs(state.draftOrigin.y) <= 1e-9;
+  const atWorldAngle = Math.abs(state.draftAngle) <= 1e-9;
+  const planeLabel = atWorldOrigin && atWorldAngle ? "world" : "custom";
+  const angleDeg = (state.draftAngle * 180) / Math.PI;
+  workplaneStatus.textContent = `Plane: ${planeLabel} | Rot: ${formatWorkplaneValue(angleDeg)}deg | Origin: ${formatWorkplaneValue(state.draftOrigin.x)}, ${formatWorkplaneValue(state.draftOrigin.y)}`;
+}
+
 function updateCursor() {
-  if (state.panning || state.spacePressed) {
+  if (state.draggingDraftOrigin) {
+    canvas.style.cursor = "grabbing";
+    return;
+  }
+
+  if (state.panning) {
     canvas.style.cursor = "grab";
+    return;
+  }
+
+  if (state.spacePressed) {
+    canvas.style.cursor = "move";
     return;
   }
 
@@ -393,6 +422,24 @@ function normalizeAngle(angle) {
   return nextAngle;
 }
 
+function worldToDraftWithPlane(point, origin, angle) {
+  return rotatePoint(
+    {
+      x: point.x - origin.x,
+      y: point.y - origin.y,
+    },
+    -angle
+  );
+}
+
+function draftToWorldWithPlane(point, origin, angle) {
+  const rotated = rotatePoint(point, angle);
+  return {
+    x: rotated.x + origin.x,
+    y: rotated.y + origin.y,
+  };
+}
+
 function transformGeometry(geometry, transformer) {
   return geometry.map((polygon) =>
     polygon.map((ring) =>
@@ -477,11 +524,11 @@ function differenceGeometry(subjectGeometry, clipGeometry) {
 }
 
 function worldToDraft(point) {
-  return rotatePoint(point, -state.draftAngle);
+  return worldToDraftWithPlane(point, state.draftOrigin, state.draftAngle);
 }
 
 function draftToWorld(point) {
-  return rotatePoint(point, state.draftAngle);
+  return draftToWorldWithPlane(point, state.draftOrigin, state.draftAngle);
 }
 
 function worldGeometryToDraft(geometry) {
@@ -1067,6 +1114,29 @@ function applyWorldCameraTransform(targetCtx) {
   targetCtx.translate(state.camera.x, state.camera.y);
   targetCtx.scale(state.camera.zoom, state.camera.zoom);
   targetCtx.rotate(-state.draftAngle);
+  targetCtx.translate(-state.draftOrigin.x, -state.draftOrigin.y);
+}
+
+function refreshPointerDerivedState() {
+  if (!state.pointerInCanvas || state.dragging || state.draggingDraftOrigin) return;
+
+  const rawDraft = screenToDraft(state.pointerScreen);
+  state.draftCurrent = state.tool === "draw" ? getDraftInputPoint(rawDraft, state.shapeType, state.shiftPressed, state.pointerScreen) : rawDraft;
+  state.current = draftToWorld(state.draftCurrent);
+}
+
+function updateDraftOriginFromDrag(screenPoint) {
+  const deltaDraft = {
+    x: (screenPoint.x - state.draftOriginDragStartScreen.x) / state.camera.zoom,
+    y: (screenPoint.y - state.draftOriginDragStartScreen.y) / state.camera.zoom,
+  };
+  const deltaWorld = rotatePoint(deltaDraft, state.draftOriginDragAngle);
+
+  state.draftOrigin = {
+    x: state.draftOriginDragStartOrigin.x - deltaWorld.x,
+    y: state.draftOriginDragStartOrigin.y - deltaWorld.y,
+  };
+  updateWorkplaneStatus();
 }
 
 function zoomAtScreenPoint(nextZoom, screenPoint) {
@@ -1084,6 +1154,13 @@ function zoomAtScreenPoint(nextZoom, screenPoint) {
 
 function rotateDraftAngle(deltaAngle) {
   state.draftAngle = normalizeAngle(state.draftAngle + deltaAngle);
+  if (state.draggingDraftOrigin) {
+    state.draftOriginDragStartScreen = { x: state.pointerScreen.x, y: state.pointerScreen.y };
+    state.draftOriginDragStartOrigin = { x: state.draftOrigin.x, y: state.draftOrigin.y };
+    state.draftOriginDragAngle = state.draftAngle;
+  }
+  refreshPointerDerivedState();
+  updateWorkplaneStatus();
   render();
 }
 
@@ -1263,7 +1340,7 @@ function drawGrid() {
 }
 
 function drawSnapPreview() {
-  if (!state.pointerInCanvas || state.panning || state.spacePressed) return;
+  if (!state.pointerInCanvas || state.panning || state.draggingDraftOrigin || state.spacePressed) return;
   if (state.tool !== "draw") return;
 
   const activeLayer = getActiveLayer();
@@ -1353,7 +1430,20 @@ canvas.addEventListener("pointerdown", (e) => {
   state.pointerInCanvas = true;
   state.current = world;
   state.draftCurrent = draft;
-  const wantsPan = e.button === 1 || state.spacePressed || (e.button === 2 && state.tool !== "draw");
+
+  if (state.spacePressed) {
+    if (e.button === 1) {
+      state.draggingDraftOrigin = true;
+      state.draftOriginDragStartScreen = { x: screen.x, y: screen.y };
+      state.draftOriginDragStartOrigin = { x: state.draftOrigin.x, y: state.draftOrigin.y };
+      state.draftOriginDragAngle = state.draftAngle;
+      updateCursor();
+      canvas.setPointerCapture(e.pointerId);
+    }
+    return;
+  }
+
+  const wantsPan = e.button === 1 || (e.button === 2 && state.tool !== "draw");
 
   if (wantsPan) {
     state.panning = true;
@@ -1428,6 +1518,13 @@ canvas.addEventListener("pointermove", (e) => {
     return;
   }
 
+  if (state.draggingDraftOrigin) {
+    updateDraftOriginFromDrag(screen);
+    state.current = draftToWorld(state.draftCurrent);
+    render();
+    return;
+  }
+
   if (!state.dragging) {
     render();
     return;
@@ -1460,6 +1557,14 @@ canvas.addEventListener("pointermove", (e) => {
 });
 
 function finishDrag() {
+  if (state.draggingDraftOrigin) {
+    state.draggingDraftOrigin = false;
+    state.current = draftToWorld(state.draftCurrent);
+    updateCursor();
+    render();
+    return;
+  }
+
   if (state.panning) {
     state.panning = false;
     updateCursor();
@@ -1663,6 +1768,7 @@ window.addEventListener("keyup", (e) => {
 window.addEventListener("resize", resizeCanvas);
 
 updateZoomLabel();
+updateWorkplaneStatus();
 updateCursor();
 renderLayersPanel();
 syncDrawSizeInput();

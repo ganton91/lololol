@@ -50,8 +50,10 @@
         left: 16px;
         z-index: 10;
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: 8px;
+        max-width: calc(100vw - 32px);
         padding: 10px;
         border: 1px solid var(--line);
         border-radius: 12px;
@@ -106,11 +108,18 @@
         color: #0c4a6e;
       }
 
+      .workplane-status {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
       .hint {
         position: absolute;
         bottom: 14px;
         left: 16px;
         z-index: 9;
+        max-width: calc(100vw - 32px);
         font-size: 12px;
         color: var(--muted);
         background: rgba(255, 255, 255, 0.8);
@@ -268,14 +277,14 @@
           title="Tool size"
           aria-label="Tool size"
         />
-
         <button id="zoom-out" class="tool-btn" type="button" aria-label="Zoom out">-</button>
         <button id="zoom-in" class="tool-btn" type="button" aria-label="Zoom in">+</button>
         <span id="zoom-level" style="font-size: 12px; color: #334155; min-width: 52px">100%</span>
+        <span id="workplane-status" class="workplane-status">Plane: world | Rot: 0deg | Origin: 0, 0</span>
       </div>
 
       <div class="hint">
-        Drag to draw. Right click in Draw subtracts with the current shape. Select moves merged shapes. Stroke Rect width is set in whole grid cells, snaps differently for odd and even widths, and uses <b>Shift</b> for sticky draft-axis lock while drawing. Square Brush size is set in whole grid cells, shows a centered brush preview, snaps by center parity, and uses <b>Shift</b> for sticky draft-axis lock from the current pointer anchor while brushing. <b>Wheel</b> zoom. <b>Space + Wheel</b> rotates the drafting angle around 0,0.
+        Drag to draw. Right click in Draw subtracts with the current shape. Select moves merged shapes. Middle mouse pans. Stroke Rect width is set in whole grid cells, snaps differently for odd and even widths, and uses <b>Shift</b> for sticky draft-axis lock while drawing. Square Brush size is set in whole grid cells, shows a centered brush preview, snaps by center parity, and uses <b>Shift</b> for sticky draft-axis lock from the current pointer anchor while brushing. <b>Wheel</b> zoom. <b>Space + Wheel</b> rotates the drafting angle. <b>Space + Middle Drag</b> moves the draft origin while the canvas stays fixed.
       </div>
 
       <aside class="layers-panel">

@@ -133,4 +133,5 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- None.
+- Refine the `Select` behavior.
+- Progress: task opened; current implementation review is the next step before proposing changes.

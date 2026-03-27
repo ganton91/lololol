@@ -51,6 +51,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - The active workplane origin is visualized with dedicated draft X=0 and Y=0 axis lines.
 - The visible grid stays screen-aligned even when the drafting angle changes.
 - World content is rendered through a drafting/workplane transform with both `origin` and `angle`, so stored geometry stays in world coordinates while the user can draw against a translated and rotated drafting frame.
+- Wheel-based draft-plane rotation is now canonical instead of accumulated: the workplane keeps a normalized base angle plus an integer wheel-step offset, so rotating away and back returns to the same exact plane instead of a float-near-zero residual angle.
 - There is no raster-mask union pipeline anymore.
 - Each visible layer is drawn from its current merged vector shapes.
 - Selection highlighting is drawn by tracing the selected shape geometry.
@@ -75,7 +76,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Mouse wheel`: zooms at cursor position.
 - `Middle mouse` or `right mouse` outside draw mode: pans the camera.
 - Holding `Space` enters a drafting-transforms mode without switching away from `Draw` or `Select`.
-- `Space + mouse wheel`: rotates the drafting angle around the current workplane origin.
+- `Space + mouse wheel`: rotates the drafting angle around the current workplane origin in exact `1deg` step positions.
 - `Space + middle drag`: moves the current workplane origin while the canvas stays fixed and the world shifts underneath.
 - `Space + left drag`: aligns the workplane from a start point toward a dragged direction, with magnetic snap to nearby geometry plus free placement anywhere in space.
 
@@ -96,6 +97,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The app maintains a workplane with separate `origin` and `angle`, independent from stored geometry.
 - Existing geometry is displayed relative to the current workplane, while the visible grid remains horizontal and vertical on screen.
 - New drawing input is created in drafting coordinates relative to the current workplane and converted back into world geometry before boolean union with the layer.
+- Wheel-based workplane rotation no longer accumulates float angle drift: returning by the same number of wheel steps restores the exact same derived plane angle, which prevents post-rotate seams caused by near-zero residual rotation.
 - While `Space` is held, the normal draw/select interaction is temporarily suspended and the pointer is used for drafting transformations instead.
 - `Space + Left Drag` workplane alignment can start and end anywhere in space, but nearby geometry acts like a magnetic snap target.
 - During `Space + Left Drag`, corners can capture from slightly farther away than edges, and corner snaps use a different preview marker from edge snaps.
@@ -129,6 +131,4 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Fix workplane rotation drift that creates post-rotate drawing seams
-- Status: In progress
-- Progress: The immediate focus has changed from measurement-system discussion to a workplane rotation correctness fix. Investigation confirmed that rotating the draft plane away from `0deg` and then back to `0deg` could leave a tiny residual angle because wheel rotation was accumulating floating-point radians instead of returning to a canonical exact step state. The current in-progress fix has now been implemented around canonical rotation state: the workplane stores a normalized base angle plus an integer wheel-step offset, the effective angle is derived from those two values, arbitrary align results become the new base angle, and wheel rotation now advances in exact `1deg` step positions instead of the previous `5deg` float-accumulation model. This should allow rotate-away / rotate-back flows to return to the same exact plane instead of a float-near-zero residual angle, but it still needs user verification in the app.
+- None.

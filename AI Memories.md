@@ -79,6 +79,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Space + mouse wheel`: rotates the drafting angle around the current workplane origin in exact `1deg` step positions.
 - `Space + middle drag`: moves the current workplane origin while the canvas stays fixed and the world shifts underneath.
 - `Space + left drag`: aligns the workplane from a start point toward a dragged direction, with magnetic snap to nearby geometry plus free placement anywhere in space.
+- `Space + R`: resets the workplane back to the world plane by restoring origin `0,0` and rotation `0deg`.
 
 ### Current Behavioral Rules
 
@@ -102,6 +103,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Space + Left Drag` workplane alignment can start and end anywhere in space, but nearby geometry acts like a magnetic snap target.
 - During `Space + Left Drag`, corners can capture from slightly farther away than edges, and corner snaps use a different preview marker from edge snaps.
 - During `Space + Left Drag`, if there is no nearby geometry, the preview and resulting alignment still use the free pointer position instead of forcing a snap.
+- Pressing `R` while `Space` is held resets the current workplane to the world-aligned plane, cancels any in-progress draft transform drag, and leaves drafting-transforms mode active as long as `Space` remains held.
 - Releasing `Space` during a pending workplane alignment cancels that alignment and returns control to the underlying tool.
 - The toolbar shows a live workplane status readout with the current plane mode, rotation in degrees, and origin coordinates.
 - Right click in `Draw` uses the current shape mode as subtraction geometry and applies boolean difference against the active layer's merged vector geometry.

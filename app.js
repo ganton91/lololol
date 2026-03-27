@@ -464,6 +464,17 @@ function setDraftAngleBase(angle) {
   state.draftAngleStepOffset = 0;
 }
 
+function resetWorkplaneToWorld() {
+  cancelDraftAlignDrag();
+  state.draggingDraftOrigin = false;
+  state.draftOrigin = { x: 0, y: 0 };
+  setDraftAngleBase(0);
+  refreshPointerDerivedState();
+  updateWorkplaneStatus();
+  updateCursor();
+  render();
+}
+
 function worldToDraftWithPlane(point, origin, angle) {
   return rotatePoint(
     {
@@ -2017,6 +2028,11 @@ window.addEventListener("keydown", (e) => {
       }
       render();
     }
+  }
+  if (state.spacePressed && e.key.toLowerCase() === "r") {
+    e.preventDefault();
+    resetWorkplaneToWorld();
+    return;
   }
   if (e.key.toLowerCase() === "s") setTool("select");
   if (e.key.toLowerCase() === "d") setTool("draw");

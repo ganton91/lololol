@@ -32,6 +32,7 @@ const state = {
   dragging: false,
   panning: false,
   draggingDraftOrigin: false,
+  draggingDraftAlign: false,
   pointerInCanvas: false,
   pointerScreen: { x: 0, y: 0 },
   spacePressed: false,
@@ -45,6 +46,8 @@ const state = {
   draftOriginDragStartScreen: { x: 0, y: 0 },
   draftOriginDragStartOrigin: { x: 0, y: 0 },
   draftOriginDragAngle: 0,
+  draftAlignStartSnap: null,
+  draftAlignCurrentSnap: null,
   drawSize: 1,
   stripCellWidth: 1,
   draftShape: null,
@@ -82,6 +85,9 @@ const gridCellSize = 24;
 const gridMidCellInterval = 10;
 const gridMajorCellInterval = 20;
 const snapPreviewSize = 8;
+const draftTransformSnapRadiusPx = 14;
+const draftTransformCornerSnapRadiusPx = 20;
+const draftTransformCornerPriorityRadiusPx = 16;
 const layerPalette = ["#93c5fd", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#fdba74", "#67e8f9"];
 
 function updateZoomLabel() {
@@ -102,6 +108,11 @@ function updateWorkplaneStatus() {
 }
 
 function updateCursor() {
+  if (state.draggingDraftAlign) {
+    canvas.style.cursor = "crosshair";
+    return;
+  }
+
   if (state.draggingDraftOrigin) {
     canvas.style.cursor = "grabbing";
     return;
@@ -113,7 +124,7 @@ function updateCursor() {
   }
 
   if (state.spacePressed) {
-    canvas.style.cursor = "move";
+    canvas.style.cursor = "crosshair";
     return;
   }
 
@@ -399,6 +410,14 @@ function getDraftInputPoint(point, shapeType = state.shapeType, shiftKey = false
   if (isStripShapeType(shapeType)) return getStripInputPoint(point, shiftKey, screenPoint);
   if (isSquareBrushShapeType(shapeType)) return getSquareBrushInputPoint(point, shiftKey, screenPoint);
   return { x: point.x, y: point.y };
+}
+
+function resolvePointerDraftPoint(rawDraftPoint, shiftKey = false, screenPoint = state.pointerScreen) {
+  if (state.spacePressed) {
+    return { x: rawDraftPoint.x, y: rawDraftPoint.y };
+  }
+
+  return state.tool === "draw" ? getDraftInputPoint(rawDraftPoint, state.shapeType, shiftKey, screenPoint) : rawDraftPoint;
 }
 
 function deepCopyGeometry(geometry) {
@@ -887,6 +906,86 @@ function pointSegmentDistance(px, py, a, b) {
   return Math.hypot(px - qx, py - qy);
 }
 
+function projectPointToSegment(point, a, b) {
+  const vx = b[0] - a[0];
+  const vy = b[1] - a[1];
+  const lenSq = vx * vx + vy * vy;
+
+  if (!lenSq) {
+    return { x: a[0], y: a[1] };
+  }
+
+  const t = Math.max(0, Math.min(1, ((point.x - a[0]) * vx + (point.y - a[1]) * vy) / lenSq));
+  return {
+    x: a[0] + t * vx,
+    y: a[1] + t * vy,
+  };
+}
+
+function cloneSnapTarget(target) {
+  if (!target) return null;
+  return {
+    kind: target.kind,
+    world: cloneDraftPoint(target.world),
+    distance: target.distance,
+  };
+}
+
+function createFreeDraftTransformTarget(worldPoint) {
+  return {
+    kind: "free",
+    world: cloneDraftPoint(worldPoint),
+    distance: Infinity,
+  };
+}
+
+function getDraftTransformSnapTarget(worldPoint, maxDistance = draftTransformSnapRadiusPx / state.camera.zoom) {
+  if (!worldPoint) return null;
+
+  const cornerMaxDistance = draftTransformCornerSnapRadiusPx / state.camera.zoom;
+  const cornerPriorityDistance = draftTransformCornerPriorityRadiusPx / state.camera.zoom;
+  let bestCorner = null;
+  let bestEdge = null;
+
+  for (let shapeIndex = state.shapes.length - 1; shapeIndex >= 0; shapeIndex -= 1) {
+    const shape = state.shapes[shapeIndex];
+    const layer = getLayerById(shape.layerId);
+    if (!layer || !layer.visible) continue;
+    if (!boundsTouch(shape.bounds, { x: worldPoint.x, y: worldPoint.y, w: 0, h: 0 }, maxDistance)) continue;
+
+    forEachRing(shape.geometry, (ring) => {
+      for (let i = 0; i < ring.length; i += 1) {
+        const corner = ring[i];
+        const cornerDistance = Math.hypot(worldPoint.x - corner[0], worldPoint.y - corner[1]);
+        if (cornerDistance <= cornerMaxDistance && (!bestCorner || cornerDistance < bestCorner.distance)) {
+          bestCorner = {
+            kind: "corner",
+            world: { x: corner[0], y: corner[1] },
+            distance: cornerDistance,
+          };
+        }
+
+        const next = ring[(i + 1) % ring.length];
+        const projection = projectPointToSegment(worldPoint, corner, next);
+        const edgeDistance = Math.hypot(worldPoint.x - projection.x, worldPoint.y - projection.y);
+
+        if (edgeDistance <= maxDistance && (!bestEdge || edgeDistance < bestEdge.distance)) {
+          bestEdge = {
+            kind: "edge",
+            world: projection,
+            distance: edgeDistance,
+          };
+        }
+      }
+    });
+  }
+
+  if (bestCorner && bestCorner.distance <= cornerPriorityDistance) return bestCorner;
+  if (bestEdge) return bestEdge;
+  if (bestCorner) return bestCorner;
+  return createFreeDraftTransformTarget(worldPoint);
+}
+
 function pointInRing(px, py, ring) {
   let inside = false;
 
@@ -1118,10 +1217,10 @@ function applyWorldCameraTransform(targetCtx) {
 }
 
 function refreshPointerDerivedState() {
-  if (!state.pointerInCanvas || state.dragging || state.draggingDraftOrigin) return;
+  if (!state.pointerInCanvas || state.dragging || state.draggingDraftOrigin || state.draggingDraftAlign) return;
 
   const rawDraft = screenToDraft(state.pointerScreen);
-  state.draftCurrent = state.tool === "draw" ? getDraftInputPoint(rawDraft, state.shapeType, state.shiftPressed, state.pointerScreen) : rawDraft;
+  state.draftCurrent = resolvePointerDraftPoint(rawDraft, state.shiftPressed, state.pointerScreen);
   state.current = draftToWorld(state.draftCurrent);
 }
 
@@ -1137,6 +1236,24 @@ function updateDraftOriginFromDrag(screenPoint) {
     y: state.draftOriginDragStartOrigin.y - deltaWorld.y,
   };
   updateWorkplaneStatus();
+}
+
+function cancelDraftAlignDrag() {
+  state.draggingDraftAlign = false;
+  state.draftAlignStartSnap = null;
+  state.draftAlignCurrentSnap = null;
+}
+
+function applyDraftAlignFromDrag() {
+  const startSnap = state.draftAlignStartSnap;
+  const endSnap = state.draftAlignCurrentSnap;
+  if (!startSnap || !endSnap) return false;
+  if (distanceBetweenPoints(startSnap.world, endSnap.world) <= 1e-6) return false;
+
+  state.draftOrigin = cloneDraftPoint(startSnap.world);
+  state.draftAngle = normalizeAngle(Math.atan2(endSnap.world.y - startSnap.world.y, endSnap.world.x - startSnap.world.x));
+  updateWorkplaneStatus();
+  return true;
 }
 
 function zoomAtScreenPoint(nextZoom, screenPoint) {
@@ -1339,6 +1456,99 @@ function drawGrid() {
   ctx.restore();
 }
 
+function drawDraftTransformSnapMarker(target, size = snapPreviewSize + 2) {
+  if (!target) return;
+
+  const screenPoint = worldToScreen(target.world);
+  const fillStyle = target.kind === "corner" ? "#14b8a6" : target.kind === "edge" ? previewStrokeColor : "#f59e0b";
+
+  ctx.save();
+  ctx.translate(screenPoint.x, screenPoint.y);
+  ctx.fillStyle = fillStyle;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.5;
+
+  if (target.kind === "corner") {
+    ctx.beginPath();
+    ctx.moveTo(0, -size / 2);
+    ctx.lineTo(size / 2, 0);
+    ctx.lineTo(0, size / 2);
+    ctx.lineTo(-size / 2, 0);
+    ctx.closePath();
+  } else if (target.kind === "edge") {
+    ctx.beginPath();
+    ctx.rect(-size / 2, -size / 2, size, size);
+  } else {
+    ctx.beginPath();
+    ctx.arc(0, 0, size / 2, 0, Math.PI * 2);
+  }
+
+  ctx.fill();
+  ctx.stroke();
+
+  if (target.kind === "free") {
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.moveTo(-size / 3, 0);
+    ctx.lineTo(size / 3, 0);
+    ctx.moveTo(0, -size / 3);
+    ctx.lineTo(0, size / 3);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawDraftAlignStartMarker(point) {
+  if (!point) return;
+
+  const screenPoint = worldToScreen(point);
+  ctx.save();
+  ctx.fillStyle = "rgba(245, 158, 11, 0.18)";
+  ctx.strokeStyle = "#f59e0b";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(screenPoint.x, screenPoint.y, snapPreviewSize, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawDraftTransformPreview() {
+  if (!state.spacePressed || !state.pointerInCanvas || state.panning || state.draggingDraftOrigin) return;
+
+  const hoverSnap = state.draggingDraftAlign ? state.draftAlignCurrentSnap : getDraftTransformSnapTarget(state.current);
+  const startSnap = state.draggingDraftAlign ? state.draftAlignStartSnap : null;
+
+  if (!hoverSnap && !startSnap) return;
+
+  ctx.save();
+
+  if (startSnap) {
+    drawDraftAlignStartMarker(startSnap.world);
+
+    if (hoverSnap && distanceBetweenPoints(startSnap.world, hoverSnap.world) > 1e-6) {
+      const startScreen = worldToScreen(startSnap.world);
+      const endScreen = worldToScreen(hoverSnap.world);
+      ctx.strokeStyle = "rgba(2, 132, 199, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath();
+      ctx.moveTo(startScreen.x, startScreen.y);
+      ctx.lineTo(endScreen.x, endScreen.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  if (hoverSnap) {
+    drawDraftTransformSnapMarker(hoverSnap, snapPreviewSize + 2);
+  }
+
+  ctx.restore();
+}
+
 function drawSnapPreview() {
   if (!state.pointerInCanvas || state.panning || state.draggingDraftOrigin || state.spacePressed) return;
   if (state.tool !== "draw") return;
@@ -1418,6 +1628,7 @@ function render() {
   }
 
   renderSelectOverlay();
+  drawDraftTransformPreview();
   drawSnapPreview();
 }
 
@@ -1425,14 +1636,30 @@ canvas.addEventListener("pointerdown", (e) => {
   const screen = getPos(e);
   state.pointerScreen = { x: screen.x, y: screen.y };
   const rawDraft = screenToDraft(screen);
-  const draft = state.tool === "draw" ? getDraftInputPoint(rawDraft, state.shapeType, e.shiftKey, screen) : rawDraft;
+  const draft = resolvePointerDraftPoint(rawDraft, e.shiftKey, screen);
   const world = draftToWorld(draft);
   state.pointerInCanvas = true;
   state.current = world;
   state.draftCurrent = draft;
 
   if (state.spacePressed) {
-    if (e.button === 1) {
+    if (e.button === 0) {
+      const startSnap = getDraftTransformSnapTarget(world);
+      if (!startSnap) {
+        render();
+        return;
+      }
+
+      state.draggingDraftAlign = true;
+      state.draftAlignStartSnap = cloneSnapTarget(startSnap);
+      state.draftAlignCurrentSnap = cloneSnapTarget(startSnap);
+      updateCursor();
+      canvas.setPointerCapture(e.pointerId);
+      render();
+      return;
+    }
+
+    if (e.button === 1 && !state.draggingDraftAlign) {
       state.draggingDraftOrigin = true;
       state.draftOriginDragStartScreen = { x: screen.x, y: screen.y };
       state.draftOriginDragStartOrigin = { x: state.draftOrigin.x, y: state.draftOrigin.y };
@@ -1508,12 +1735,18 @@ canvas.addEventListener("pointermove", (e) => {
   state.pointerScreen = { x: screen.x, y: screen.y };
   const rawDraft = screenToDraft(screen);
   state.pointerInCanvas = true;
-  state.draftCurrent = state.tool === "draw" ? getDraftInputPoint(rawDraft, state.shapeType, e.shiftKey, screen) : rawDraft;
+  state.draftCurrent = resolvePointerDraftPoint(rawDraft, e.shiftKey, screen);
   state.current = draftToWorld(state.draftCurrent);
 
   if (state.panning) {
     state.camera.x = state.panOrigin.x + (screen.x - state.panStart.x);
     state.camera.y = state.panOrigin.y + (screen.y - state.panStart.y);
+    render();
+    return;
+  }
+
+  if (state.draggingDraftAlign) {
+    state.draftAlignCurrentSnap = cloneSnapTarget(getDraftTransformSnapTarget(state.current));
     render();
     return;
   }
@@ -1556,7 +1789,30 @@ canvas.addEventListener("pointermove", (e) => {
   render();
 });
 
-function finishDrag() {
+function finishDrag(e) {
+  if (e && e.type !== "pointerleave") {
+    const screen = getPos(e);
+    state.pointerScreen = { x: screen.x, y: screen.y };
+    const rawDraft = screenToDraft(screen);
+    state.draftCurrent = resolvePointerDraftPoint(rawDraft, e.shiftKey, screen);
+    state.current = draftToWorld(state.draftCurrent);
+  }
+
+  if (state.draggingDraftAlign) {
+    const canApply = !e || e.type !== "pointerleave";
+    let didApply = false;
+    if (canApply) {
+      state.draftAlignCurrentSnap = cloneSnapTarget(getDraftTransformSnapTarget(state.current));
+      didApply = applyDraftAlignFromDrag();
+    }
+
+    cancelDraftAlignDrag();
+    if (didApply) refreshPointerDerivedState();
+    updateCursor();
+    render();
+    return;
+  }
+
   if (state.draggingDraftOrigin) {
     state.draggingDraftOrigin = false;
     state.current = draftToWorld(state.draftCurrent);
@@ -1624,6 +1880,7 @@ canvas.addEventListener(
   (e) => {
     e.preventDefault();
     if (state.spacePressed) {
+      if (state.draggingDraftAlign) return;
       rotateDraftAngle(e.deltaY < 0 ? draftRotationStep : -draftRotationStep);
       return;
     }
@@ -1723,7 +1980,7 @@ layerDownBtn.addEventListener("click", () => moveActiveLayer(-1));
 window.addEventListener("keydown", (e) => {
   if (e.key === "Shift") {
     state.shiftPressed = true;
-    if (state.pointerInCanvas && state.tool === "draw" && (isSquareBrushShapeType() || isStripShapeType())) {
+    if (!state.spacePressed && state.pointerInCanvas && state.tool === "draw" && (isSquareBrushShapeType() || isStripShapeType())) {
       if (state.dragging && isSquareBrushShapeType()) {
         resetSquareBrushAxisLockAnchor(state.pointerScreen);
       }
@@ -1741,7 +1998,9 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Space") {
     e.preventDefault();
     state.spacePressed = true;
+    refreshPointerDerivedState();
     updateCursor();
+    render();
   }
 });
 
@@ -1749,7 +2008,7 @@ window.addEventListener("keyup", (e) => {
   if (e.key === "Shift") {
     state.shiftPressed = false;
     clearSquareBrushAxisLock();
-    if (state.pointerInCanvas && state.tool === "draw" && (isSquareBrushShapeType() || isStripShapeType())) {
+    if (!state.spacePressed && state.pointerInCanvas && state.tool === "draw" && (isSquareBrushShapeType() || isStripShapeType())) {
       if (state.dragging && isStripShapeType()) {
         state.stripLockedAxis = null;
         state.draftCurrent = getStripInputPoint(screenToDraft(state.pointerScreen), false, state.pointerScreen);
@@ -1760,8 +2019,12 @@ window.addEventListener("keyup", (e) => {
     }
   }
   if (e.code === "Space") {
+    cancelDraftAlignDrag();
+    state.draggingDraftOrigin = false;
     state.spacePressed = false;
+    refreshPointerDerivedState();
     updateCursor();
+    render();
   }
 });
 

@@ -116,6 +116,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - If a task is still in progress, track it only in the "Current Task" section until the user has tested it and confirmed it is complete.
 - Before user confirmation, update only the "Progress" inside "Current Task" rather than moving unfinished work into the permanent sections.
 - Once the user confirms the task is complete, move the lasting result into the permanent sections above and clear the task section.
+- The `Reference Only` folder is not part of the default startup reading context for new chats. Only inspect files in `Reference Only` when the user explicitly asks to look at a specific reference example or behavior from that folder.
 
 ## Current Task
 

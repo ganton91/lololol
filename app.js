@@ -38,10 +38,11 @@ const state = {
   draftCurrent: { x: 0, y: 0 },
   panStart: { x: 0, y: 0 },
   panOrigin: { x: 0, y: 0 },
-  drawSize: 24,
+  drawSize: 1,
   stripCellWidth: 1,
   draftShape: null,
   brushLastPoint: null,
+  brushPoints: [],
   drawOperation: "add",
   draftAngle: 0,
   camera: { x: 0, y: 0, zoom: 1 },
@@ -60,7 +61,6 @@ const previewStrokeWidth = 1.5;
 const minZoom = 0.09;
 const maxZoom = 2;
 const ellipseSegments = 96;
-const squareBrushSpacingRatio = 0.35;
 const draftRotationStep = Math.PI / 36;
 const gridCellSize = 24;
 const gridMidCellInterval = 10;
@@ -118,12 +118,12 @@ function syncDrawSizeInput() {
 
   if (isSquareBrushShapeType()) {
     drawSizeInput.disabled = false;
-    drawSizeInput.min = "2";
-    drawSizeInput.max = "300";
+    drawSizeInput.min = "1";
+    drawSizeInput.max = "50";
     drawSizeInput.step = "1";
-    drawSizeInput.value = String(Math.round(state.drawSize));
-    drawSizeInput.title = "Square Brush size";
-    drawSizeInput.setAttribute("aria-label", "Square Brush size");
+    drawSizeInput.value = String(getSquareBrushCellWidth());
+    drawSizeInput.title = "Square Brush size in grid cells";
+    drawSizeInput.setAttribute("aria-label", "Square Brush size in grid cells");
     return;
   }
 
@@ -179,6 +179,26 @@ function getStripSnapOffset(cellWidth = state.stripCellWidth) {
   return getStripCellWidth(cellWidth) % 2 === 0 ? 0 : gridCellSize / 2;
 }
 
+function getSquareBrushCellWidth(cellWidth = state.drawSize) {
+  return Math.max(1, Math.min(50, Math.round(cellWidth)));
+}
+
+function getSquareBrushSizeInDraftUnits(cellWidth = state.drawSize) {
+  return getSquareBrushCellWidth(cellWidth) * gridCellSize;
+}
+
+function getSquareBrushSnapOffset(cellWidth = state.drawSize) {
+  return getSquareBrushCellWidth(cellWidth) % 2 === 0 ? 0 : gridCellSize / 2;
+}
+
+function snapDraftPointToSquareBrushCenter(point, cellWidth = state.drawSize) {
+  const offset = getSquareBrushSnapOffset(cellWidth);
+  return {
+    x: snapValueToGridWithOffset(point.x, offset),
+    y: snapValueToGridWithOffset(point.y, offset),
+  };
+}
+
 function getStripSnapCandidates(point, cellWidth = state.stripCellWidth) {
   const offset = getStripSnapOffset(cellWidth);
   if (!offset) {
@@ -230,6 +250,7 @@ function getSnappedStripSegment(a, b, cellWidth = state.stripCellWidth) {
 
 function getDraftInputPoint(point, shapeType = state.shapeType) {
   if (isBoxSnapShapeType(shapeType)) return snapDraftPointToGrid(point);
+  if (isSquareBrushShapeType(shapeType)) return snapDraftPointToSquareBrushCenter(point);
   return { x: point.x, y: point.y };
 }
 
@@ -504,7 +525,7 @@ function isSquareBrushShapeType(shapeType = state.shapeType) {
 }
 
 function createSquareBrushDabGeometry(point, size) {
-  const side = Math.max(2, size);
+  const side = getSquareBrushSizeInDraftUnits(size);
   const half = side / 2;
   return createRectGeometry({
     x: point.x - half,
@@ -512,6 +533,89 @@ function createSquareBrushDabGeometry(point, size) {
     w: side,
     h: side,
   });
+}
+
+function getSquareBrushCornerPoints(point, size) {
+  const side = getSquareBrushSizeInDraftUnits(size);
+  const half = side / 2;
+  return [
+    { x: point.x - half, y: point.y - half },
+    { x: point.x + half, y: point.y - half },
+    { x: point.x + half, y: point.y + half },
+    { x: point.x - half, y: point.y + half },
+  ];
+}
+
+function crossProduct(origin, a, b) {
+  return (a.x - origin.x) * (b.y - origin.y) - (a.y - origin.y) * (b.x - origin.x);
+}
+
+function createConvexHullGeometry(points) {
+  if (points.length < 3) return [];
+
+  const sorted = [...points].sort((a, b) => {
+    if (a.x !== b.x) return a.x - b.x;
+    return a.y - b.y;
+  });
+
+  const unique = [];
+  for (const point of sorted) {
+    const prev = unique[unique.length - 1];
+    if (prev && Math.abs(prev.x - point.x) <= 1e-9 && Math.abs(prev.y - point.y) <= 1e-9) {
+      continue;
+    }
+    unique.push(point);
+  }
+
+  if (unique.length < 3) return [];
+
+  const lower = [];
+  for (const point of unique) {
+    while (lower.length >= 2 && crossProduct(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) {
+      lower.pop();
+    }
+    lower.push(point);
+  }
+
+  const upper = [];
+  for (let i = unique.length - 1; i >= 0; i -= 1) {
+    const point = unique[i];
+    while (upper.length >= 2 && crossProduct(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) {
+      upper.pop();
+    }
+    upper.push(point);
+  }
+
+  lower.pop();
+  upper.pop();
+  const hull = [...lower, ...upper];
+  if (hull.length < 3) return [];
+
+  return [[hull.map((point) => [point.x, point.y])]];
+}
+
+function createSquareBrushSweepSegmentGeometry(a, b, size) {
+  if (distanceBetweenPoints(a, b) <= 1e-6) {
+    return createSquareBrushDabGeometry(a, size);
+  }
+
+  return createConvexHullGeometry([...getSquareBrushCornerPoints(a, size), ...getSquareBrushCornerPoints(b, size)]);
+}
+
+function buildSquareBrushStrokeDraftGeometry(points, size) {
+  if (!points.length) return [];
+  if (points.length === 1) return createSquareBrushDabGeometry(points[0], size);
+
+  const sweeps = [];
+  for (let i = 1; i < points.length; i += 1) {
+    const start = points[i - 1];
+    const end = points[i];
+    if (distanceBetweenPoints(start, end) <= 1e-6) continue;
+    sweeps.push(createSquareBrushSweepSegmentGeometry(start, end, size));
+  }
+
+  if (!sweeps.length) return createSquareBrushDabGeometry(points[0], size);
+  return unionGeometryList(sweeps);
 }
 
 function setDraftShapeFromGeometry(geometry) {
@@ -526,44 +630,36 @@ function setDraftShapeFromGeometry(geometry) {
 function resetDrawSession() {
   state.draftShape = null;
   state.brushLastPoint = null;
+  state.brushPoints = [];
+}
+
+function rebuildSquareBrushDraftShape() {
+  const draftGeometry = buildSquareBrushStrokeDraftGeometry(state.brushPoints, state.drawSize);
+  setDraftShapeFromGeometry(draftGeometryToWorld(draftGeometry));
 }
 
 function startSquareBrushStroke(point) {
+  state.brushPoints = [{ x: point.x, y: point.y }];
   state.brushLastPoint = { x: point.x, y: point.y };
-  setDraftShapeFromGeometry(draftGeometryToWorld(createSquareBrushDabGeometry(point, state.drawSize)));
+  rebuildSquareBrushDraftShape();
+}
+
+function appendSquareBrushPathPoints(point) {
+  if (!state.brushLastPoint) {
+    startSquareBrushStroke(point);
+    return false;
+  }
+
+  if (distanceBetweenPoints(point, state.brushLastPoint) <= 1e-6) return false;
+
+  state.brushPoints.push({ x: point.x, y: point.y });
+  state.brushLastPoint = { x: point.x, y: point.y };
+  return true;
 }
 
 function extendSquareBrushStroke(point) {
-  if (!state.brushLastPoint) {
-    startSquareBrushStroke(point);
-    return;
-  }
-
-  const dx = point.x - state.brushLastPoint.x;
-  const dy = point.y - state.brushLastPoint.y;
-  const distance = Math.hypot(dx, dy);
-  const spacing = Math.max(1, state.drawSize * squareBrushSpacingRatio);
-  const dabs = [];
-  const steps = Math.max(1, Math.ceil(distance / spacing));
-
-  for (let i = 1; i <= steps; i += 1) {
-    const t = distance ? i / steps : 1;
-    dabs.push(
-      draftGeometryToWorld(
-        createSquareBrushDabGeometry(
-          {
-            x: state.brushLastPoint.x + dx * t,
-            y: state.brushLastPoint.y + dy * t,
-          },
-          state.drawSize
-        )
-      )
-    );
-  }
-
-  const geometry = unionGeometryList([state.draftShape ? state.draftShape.geometry : [], ...dabs]);
-  state.brushLastPoint = { x: point.x, y: point.y };
-  setDraftShapeFromGeometry(geometry);
+  if (!appendSquareBrushPathPoints(point)) return;
+  rebuildSquareBrushDraftShape();
 }
 
 function makeDraftShape(a, b) {
@@ -1043,13 +1139,42 @@ function drawSnapPreview() {
       state.dragging && state.draftStart
         ? getSnappedStripSegment(state.draftStart, state.draftCurrent).end
         : snapDraftPointToStripCenterline(state.draftCurrent);
+  } else if (isSquareBrushShapeType()) {
+    snapPoint = snapDraftPointToSquareBrushCenter(state.draftCurrent);
   }
 
   if (!snapPoint) return;
 
-  const screenPoint = draftToScreen(snapPoint);
-  const size = snapPreviewSize;
   const isSubtract = state.dragging && state.drawOperation === "subtract";
+  const screenPoint = draftToScreen(snapPoint);
+
+  if (isSquareBrushShapeType()) {
+    const brushSize = getSquareBrushSizeInDraftUnits();
+    const half = brushSize / 2;
+    const topLeft = draftToScreen({ x: snapPoint.x - half, y: snapPoint.y - half });
+    const screenSize = brushSize * state.camera.zoom;
+
+    ctx.save();
+    ctx.fillStyle = isSubtract ? "rgba(239, 68, 68, 0.14)" : "rgba(14, 165, 233, 0.14)";
+    ctx.strokeStyle = isSubtract ? "#dc2626" : previewStrokeColor;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.rect(topLeft.x, topLeft.y, screenSize, screenSize);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = isSubtract ? "#dc2626" : previewStrokeColor;
+    ctx.strokeStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.rect(screenPoint.x - snapPreviewSize / 2, screenPoint.y - snapPreviewSize / 2, snapPreviewSize, snapPreviewSize);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  const size = snapPreviewSize;
 
   ctx.save();
   ctx.fillStyle = isSubtract ? "#dc2626" : previewStrokeColor;
@@ -1288,14 +1413,18 @@ drawSizeInput.addEventListener("input", (e) => {
     state.stripCellWidth = getStripCellWidth(value);
     drawSizeInput.value = String(state.stripCellWidth);
   } else if (isSquareBrushShapeType()) {
-    state.drawSize = Math.max(2, Math.min(300, value));
-    drawSizeInput.value = String(Math.round(state.drawSize));
+    state.drawSize = getSquareBrushCellWidth(value);
+    drawSizeInput.value = String(state.drawSize);
+    state.draftCurrent = snapDraftPointToSquareBrushCenter(state.draftCurrent);
+    state.current = draftToWorld(state.draftCurrent);
   } else {
     return;
   }
 
   if (state.dragging && state.tool === "draw") {
-    if (!isSquareBrushShapeType()) {
+    if (isSquareBrushShapeType()) {
+      rebuildSquareBrushDraftShape();
+    } else {
       state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
     }
   }

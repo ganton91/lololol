@@ -28,7 +28,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 
 - The app is now vector-based.
 - Shapes are stored as polygon or multipolygon geometry, not as primitive compounds.
-- Square brush strokes are built from accumulated square polygon dabs and then stored like any other merged polygon geometry.
+- Square brush strokes are built from unions of exact square-sweep segment hulls in draft space and then stored like any other merged polygon geometry.
 - A shape record currently stores:
   - `id`
   - `layerId`
@@ -70,6 +70,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 ### Tools And Interaction
 
 - `Draw`: creates rectangle, ellipse, strip, or square-brush geometry with left click, and subtracts with the same geometry modes using right click.
+- `Draw` size controls for `Stroke Rect` and `Square Brush` are expressed in whole visible grid cells.
 - `Select`: selects and moves whole merged shapes.
 - `Mouse wheel`: zooms at cursor position.
 - `Space + drag` or middle/right mouse: pans the camera.
@@ -78,7 +79,12 @@ Layer order controls draw order. The active layer receives new geometry when the
 ### Current Behavioral Rules
 
 - New geometry is created on the active layer.
-- `Rectangle` snapping is active on the visible drafting grid: rectangle draw and right-click subtract snap both corners to grid intersections, show a snap preview marker at the cursor, and produce bounds aligned exactly to cell multiples.
+- `Rectangle` and `Ellipse` snapping are active on the visible drafting grid: draw and right-click subtract snap both bounding-box corners to grid intersections, show a snap preview marker at the cursor, and produce bounds aligned exactly to cell multiples.
+- `Stroke Rect` width is expressed in whole grid cells, its generated strip width is always an exact multiple of one cell, and its centerline snapping is parity-aware: odd cell widths snap on half-cell centerline families while even cell widths snap on full grid intersections.
+- `Stroke Rect` can be drawn at arbitrary drafting angles while preserving its cell-multiple width and parity-aware snapping.
+- `Square Brush` size is expressed in whole grid cells and its preview is centered on the snapped pointer position.
+- `Square Brush` snapping is parity-aware: odd cell widths snap the brush center to cell centers, while even cell widths snap the brush center to grid intersections.
+- `Square Brush` records and rebuilds its path from snapped center point to snapped center point, using square-sweep geometry instead of dab-by-dab stamping.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
 - Zoom is currently clamped between a minimum of `0.09` and a maximum of `2`.
 - The app maintains a global drafting angle separate from stored geometry.
@@ -110,6 +116,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Refine `Square Brush` stroke construction so recorded brush paths produce cleaner vector geometry and support the remaining brush-related interaction work.
+- Task: Design and implement `Square Brush` behavior refinements, starting with modifier-key shortcuts and constrained drawing behavior.
 - Status: In progress
-- Progress: Rectangle snapping has been implemented, browser-tested, and confirmed by the user. The first snapping pass for `Stroke Rect` and `Ellipse` is still present in code and still waiting for browser validation before it moves into the permanent sections. Focus has now shifted to `Square Brush`: the previous brush pipeline stamps axis-aligned square dabs along the draft path, which creates staircase edges on diagonal or curved strokes. One intermediate brush attempt that used path-aligned strip segments was rejected because it no longer behaved like a true square brush. The brush geometry is now back on a square-sweep path, and an initial snapping pass is now in progress for `Square Brush`: its size control is expressed in whole grid cells, the pointer is centered on the brush preview, odd cell widths snap the brush center to cell centers, even cell widths snap the brush center to grid intersections, and the recorded brush path is now intended to advance from snapped center point to snapped center point. This still needs browser validation before it is moved into the permanent sections.
+- Progress: The current snapping phase for `Rectangle`, `Ellipse`, `Stroke Rect`, and `Square Brush` has been browser-tested and accepted by the user, so those rules are now part of the permanent behavior above. The next phase is to refine `Square Brush` interaction behavior one step at a time, starting with shortcut-driven constraints such as shift-based axis locking and related guided stroke behavior. No new brush behavior shortcuts have been implemented yet.

@@ -20,7 +20,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 
 ### UI Structure
 
-- `index.html` contains the canvas, toolbar, zoom controls, hint area, and layers panel.
+- `index.html` contains the canvas, toolbar, zoom controls, live workplane status readout, hint area, and layers panel.
 - `app.js` reads those DOM elements and drives the whole interaction loop.
 - The app still runs as a plain browser project without a bundler.
 
@@ -48,9 +48,9 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 
 - Rendering is direct vector drawing on the main canvas.
 - The canvas background grid uses three line tiers: minor lines every cell, mid lines every 10 cells, and major lines every 20 cells.
-- The world origin is visualized with dedicated X=0 and Y=0 axis lines that cross at 0,0.
+- The active workplane origin is visualized with dedicated draft X=0 and Y=0 axis lines.
 - The visible grid stays screen-aligned even when the drafting angle changes.
-- World content is rendered through a global drafting/workplane rotation around `0,0`, so stored geometry stays in world coordinates while the user can draw against a rotated drafting frame.
+- World content is rendered through a drafting/workplane transform with both `origin` and `angle`, so stored geometry stays in world coordinates while the user can draw against a translated and rotated drafting frame.
 - There is no raster-mask union pipeline anymore.
 - Each visible layer is drawn from its current merged vector shapes.
 - Selection highlighting is drawn by tracing the selected shape geometry.
@@ -73,8 +73,11 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Draw` size controls for `Stroke Rect` and `Square Brush` are expressed in whole visible grid cells.
 - `Select`: selects and moves whole merged shapes.
 - `Mouse wheel`: zooms at cursor position.
-- `Space + drag` or middle/right mouse: pans the camera.
-- `Space + mouse wheel`: rotates the drafting angle around the world origin `0,0`.
+- `Middle mouse` or `right mouse` outside draw mode: pans the camera.
+- Holding `Space` enters a drafting-transforms mode without switching away from `Draw` or `Select`.
+- `Space + mouse wheel`: rotates the drafting angle around the current workplane origin.
+- `Space + middle drag`: moves the current workplane origin while the canvas stays fixed and the world shifts underneath.
+- `Space + left drag`: aligns the workplane from a start point toward a dragged direction, with magnetic snap to nearby geometry plus free placement anywhere in space.
 
 ### Current Behavioral Rules
 
@@ -90,9 +93,15 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Square Brush` remembers the previous brush point between strokes, so starting a new square-brush stroke with `Shift` can continue immediately from that remembered point.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
 - Zoom is currently clamped between a minimum of `0.09` and a maximum of `2`.
-- The app maintains a global drafting angle separate from stored geometry.
-- Existing geometry is displayed relative to the current drafting angle, while the visible grid remains horizontal and vertical on screen.
-- New drawing input is created in drafting coordinates and converted back into world geometry before boolean union with the layer.
+- The app maintains a workplane with separate `origin` and `angle`, independent from stored geometry.
+- Existing geometry is displayed relative to the current workplane, while the visible grid remains horizontal and vertical on screen.
+- New drawing input is created in drafting coordinates relative to the current workplane and converted back into world geometry before boolean union with the layer.
+- While `Space` is held, the normal draw/select interaction is temporarily suspended and the pointer is used for drafting transformations instead.
+- `Space + Left Drag` workplane alignment can start and end anywhere in space, but nearby geometry acts like a magnetic snap target.
+- During `Space + Left Drag`, corners can capture from slightly farther away than edges, and corner snaps use a different preview marker from edge snaps.
+- During `Space + Left Drag`, if there is no nearby geometry, the preview and resulting alignment still use the free pointer position instead of forcing a snap.
+- Releasing `Space` during a pending workplane alignment cancels that alignment and returns control to the underlying tool.
+- The toolbar shows a live workplane status readout with the current plane mode, rotation in degrees, and origin coordinates.
 - Right click in `Draw` uses the current shape mode as subtraction geometry and applies boolean difference against the active layer's merged vector geometry.
 - After drawing, the new geometry is inserted into the layer and the layer is rebuilt through boolean union.
 - After subtractive drawing, the active layer is replaced with the resulting difference geometry instead of deleting whole merged objects by hit-test.
@@ -120,6 +129,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Design and implement draft-space behavior refinements, including edge-aligned workplane setup in addition to the current manual drafting-angle rotation.
-- Status: In progress
-- Progress: The drafting/workplane system still uses the newer `origin` plus `angle` model, and the temporary toolbar `Align Edge` button experiment has been replaced by a direct `Space`-mode drafting transformation workflow. The current interaction model is: `Space + Wheel` rotates the drafting angle, `Space + Middle Drag` moves the `draftOrigin` directly while the canvas/grid stay visually fixed and the world space shifts underneath in the same screen direction as the drag gesture, and `Space + Left Drag` now performs workplane alignment with free placement anywhere in space plus magnetic snap to nearby geometry. During that align drag, corners and projected edge points can capture the hover when the pointer gets close, the corner capture radius is intentionally a bit larger than the edge capture radius so corners are easier to acquire, the preview is visually different for corner vs edge snaps, free points remain available when there is no nearby geometry, and releasing `Space` cancels the pending align action and returns to the underlying `Draw` or `Select` tool. The toolbar keeps only a live workplane status readout so the current plane mode, rotation in degrees, and origin coordinates can be checked while testing. This is still in progress and not yet user-confirmed; the next step is to test and tune the snap radius feel and preview clarity of the new align drag workflow before any future reference-image features are added.
+- Task: None
+- Status: Idle
+- Progress: No active task. The recent drafting/workplane refinement work has been accepted by the user and its lasting behavior is now recorded in the permanent sections above.

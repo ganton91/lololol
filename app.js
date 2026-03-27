@@ -72,6 +72,10 @@ const state = {
     mode: null,
     boxStartDraft: null,
     boxCurrentDraft: null,
+    boxBaseShapeIds: null,
+    modifierMode: null,
+    pendingShapeId: null,
+    pendingScreen: null,
   },
 };
 
@@ -94,6 +98,7 @@ const snapPreviewSize = 8;
 const draftTransformSnapRadiusPx = 14;
 const draftTransformCornerSnapRadiusPx = 20;
 const draftTransformCornerPriorityRadiusPx = 16;
+const selectionToggleDragThresholdPx = 5;
 const layerPalette = ["#93c5fd", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#fdba74", "#67e8f9"];
 
 function updateZoomLabel() {
@@ -1356,6 +1361,20 @@ function setSelectedShapeIds(shapeIds) {
   state.selection.shapeIds = normalizeSelectedShapeIds(shapeIds);
 }
 
+function getToggledShapeIds(baseShapeIds, toggledShapeIds) {
+  const nextShapeIds = new Set(baseShapeIds);
+
+  for (const shapeId of toggledShapeIds) {
+    if (nextShapeIds.has(shapeId)) {
+      nextShapeIds.delete(shapeId);
+    } else {
+      nextShapeIds.add(shapeId);
+    }
+  }
+
+  return normalizeSelectedShapeIds([...nextShapeIds]);
+}
+
 function getSelectedShapes() {
   const selectedIds = new Set(state.selection.shapeIds);
   return state.shapes.filter((shape) => selectedIds.has(shape.id));
@@ -1372,6 +1391,10 @@ function resetSelectionInteraction() {
   state.selection.mode = null;
   state.selection.boxStartDraft = null;
   state.selection.boxCurrentDraft = null;
+  state.selection.boxBaseShapeIds = null;
+  state.selection.modifierMode = null;
+  state.selection.pendingShapeId = null;
+  state.selection.pendingScreen = null;
 }
 
 function clearSelection() {
@@ -1627,20 +1650,54 @@ function startSelectionMove(worldPoint) {
   state.selection.modified = false;
   state.selection.boxStartDraft = null;
   state.selection.boxCurrentDraft = null;
+  state.selection.boxBaseShapeIds = null;
+  state.selection.modifierMode = null;
+  state.selection.pendingShapeId = null;
+  state.selection.pendingScreen = null;
 }
 
-function startSelectionBox(draftPoint) {
+function startSelectionBox(draftPoint, modifierMode = "replace") {
   state.selection.mode = "box";
   state.selection.startWorld = null;
   state.selection.shapeSnapshots = null;
   state.selection.modified = false;
   state.selection.boxStartDraft = cloneDraftPoint(draftPoint);
   state.selection.boxCurrentDraft = cloneDraftPoint(draftPoint);
+  state.selection.boxBaseShapeIds = [...state.selection.shapeIds];
+  state.selection.modifierMode = modifierMode;
+  state.selection.pendingShapeId = null;
+  state.selection.pendingScreen = null;
+}
+
+function startSelectionTogglePending(shapeId, draftPoint, screenPoint) {
+  state.selection.mode = "toggle-pending";
+  state.selection.startWorld = null;
+  state.selection.shapeSnapshots = null;
+  state.selection.modified = false;
+  state.selection.boxStartDraft = cloneDraftPoint(draftPoint);
+  state.selection.boxCurrentDraft = cloneDraftPoint(draftPoint);
+  state.selection.boxBaseShapeIds = [...state.selection.shapeIds];
+  state.selection.modifierMode = "toggle";
+  state.selection.pendingShapeId = shapeId;
+  state.selection.pendingScreen = { x: screenPoint.x, y: screenPoint.y };
+}
+
+function hasPendingSelectionDragExceededThreshold(screenPoint) {
+  const pendingScreen = state.selection.pendingScreen;
+  if (!pendingScreen || !screenPoint) return false;
+
+  return Math.hypot(screenPoint.x - pendingScreen.x, screenPoint.y - pendingScreen.y) >= selectionToggleDragThresholdPx;
 }
 
 function updateSelectionBoxSelection(draftPoint) {
   state.selection.boxCurrentDraft = cloneDraftPoint(draftPoint);
-  setSelectedShapeIds(getShapeIdsInDraftSelectionBox(state.selection.boxStartDraft, state.selection.boxCurrentDraft));
+  const boxShapeIds = getShapeIdsInDraftSelectionBox(state.selection.boxStartDraft, state.selection.boxCurrentDraft);
+  const nextShapeIds =
+    state.selection.modifierMode === "toggle"
+      ? getToggledShapeIds(state.selection.boxBaseShapeIds || [], boxShapeIds)
+      : boxShapeIds;
+
+  setSelectedShapeIds(nextShapeIds);
 }
 
 function renderSelectOverlay() {
@@ -2041,9 +2098,22 @@ canvas.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
 
     const pick = pickSelectableAt(world);
+    if (e.shiftKey) {
+      if (pick) {
+        startSelectionTogglePending(state.shapes[pick.shapeIndex].id, draft, screen);
+      } else {
+        startSelectionBox(draft, "toggle");
+      }
+
+      state.dragging = true;
+      canvas.setPointerCapture(e.pointerId);
+      render();
+      return;
+    }
+
     if (!pick) {
       clearSelection();
-      startSelectionBox(draft);
+      startSelectionBox(draft, "replace");
       state.dragging = true;
       canvas.setPointerCapture(e.pointerId);
       render();
@@ -2123,6 +2193,15 @@ canvas.addEventListener("pointermove", (e) => {
   }
 
   if (state.tool === "select") {
+    if (state.selection.mode === "toggle-pending") {
+      if (hasPendingSelectionDragExceededThreshold(screen)) {
+        state.selection.mode = "box";
+        updateSelectionBoxSelection(state.draftCurrent);
+      }
+      render();
+      return;
+    }
+
     if (state.selection.mode === "box") {
       updateSelectionBoxSelection(state.draftCurrent);
       render();
@@ -2202,6 +2281,16 @@ function finishDrag(e) {
   if (!state.dragging) return;
 
   if (state.tool === "select") {
+    if (state.selection.mode === "toggle-pending") {
+      setSelectedShapeIds(
+        getToggledShapeIds(state.selection.boxBaseShapeIds || [], state.selection.pendingShapeId ? [state.selection.pendingShapeId] : [])
+      );
+      resetSelectionInteraction();
+      state.dragging = false;
+      render();
+      return;
+    }
+
     if (state.selection.mode === "box") {
       updateSelectionBoxSelection(state.draftCurrent);
       resetSelectionInteraction();
@@ -2358,6 +2447,14 @@ layerDownBtn.addEventListener("click", () => moveActiveLayer(-1));
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && state.tool === "draw") {
     setTool("select");
+    return;
+  }
+
+  if (e.key === "Escape" && state.tool === "select" && state.selection.shapeIds.length) {
+    clearSelection();
+    state.dragging = false;
+    updateCursor();
+    render();
     return;
   }
 

@@ -46,6 +46,8 @@ const state = {
   brushLastPoint: null,
   brushPoints: [],
   squareBrushMemoryPoint: null,
+  stripLockedAxis: null,
+  stripLockAnchorScreen: null,
   squareBrushLockedAxis: null,
   squareBrushLockAnchorScreen: null,
   squareBrushLockAnchorDraft: null,
@@ -187,6 +189,56 @@ function getStripSnapOffset(cellWidth = state.stripCellWidth) {
   return getStripCellWidth(cellWidth) % 2 === 0 ? 0 : gridCellSize / 2;
 }
 
+function clearStripAxisLock() {
+  state.stripLockedAxis = null;
+  state.stripLockAnchorScreen = null;
+}
+
+function resetStripAxisLockAnchor(screenPoint = state.pointerScreen) {
+  if (!screenPoint) return;
+  state.stripLockAnchorScreen = {
+    x: screenPoint.x,
+    y: screenPoint.y,
+  };
+  state.stripLockedAxis = null;
+}
+
+function getStripLockedAxis(screenPoint, anchorScreen = state.stripLockAnchorScreen) {
+  if (!anchorScreen) return null;
+
+  const dx = screenPoint.x - anchorScreen.x;
+  const dy = screenPoint.y - anchorScreen.y;
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+  const distance = Math.hypot(dx, dy);
+
+  if (distance < squareBrushAxisDecisionDistancePx) return null;
+  if (Math.abs(absDx - absDy) < squareBrushAxisDecisionBiasPx) return null;
+
+  return absDx >= absDy ? "x" : "y";
+}
+
+function getStripInputPoint(point, shiftKey = false, screenPoint = state.pointerScreen) {
+  if (!shiftKey || !state.dragging || !state.draftStart) {
+    state.stripLockedAxis = null;
+    return { x: point.x, y: point.y };
+  }
+
+  if (!state.stripLockAnchorScreen) {
+    resetStripAxisLockAnchor(screenPoint);
+  }
+
+  if (!state.stripLockedAxis) {
+    state.stripLockedAxis = getStripLockedAxis(screenPoint);
+  }
+
+  if (!state.stripLockedAxis) {
+    return { x: point.x, y: point.y };
+  }
+
+  return constrainPointToAxis(point, state.draftStart, state.stripLockedAxis);
+}
+
 function getSquareBrushCellWidth(cellWidth = state.drawSize) {
   return Math.max(1, Math.min(50, Math.round(cellWidth)));
 }
@@ -315,6 +367,7 @@ function getSnappedStripSegment(a, b, cellWidth = state.stripCellWidth) {
 
 function getDraftInputPoint(point, shapeType = state.shapeType, shiftKey = false, screenPoint = state.pointerScreen) {
   if (isBoxSnapShapeType(shapeType)) return snapDraftPointToGrid(point);
+  if (isStripShapeType(shapeType)) return getStripInputPoint(point, shiftKey, screenPoint);
   if (isSquareBrushShapeType(shapeType)) return getSquareBrushInputPoint(point, shiftKey, screenPoint);
   return { x: point.x, y: point.y };
 }
@@ -700,6 +753,7 @@ function resetDrawSession() {
   state.draftShape = null;
   state.brushLastPoint = null;
   state.brushPoints = [];
+  clearStripAxisLock();
   clearSquareBrushAxisLock();
 }
 
@@ -1346,6 +1400,10 @@ canvas.addEventListener("pointerdown", (e) => {
       if (e.shiftKey) resetSquareBrushAxisLockAnchor(screen);
       startSquareBrushStroke(draft, e.shiftKey);
       render();
+    } else if (isStripShapeType()) {
+      resetStripAxisLockAnchor(screen);
+      state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
+      render();
     } else {
       state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
       render();
@@ -1560,8 +1618,16 @@ layerDownBtn.addEventListener("click", () => moveActiveLayer(-1));
 window.addEventListener("keydown", (e) => {
   if (e.key === "Shift") {
     state.shiftPressed = true;
-    if (state.pointerInCanvas && state.tool === "draw" && isSquareBrushShapeType()) {
-      if (state.dragging) resetSquareBrushAxisLockAnchor(state.pointerScreen);
+    if (state.pointerInCanvas && state.tool === "draw" && (isSquareBrushShapeType() || isStripShapeType())) {
+      if (state.dragging && isSquareBrushShapeType()) {
+        resetSquareBrushAxisLockAnchor(state.pointerScreen);
+      }
+      if (state.dragging && isStripShapeType()) {
+        state.stripLockedAxis = null;
+        state.draftCurrent = getStripInputPoint(screenToDraft(state.pointerScreen), true, state.pointerScreen);
+        state.current = draftToWorld(state.draftCurrent);
+        state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
+      }
       render();
     }
   }
@@ -1578,7 +1644,13 @@ window.addEventListener("keyup", (e) => {
   if (e.key === "Shift") {
     state.shiftPressed = false;
     clearSquareBrushAxisLock();
-    if (state.pointerInCanvas && state.tool === "draw" && isSquareBrushShapeType()) {
+    if (state.pointerInCanvas && state.tool === "draw" && (isSquareBrushShapeType() || isStripShapeType())) {
+      if (state.dragging && isStripShapeType()) {
+        state.stripLockedAxis = null;
+        state.draftCurrent = getStripInputPoint(screenToDraft(state.pointerScreen), false, state.pointerScreen);
+        state.current = draftToWorld(state.draftCurrent);
+        state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
+      }
       render();
     }
   }

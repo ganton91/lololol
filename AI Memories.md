@@ -82,6 +82,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Rectangle` and `Ellipse` snapping are active on the visible drafting grid: draw and right-click subtract snap both bounding-box corners to grid intersections, show a snap preview marker at the cursor, and produce bounds aligned exactly to cell multiples.
 - `Stroke Rect` width is expressed in whole grid cells, its generated strip width is always an exact multiple of one cell, and its centerline snapping is parity-aware: odd cell widths snap on half-cell centerline families while even cell widths snap on full grid intersections.
 - `Stroke Rect` can be drawn at arbitrary drafting angles while preserving its cell-multiple width and parity-aware snapping.
+- `Stroke Rect` supports sticky `Shift` axis lock behavior during an active draw: holding `Shift` constrains the strip direction to the draft-space `X` or `Y` axis for the current hold.
 - `Square Brush` size is expressed in whole grid cells and its preview is centered on the snapped pointer position.
 - `Square Brush` snapping is parity-aware: odd cell widths snap the brush center to cell centers, while even cell widths snap the brush center to grid intersections.
 - `Square Brush` records and rebuilds its path from snapped center point to snapped center point, using square-sweep geometry instead of dab-by-dab stamping.
@@ -118,6 +119,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Design and implement `Stroke Rect` (`SquareRect`) behavior refinements, starting with modifier-key shortcuts and constrained drawing behavior.
+- Task: Design and implement draft-space behavior refinements, including edge-aligned workplane setup in addition to the current manual drafting-angle rotation.
 - Status: In progress
-- Progress: The recently added `Square Brush` behavior refinements, including the reference-style `Shift` axis lock workflow and remembered-point continuation between strokes, have been browser-tested and accepted by the user and are now part of the permanent behavior above. The next phase is to refine `Stroke Rect` behavior one step at a time, beginning with shortcut-driven constraints and related interaction polish. No new `Stroke Rect` behavior shortcuts have been implemented yet.
+- Progress: Tool-specific behavior work is paused for now after the recent `Square Brush` and `Stroke Rect` shortcut refinements were accepted by the user. The next focus is the drafting/workplane system itself: the app currently supports manual drafting-angle rotation around `0,0`, but it does not yet support aligning the draft space to an existing edge or other scene geometry. The next phase is to define and implement that draft-space alignment behavior so tool testing can happen against a more realistic workplane workflow. No draft-space alignment changes have been implemented yet.

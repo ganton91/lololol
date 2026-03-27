@@ -54,7 +54,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - Wheel-based draft-plane rotation is now canonical instead of accumulated: the workplane keeps a normalized base angle plus an integer wheel-step offset, so rotating away and back returns to the same exact plane instead of a float-near-zero residual angle.
 - There is no raster-mask union pipeline anymore.
 - Each visible layer is drawn from its current merged vector shapes.
-- Selection highlighting is drawn by tracing the selected shape geometry.
+- Selection highlighting is drawn by tracing the selected shape geometries.
 
 ### Layer Model
 
@@ -72,7 +72,9 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 - `Draw`: creates rectangle, ellipse, strip, or square-brush geometry with left click, and subtracts with the same geometry modes using right click.
 - `Draw` size controls for `Stroke Rect` and `Square Brush` are expressed in whole visible grid cells.
-- `Select`: selects and moves whole merged shapes.
+- `Select`: selects and moves one or more whole merged shapes.
+- `S`: switches to `Select`.
+- Pressing `Escape` while `Draw` is active switches to `Select`.
 - `Mouse wheel`: zooms at cursor position.
 - `Middle mouse` or `right mouse` outside draw mode: pans the camera.
 - Holding `Space` enters a drafting-transforms mode without switching away from `Draw` or `Select`.
@@ -106,10 +108,14 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Pressing `R` while `Space` is held resets the current workplane to the world-aligned plane, cancels any in-progress draft transform drag, and leaves drafting-transforms mode active as long as `Space` remains held.
 - Releasing `Space` during a pending workplane alignment cancels that alignment and returns control to the underlying tool.
 - The toolbar shows a live workplane status readout with the current plane mode, rotation in degrees, and origin coordinates.
+- `Select` supports marquee selection in draft/screen space: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed by or intersect the box.
+- Holding `Shift` in `Select` toggles selection membership for both click and marquee selection: newly hit shapes are added while already selected shapes captured by the click or box are removed.
+- Multi-selected shapes move together when dragged from a selected shape.
+- Pressing `Escape` while in `Select` with an active selection clears that selection.
 - Right click in `Draw` uses the current shape mode as subtraction geometry and applies boolean difference against the active layer's merged vector geometry.
 - After drawing, the new geometry is inserted into the layer and the layer is rebuilt through boolean union.
 - After subtractive drawing, the active layer is replaced with the resulting difference geometry instead of deleting whole merged objects by hit-test.
-- After moving a selected shape, the layer is rebuilt again so intersections and merges stay correct.
+- After moving selected geometry, the affected layer or layers are rebuilt again so intersections and merges stay correct.
 - Hidden layers are not rendered.
 - Locked layers do not accept edits.
 
@@ -133,5 +139,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Refine the `Select` behavior.
-- Progress: implementation review completed; `Select` has the keyboard shortcut `S`, pressing `Escape` while the active tool is `Draw` now switches to `Select`, pressing `Escape` while in `Select` with an active selection clears that selection, `Select` supports marquee multi-selection in draft/screen space with direction-based rules (dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed or intersect the box), multi-selected shapes move together when dragged from a selected shape, and holding `Shift` in `Select` now toggles selection membership for both click and marquee selection: newly hit shapes are added while already selected shapes captured by the click or box are removed. Pending user test/confirmation.
+- Goal: add real-world dimensions to the canvas so drawing operates with real-world measurements and scale, not only abstract grid cells.
+- Framing: the painting/drawing workflow should gain `Real World Dimensions`.
+- Progress: noted for discussion and planning only; no code changes have been made yet.

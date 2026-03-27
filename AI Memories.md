@@ -129,6 +129,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: Measurement calibration and layer area reporting design
-- Status: In discussion
-- Progress: The next feature direction has been clarified but is intentionally still at discussion stage with no code changes yet. The agreed goal is to add document-level measurement settings with separate reporting units (`m`, `cm`, `mm`) and grid-cell real size input with its own unit selector, so a project can report in meters while each square grid cell represents a size such as `5 cm x 5 cm`. The grid remains square, internal geometry math should stay as-is, and the first planned implementation slice is settings UI plus per-layer area reporting based on calibrated real-world area.
+- Task: Fix workplane rotation drift that creates post-rotate drawing seams
+- Status: In progress
+- Progress: The immediate focus has changed from measurement-system discussion to a workplane rotation correctness fix. Current investigation indicates that rotating the draft plane away from `0deg` and then back to `0deg` can leave a tiny residual angle because wheel rotation accumulates floating-point radians instead of returning to a canonical exact step state. That residual drift causes later grid-snapped drawing to land on a slightly different world lattice, which in turn creates visible seams between strokes that should share exact edges. The safest planned fix is to redesign workplane rotation state around canonical discrete rotation steps so returning to the prior angle restores the exact same plane instead of an approximate float-near-zero angle.

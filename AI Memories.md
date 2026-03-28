@@ -115,6 +115,8 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Right click in `Draw` uses the current shape mode as subtraction geometry and applies boolean difference against the active layer's merged vector geometry.
 - After drawing, the new geometry is inserted into the layer and the layer is rebuilt through boolean union.
 - After subtractive drawing, the active layer is replaced with the resulting difference geometry instead of deleting whole merged objects by hit-test.
+- Boolean union and difference still try the collinear-overlap `preSplit` path first, but if that processed path fails and the equivalent raw boolean succeeds, the app now falls back to the raw result while keeping the regression diagnostics.
+- When a two-shape union succeeds but still returns multiple polygons because the shapes only share a collinear edge, the app now attempts a narrow shared-edge stitch fallback for simple exterior-ring cases and keeps the non-merge diagnostics whether that stitch succeeds or not.
 - After moving selected geometry, the affected layer or layers are rebuilt again so intersections and merges stay correct.
 - Hidden layers are not rendered.
 - Locked layers do not accept edits.
@@ -149,8 +151,11 @@ Layer order controls draw order. The active layer receives new geometry when the
   - Added a live debug status line plus stage-specific logs for `finishDrag`, `insertShapeToLayer`, `rebuildLayerShapes`, `subtractGeometryFromLayer`, and uncaught runtime errors.
   - Added global debug payloads on `window.__cadDebugLastBooleanFailure`, `window.__cadDebugLastUnion`, and `window.__cadDebugLastDifference`.
   - Added focused failure helpers on `window.__cadDebugLastUnionFocus`, `window.__cadDebugLastBooleanFailureFocus`, `window.__cadDebugLastUnionPairSnapshot`, `window.__cadDebugLastBooleanFailurePairSnapshot`, `window.__cadDebugLastUnionRegression`, and `window.__cadDebugLastBooleanFailureRegression`.
+  - Added a successful-non-merge diagnostic on `window.__cadDebugLastUnionNonMerge` / `window.__cadDebugLastBooleanNonMerge` for the case where union succeeds but still returns multiple polygons, so gap/corner-touch cases can be distinguished from pre-split topology regressions.
   - Added pairwise analysis, minimal failing subset isolation, exact split-point capture, SVG snapshots, and per-geometry integrity diagnostics for failing boolean cases.
   - Added a cleanup path in `finishDrag` so a boolean/runtime failure no longer leaves the draft preview stuck from the exception alone.
+  - Added a conservative runtime fallback for boolean union/difference: if the pre-split processed inputs fail but the equivalent raw inputs succeed, the app now returns the raw boolean result instead of breaking the commit, while preserving the regression snapshot for later inspection.
+  - Added a narrow shared-edge stitch fallback for two simple exterior-ring union inputs: when union succeeds but leaves a `shared-collinear-edge-without-merge` result, the app removes the duplicated internal edge, rebuilds the outer loop, and accepts it only if XOR validation proves it is area-equivalent to the original union result.
   - Tried an experimental incremental union rebuild earlier and then backed it out because it introduced noisier failure modes; the layer rebuild is back to a direct union of source geometries.
 - Recommended future follow-up if this bug reappears:
   - Inspect the union focus, pair snapshot, and regression globals first.
@@ -159,4 +164,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- No active task recorded right now.
+- Goal: validate the new conservative boolean fallback that recovers with raw inputs when the `preSplit` path regresses.
+- Status: in progress.
+- Progress: `unionGeometryList` and `differenceGeometry` now retry the equivalent raw boolean only after a processed pre-split failure. If the raw attempt succeeds, the app keeps the debug payloads and regression snapshots but returns the raw result so draw/subtract commits can continue instead of failing outright. A second diagnostic branch now captures successful-but-unmerged two-shape unions so we can tell apart true gap/corner-touch cases from silent pre-split topology changes, and a new narrow stitch fallback tries to collapse `shared-collinear-edge-without-merge` results into a single polygon for simple two-ring cases after XOR validation. Manual browser validation is still pending.

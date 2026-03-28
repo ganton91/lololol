@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-03-28
+- Last updated: 2026-03-29
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -137,8 +137,26 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Once the user confirms the task is complete, move the lasting result into the permanent sections above and clear the task section.
 - The `Reference Only` folder is not part of the default startup reading context for new chats. Only inspect files in `Reference Only` when the user explicitly asks to look at a specific reference example or behavior from that folder.
 
+## Known Bugs
+
+### Intermittent Layer Rebuild Boolean Failure
+
+- Status: currently not reproduced in the latest manual testing sessions, but still treated as a known latent bug rather than fully resolved.
+- Symptom: during draw commits and layer rebuilds, `polygon-clipping` can throw during layer union rebuild, which breaks the rebuild. Before the cleanup guard was added, this could also leave the draft preview visually stuck.
+- Scope observed so far: the crash happens inside `rebuildLayerShapes` during boolean union. It is not always caused by the most recently inserted shape; some failures narrow down to an existing pair of shapes already present in the layer.
+- Key finding: the current collinear-overlap `preSplit` mitigation changes the boolean inputs before union. In some cases this makes failures rarer, but in other cases the raw pair unions successfully while the pre-split processed pair fails, so the mitigation can also introduce a regression.
+- Debug and mitigation work completed so far:
+  - Added a live debug status line plus stage-specific logs for `finishDrag`, `insertShapeToLayer`, `rebuildLayerShapes`, `subtractGeometryFromLayer`, and uncaught runtime errors.
+  - Added global debug payloads on `window.__cadDebugLastBooleanFailure`, `window.__cadDebugLastUnion`, and `window.__cadDebugLastDifference`.
+  - Added focused failure helpers on `window.__cadDebugLastUnionFocus`, `window.__cadDebugLastBooleanFailureFocus`, `window.__cadDebugLastUnionPairSnapshot`, `window.__cadDebugLastBooleanFailurePairSnapshot`, `window.__cadDebugLastUnionRegression`, and `window.__cadDebugLastBooleanFailureRegression`.
+  - Added pairwise analysis, minimal failing subset isolation, exact split-point capture, SVG snapshots, and per-geometry integrity diagnostics for failing boolean cases.
+  - Added a cleanup path in `finishDrag` so a boolean/runtime failure no longer leaves the draft preview stuck from the exception alone.
+  - Tried an experimental incremental union rebuild earlier and then backed it out because it introduced noisier failure modes; the layer rebuild is back to a direct union of source geometries.
+- Recommended future follow-up if this bug reappears:
+  - Inspect the union focus, pair snapshot, and regression globals first.
+  - Treat the current `preSplit` logic as a suspect, because the strongest recent repros show raw pair success and processed pair failure.
+  - If needed, either narrow the `preSplit` logic to only safe overlap patterns or temporarily remove it to return to a pure debug-only baseline.
+
 ## Current Task
 
-- Goal: add real-world dimensions to the canvas so drawing operates with real-world measurements and scale, not only abstract grid cells.
-- Framing: the painting/drawing workflow should gain `Real World Dimensions`.
-- Progress: noted for discussion and planning only; no code changes have been made yet.
+- No active task recorded right now.

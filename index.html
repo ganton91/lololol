@@ -114,6 +114,23 @@
         white-space: nowrap;
       }
 
+      .debug-status {
+        font-size: 12px;
+        color: #64748b;
+        max-width: min(44vw, 520px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .debug-status[data-level="warn"] {
+        color: #b45309;
+      }
+
+      .debug-status[data-level="error"] {
+        color: #b91c1c;
+      }
+
       .hint {
         position: absolute;
         bottom: 14px;
@@ -281,6 +298,7 @@
         <button id="zoom-in" class="tool-btn" type="button" aria-label="Zoom in">+</button>
         <span id="zoom-level" style="font-size: 12px; color: #334155; min-width: 52px">100%</span>
         <span id="workplane-status" class="workplane-status">Plane: world | Rot: 0deg | Origin: 0, 0</span>
+        <span id="debug-status" class="debug-status" data-level="info">Debug: idle</span>
       </div>
 
       <div class="hint">

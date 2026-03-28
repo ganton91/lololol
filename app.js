@@ -14,6 +14,7 @@ const zoomOutBtn = document.getElementById("zoom-out");
 const zoomInBtn = document.getElementById("zoom-in");
 const zoomLevel = document.getElementById("zoom-level");
 const workplaneStatus = document.getElementById("workplane-status");
+const debugStatus = document.getElementById("debug-status");
 const layersList = document.getElementById("layers-list");
 const layerAddBtn = document.getElementById("layer-add");
 const layerDeleteBtn = document.getElementById("layer-delete");
@@ -100,6 +101,153 @@ const draftTransformCornerSnapRadiusPx = 20;
 const draftTransformCornerPriorityRadiusPx = 16;
 const selectionToggleDragThresholdPx = 5;
 const layerPalette = ["#93c5fd", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#fdba74", "#67e8f9"];
+const debugLogLimit = 200;
+const geometryDebugEpsilon = 1e-6;
+const cadDebug = (window.__cadDebug = window.__cadDebug || {});
+
+if (!Array.isArray(cadDebug.log)) cadDebug.log = [];
+if (!("__cadDebugLog" in window)) window.__cadDebugLog = cadDebug.log;
+if (!("__cadDebugLastBooleanFailure" in window)) window.__cadDebugLastBooleanFailure = null;
+if (!("__cadDebugLastUnion" in window)) window.__cadDebugLastUnion = null;
+if (!("__cadDebugLastDifference" in window)) window.__cadDebugLastDifference = null;
+if (!("__cadDebugLastUnionFocus" in window)) window.__cadDebugLastUnionFocus = null;
+if (!("__cadDebugLastBooleanFailureFocus" in window)) window.__cadDebugLastBooleanFailureFocus = null;
+if (!("__cadDebugLastUnionPairSnapshot" in window)) window.__cadDebugLastUnionPairSnapshot = null;
+if (!("__cadDebugLastBooleanFailurePairSnapshot" in window)) window.__cadDebugLastBooleanFailurePairSnapshot = null;
+if (!("__cadDebugLastUnionRegression" in window)) window.__cadDebugLastUnionRegression = null;
+if (!("__cadDebugLastBooleanFailureRegression" in window)) window.__cadDebugLastBooleanFailureRegression = null;
+
+function roundDebugNumber(value, precision = 1000) {
+  if (!Number.isFinite(value)) return value;
+  return Math.round(value * precision) / precision;
+}
+
+function serializeDebugPoint(point) {
+  if (!point) return null;
+  if (Array.isArray(point)) {
+    return [roundDebugNumber(point[0]), roundDebugNumber(point[1])];
+  }
+
+  return {
+    x: roundDebugNumber(point.x),
+    y: roundDebugNumber(point.y),
+  };
+}
+
+function serializeDebugPointList(points) {
+  if (!Array.isArray(points)) return [];
+  return points.map((point) => serializeDebugPoint(point));
+}
+
+function serializeDebugBounds(bounds) {
+  if (!bounds) return null;
+  return {
+    x: roundDebugNumber(bounds.x),
+    y: roundDebugNumber(bounds.y),
+    w: roundDebugNumber(bounds.w),
+    h: roundDebugNumber(bounds.h),
+  };
+}
+
+function cloneDebugValue(value) {
+  if (value === undefined) return undefined;
+
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch (error) {
+      // Fall through to JSON cloning for plain payloads.
+    }
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    return {
+      fallbackType: typeof value,
+      stringValue: String(value),
+    };
+  }
+}
+
+function storeDebugGlobal(name, value) {
+  const nextValue = cloneDebugValue(value);
+  window[name] = nextValue;
+  return nextValue;
+}
+
+function serializeError(error) {
+  if (!error) return null;
+  return {
+    name: error.name || "Error",
+    message: error.message || String(error),
+    stack: typeof error.stack === "string" ? error.stack.split("\n").slice(0, 8).join("\n") : null,
+  };
+}
+
+function updateDebugStatus(message, level = "info") {
+  if (!debugStatus) return;
+  debugStatus.textContent = `Debug: ${message}`;
+  debugStatus.dataset.level = level;
+}
+
+function pushDebugEntry(stage, message, payload = null, level = "info") {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    stage,
+    message,
+    level,
+    payload: payload ? cloneDebugValue(payload) : null,
+  };
+
+  cadDebug.log.push(entry);
+  if (cadDebug.log.length > debugLogLimit) {
+    cadDebug.log.splice(0, cadDebug.log.length - debugLogLimit);
+  }
+
+  cadDebug.lastEntry = entry;
+  window.__cadDebugLog = cadDebug.log;
+
+  const method = level === "error" ? "error" : level === "warn" ? "warn" : "log";
+  console[method](`[cad-debug:${stage}] ${message}`, entry.payload || "");
+  updateDebugStatus(`${stage} | ${message}`, level);
+  return entry;
+}
+
+function summarizeGeometry(geometry) {
+  const cleanGeometry = sanitizeGeometry(geometry);
+  let ringCount = 0;
+  let pointCount = 0;
+
+  forEachRing(cleanGeometry, (ring) => {
+    ringCount += 1;
+    pointCount += ring.length;
+  });
+
+  return {
+    polygonCount: cleanGeometry.length,
+    ringCount,
+    pointCount,
+    bounds: cleanGeometry.length ? serializeDebugBounds(getGeometryBounds(cleanGeometry)) : null,
+  };
+}
+
+function summarizeShape(shape) {
+  if (!shape) return null;
+  return {
+    id: shape.id,
+    layerId: shape.layerId,
+    bounds: serializeDebugBounds(shape.bounds),
+    geometry: summarizeGeometry(shape.geometry),
+  };
+}
+
+function summarizeGeometryList(geometries) {
+  return geometries.map((geometry, index) => ({
+    index,
+    summary: summarizeGeometry(geometry),
+  }));
+}
 
 function updateZoomLabel() {
   zoomLevel.textContent = Math.round(state.camera.zoom * 100) + "%";
@@ -560,7 +708,755 @@ function sanitizeGeometry(geometry) {
   return polygons;
 }
 
-function unionGeometryList(geometries) {
+function debugPointsEqual(a, b, epsilon = geometryDebugEpsilon) {
+  return Math.abs(a[0] - b[0]) <= epsilon && Math.abs(a[1] - b[1]) <= epsilon;
+}
+
+function segmentCrossValue(point, start, end) {
+  return (end[0] - start[0]) * (point[1] - start[1]) - (end[1] - start[1]) * (point[0] - start[0]);
+}
+
+function isPointOnSegmentArray(point, start, end, epsilon = geometryDebugEpsilon) {
+  if (Math.abs(segmentCrossValue(point, start, end)) > epsilon) return false;
+
+  return (
+    point[0] >= Math.min(start[0], end[0]) - epsilon &&
+    point[0] <= Math.max(start[0], end[0]) + epsilon &&
+    point[1] >= Math.min(start[1], end[1]) - epsilon &&
+    point[1] <= Math.max(start[1], end[1]) + epsilon
+  );
+}
+
+function isInteriorPointOnSegmentArray(point, start, end, epsilon = geometryDebugEpsilon) {
+  return isPointOnSegmentArray(point, start, end, epsilon) && !debugPointsEqual(point, start, epsilon) && !debugPointsEqual(point, end, epsilon);
+}
+
+function getSegmentPointParam(point, start, end) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+
+  if (Math.abs(dx) >= Math.abs(dy) && Math.abs(dx) > geometryDebugEpsilon) {
+    return (point[0] - start[0]) / dx;
+  }
+
+  if (Math.abs(dy) > geometryDebugEpsilon) {
+    return (point[1] - start[1]) / dy;
+  }
+
+  return 0;
+}
+
+function pointFromSegmentScalar(start, end, scalar, axis = "x") {
+  const startScalar = axis === "x" ? start[0] : start[1];
+  const endScalar = axis === "x" ? end[0] : end[1];
+  const delta = endScalar - startScalar;
+  const t = Math.abs(delta) <= geometryDebugEpsilon ? 0 : (scalar - startScalar) / delta;
+  return [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t];
+}
+
+function dedupeDebugPoints(points, epsilon = geometryDebugEpsilon) {
+  const unique = [];
+
+  for (const point of points) {
+    if (!Array.isArray(point) || point.length < 2) continue;
+    if (unique.some((candidate) => debugPointsEqual(candidate, point, epsilon))) continue;
+    unique.push([point[0], point[1]]);
+  }
+
+  return unique;
+}
+
+function collectGeometrySegments(geometry) {
+  const segments = [];
+
+  forEachRing(geometry, (ring, polygonIndex, ringIndex) => {
+    for (let segmentIndex = 0; segmentIndex < ring.length; segmentIndex += 1) {
+      segments.push({
+        polygonIndex,
+        ringIndex,
+        segmentIndex,
+        start: ring[segmentIndex],
+        end: ring[(segmentIndex + 1) % ring.length],
+      });
+    }
+  });
+
+  return segments;
+}
+
+function getRingSignedArea(ring) {
+  let area = 0;
+
+  for (let index = 0; index < ring.length; index += 1) {
+    const start = ring[index];
+    const end = ring[(index + 1) % ring.length];
+    area += start[0] * end[1] - end[0] * start[1];
+  }
+
+  return area / 2;
+}
+
+function getNormalizedSegmentKey(start, end) {
+  const a =
+    start[0] < end[0] || (Math.abs(start[0] - end[0]) <= geometryDebugEpsilon && start[1] <= end[1]) ? start : end;
+  const b = a === start ? end : start;
+  return `${roundDebugNumber(a[0], 1000000)},${roundDebugNumber(a[1], 1000000)}|${roundDebugNumber(
+    b[0],
+    1000000
+  )},${roundDebugNumber(b[1], 1000000)}`;
+}
+
+function areSegmentIndicesAdjacent(indexA, indexB, ringLength) {
+  if (indexA === indexB) return true;
+  if ((indexA + 1) % ringLength === indexB) return true;
+  if ((indexB + 1) % ringLength === indexA) return true;
+  return false;
+}
+
+function countRepeatedVertices(ring) {
+  const seen = new Set();
+  let repeatedCount = 0;
+
+  for (const point of ring) {
+    const key = `${roundDebugNumber(point[0], 1000000)},${roundDebugNumber(point[1], 1000000)}`;
+    if (seen.has(key)) {
+      repeatedCount += 1;
+    } else {
+      seen.add(key);
+    }
+  }
+
+  return repeatedCount;
+}
+
+function analyzeRingIntegrity(ring) {
+  const ringLength = ring.length;
+  const area = getRingSignedArea(ring);
+  const segmentKeys = new Map();
+  const selfIntersections = [];
+  const selfOverlaps = [];
+
+  for (let segmentIndex = 0; segmentIndex < ringLength; segmentIndex += 1) {
+    const start = ring[segmentIndex];
+    const end = ring[(segmentIndex + 1) % ringLength];
+    const key = getNormalizedSegmentKey(start, end);
+    segmentKeys.set(key, (segmentKeys.get(key) || 0) + 1);
+  }
+
+  for (let aIndex = 0; aIndex < ringLength; aIndex += 1) {
+    const aStart = ring[aIndex];
+    const aEnd = ring[(aIndex + 1) % ringLength];
+
+    for (let bIndex = aIndex + 1; bIndex < ringLength; bIndex += 1) {
+      if (areSegmentIndicesAdjacent(aIndex, bIndex, ringLength)) continue;
+
+      const bStart = ring[bIndex];
+      const bEnd = ring[(bIndex + 1) % ringLength];
+
+      if (
+        segmentsIntersect(
+          { x: aStart[0], y: aStart[1] },
+          { x: aEnd[0], y: aEnd[1] },
+          { x: bStart[0], y: bStart[1] },
+          { x: bEnd[0], y: bEnd[1] },
+          geometryDebugEpsilon
+        )
+      ) {
+        selfIntersections.push({
+          segments: [aIndex, bIndex],
+          a: {
+            start: serializeDebugPoint(aStart),
+            end: serializeDebugPoint(aEnd),
+          },
+          b: {
+            start: serializeDebugPoint(bStart),
+            end: serializeDebugPoint(bEnd),
+          },
+        });
+      }
+
+      const overlap = getCollinearSegmentOverlap(
+        { start: aStart, end: aEnd },
+        { start: bStart, end: bEnd },
+        geometryDebugEpsilon
+      );
+
+      if (overlap) {
+        selfOverlaps.push({
+          segments: [aIndex, bIndex],
+          overlap: {
+            start: serializeDebugPoint(overlap.start),
+            end: serializeDebugPoint(overlap.end),
+            length: roundDebugNumber(overlap.length),
+          },
+        });
+      }
+    }
+  }
+
+  return {
+    pointCount: ringLength,
+    signedArea: roundDebugNumber(area, 1000),
+    absoluteArea: roundDebugNumber(Math.abs(area), 1000),
+    winding: area < 0 ? "cw" : "ccw",
+    repeatedVertexCount: countRepeatedVertices(ring),
+    repeatedSegmentCount: [...segmentKeys.values()].filter((count) => count > 1).length,
+    selfIntersectionCount: selfIntersections.length,
+    selfIntersections: selfIntersections.slice(0, 12),
+    selfOverlapCount: selfOverlaps.length,
+    selfOverlaps: selfOverlaps.slice(0, 12),
+  };
+}
+
+function analyzeGeometryIntegrity(geometry) {
+  const cleanGeometry = sanitizeGeometry(geometry);
+  const polygonDiagnostics = cleanGeometry.map((polygon, polygonIndex) => ({
+    polygonIndex,
+    ringDiagnostics: polygon.map((ring, ringIndex) => ({
+      ringIndex,
+      ...analyzeRingIntegrity(ring),
+    })),
+  }));
+
+  let selfIntersectionCount = 0;
+  let selfOverlapCount = 0;
+  let repeatedVertexCount = 0;
+  let repeatedSegmentCount = 0;
+
+  for (const polygon of polygonDiagnostics) {
+    for (const ring of polygon.ringDiagnostics) {
+      selfIntersectionCount += ring.selfIntersectionCount;
+      selfOverlapCount += ring.selfOverlapCount;
+      repeatedVertexCount += ring.repeatedVertexCount;
+      repeatedSegmentCount += ring.repeatedSegmentCount;
+    }
+  }
+
+  return {
+    polygonCount: cleanGeometry.length,
+    summary: summarizeGeometry(cleanGeometry),
+    repeatedVertexCount,
+    repeatedSegmentCount,
+    selfIntersectionCount,
+    selfOverlapCount,
+    polygonDiagnostics,
+  };
+}
+
+function getCollinearSegmentOverlap(segmentA, segmentB, epsilon = geometryDebugEpsilon) {
+  const dxA = segmentA.end[0] - segmentA.start[0];
+  const dyA = segmentA.end[1] - segmentA.start[1];
+  const dxB = segmentB.end[0] - segmentB.start[0];
+  const dyB = segmentB.end[1] - segmentB.start[1];
+
+  if (Math.hypot(dxA, dyA) <= epsilon || Math.hypot(dxB, dyB) <= epsilon) return null;
+  if (Math.abs(segmentCrossValue(segmentB.start, segmentA.start, segmentA.end)) > epsilon) return null;
+  if (Math.abs(segmentCrossValue(segmentB.end, segmentA.start, segmentA.end)) > epsilon) return null;
+
+  const useXAxis = Math.abs(dxA) >= Math.abs(dyA) ? true : Math.abs(dxB) >= Math.abs(dyB);
+  const axis = useXAxis ? "x" : "y";
+  const aStart = axis === "x" ? segmentA.start[0] : segmentA.start[1];
+  const aEnd = axis === "x" ? segmentA.end[0] : segmentA.end[1];
+  const bStart = axis === "x" ? segmentB.start[0] : segmentB.start[1];
+  const bEnd = axis === "x" ? segmentB.end[0] : segmentB.end[1];
+  const overlapStartScalar = Math.max(Math.min(aStart, aEnd), Math.min(bStart, bEnd));
+  const overlapEndScalar = Math.min(Math.max(aStart, aEnd), Math.max(bStart, bEnd));
+
+  if (overlapEndScalar - overlapStartScalar <= epsilon) return null;
+
+  const overlapStart = pointFromSegmentScalar(segmentA.start, segmentA.end, overlapStartScalar, axis);
+  const overlapEnd = pointFromSegmentScalar(segmentA.start, segmentA.end, overlapEndScalar, axis);
+
+  return {
+    start: overlapStart,
+    end: overlapEnd,
+    length: Math.hypot(overlapEnd[0] - overlapStart[0], overlapEnd[1] - overlapStart[1]),
+  };
+}
+
+function collectCollinearOverlapDiagnostics(geometryA, geometryB, maxHints = 12) {
+  const cleanA = sanitizeGeometry(geometryA);
+  const cleanB = sanitizeGeometry(geometryB);
+  const segmentsA = collectGeometrySegments(cleanA);
+  const segmentsB = collectGeometrySegments(cleanB);
+  const hints = [];
+  const splitPointsA = [];
+  const splitPointsB = [];
+  let overlapCount = 0;
+
+  for (const segmentA of segmentsA) {
+    for (const segmentB of segmentsB) {
+      const overlap = getCollinearSegmentOverlap(segmentA, segmentB);
+      if (!overlap) continue;
+
+      overlapCount += 1;
+      if (hints.length < maxHints) {
+        hints.push({
+          segmentA: {
+            polygonIndex: segmentA.polygonIndex,
+            ringIndex: segmentA.ringIndex,
+            segmentIndex: segmentA.segmentIndex,
+            start: serializeDebugPoint(segmentA.start),
+            end: serializeDebugPoint(segmentA.end),
+          },
+          segmentB: {
+            polygonIndex: segmentB.polygonIndex,
+            ringIndex: segmentB.ringIndex,
+            segmentIndex: segmentB.segmentIndex,
+            start: serializeDebugPoint(segmentB.start),
+            end: serializeDebugPoint(segmentB.end),
+          },
+          overlap: {
+            start: serializeDebugPoint(overlap.start),
+            end: serializeDebugPoint(overlap.end),
+            length: roundDebugNumber(overlap.length),
+          },
+        });
+      }
+
+      if (isInteriorPointOnSegmentArray(overlap.start, segmentA.start, segmentA.end)) splitPointsA.push(overlap.start);
+      if (isInteriorPointOnSegmentArray(overlap.end, segmentA.start, segmentA.end)) splitPointsA.push(overlap.end);
+      if (isInteriorPointOnSegmentArray(overlap.start, segmentB.start, segmentB.end)) splitPointsB.push(overlap.start);
+      if (isInteriorPointOnSegmentArray(overlap.end, segmentB.start, segmentB.end)) splitPointsB.push(overlap.end);
+    }
+  }
+
+  return {
+    overlapCount,
+    hints,
+    splitPointsA: dedupeDebugPoints(splitPointsA),
+    splitPointsB: dedupeDebugPoints(splitPointsB),
+  };
+}
+
+function splitRingAtPoints(ring, splitPoints) {
+  if (!splitPoints.length) return ring.map((point) => [point[0], point[1]]);
+
+  const nextRing = [];
+
+  for (let index = 0; index < ring.length; index += 1) {
+    const start = ring[index];
+    const end = ring[(index + 1) % ring.length];
+    const segmentPoints = dedupeDebugPoints(
+      splitPoints
+        .filter((point) => isInteriorPointOnSegmentArray(point, start, end))
+        .sort((a, b) => getSegmentPointParam(a, start, end) - getSegmentPointParam(b, start, end))
+    );
+
+    if (!nextRing.length || !debugPointsEqual(nextRing[nextRing.length - 1], start)) {
+      nextRing.push([start[0], start[1]]);
+    }
+
+    for (const point of segmentPoints) {
+      if (!debugPointsEqual(nextRing[nextRing.length - 1], point)) {
+        nextRing.push([point[0], point[1]]);
+      }
+    }
+  }
+
+  return normalizeRing(nextRing) || ring.map((point) => [point[0], point[1]]);
+}
+
+function splitGeometryAtPoints(geometry, splitPoints) {
+  const cleanGeometry = sanitizeGeometry(geometry);
+  const uniqueSplitPoints = dedupeDebugPoints(splitPoints);
+  if (!uniqueSplitPoints.length) return deepCopyGeometry(cleanGeometry);
+
+  return sanitizeGeometry(
+    cleanGeometry.map((polygon) => polygon.map((ring) => splitRingAtPoints(ring, uniqueSplitPoints)))
+  );
+}
+
+function preprocessUnionInputs(geometries) {
+  const cleanGeometries = geometries.map((geometry) => sanitizeGeometry(geometry));
+  const splitPointsByGeometry = cleanGeometries.map(() => []);
+  const overlapHints = [];
+  let overlapCount = 0;
+
+  for (let i = 0; i < cleanGeometries.length; i += 1) {
+    for (let j = i + 1; j < cleanGeometries.length; j += 1) {
+      const analysis = collectCollinearOverlapDiagnostics(cleanGeometries[i], cleanGeometries[j]);
+      overlapCount += analysis.overlapCount;
+      splitPointsByGeometry[i].push(...analysis.splitPointsA);
+      splitPointsByGeometry[j].push(...analysis.splitPointsB);
+
+      for (const hint of analysis.hints) {
+        if (overlapHints.length >= 12) break;
+        overlapHints.push({
+          pair: [i, j],
+          ...hint,
+        });
+      }
+    }
+  }
+
+  const dedupedSplitPointsByGeometry = splitPointsByGeometry.map((points) => dedupeDebugPoints(points));
+  const splitPointCounts = dedupedSplitPointsByGeometry.map((points) => points.length);
+
+  return {
+    geometries: cleanGeometries.map((geometry, index) => splitGeometryAtPoints(geometry, dedupedSplitPointsByGeometry[index])),
+    didChange: splitPointCounts.some((count) => count > 0),
+    splitPointCounts,
+    splitPointsByGeometry: dedupedSplitPointsByGeometry,
+    overlapCount,
+    overlapHints,
+  };
+}
+
+function preprocessDifferenceInputs(subjectGeometry, clipGeometry) {
+  const cleanSubject = sanitizeGeometry(subjectGeometry);
+  const cleanClip = sanitizeGeometry(clipGeometry);
+  const analysis = collectCollinearOverlapDiagnostics(cleanSubject, cleanClip);
+
+  return {
+    subject: splitGeometryAtPoints(cleanSubject, analysis.splitPointsA),
+    clip: splitGeometryAtPoints(cleanClip, analysis.splitPointsB),
+    didChange: analysis.splitPointsA.length > 0 || analysis.splitPointsB.length > 0,
+    splitPointCounts: {
+      subject: analysis.splitPointsA.length,
+      clip: analysis.splitPointsB.length,
+    },
+    overlapCount: analysis.overlapCount,
+    overlapHints: analysis.hints,
+  };
+}
+
+function runUnionAttempt(geometries) {
+  if (!geometries.length) {
+    return {
+      ok: true,
+      resultSummary: summarizeGeometry([]),
+    };
+  }
+
+  if (geometries.length === 1) {
+    return {
+      ok: true,
+      resultSummary: summarizeGeometry(geometries[0]),
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      resultSummary: summarizeGeometry(sanitizeGeometry(polygonBoolean.union(geometries[0], ...geometries.slice(1)))),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: serializeError(error),
+    };
+  }
+}
+
+function analyzeUnionFailureIsolation(geometries, sourceShapeIds = [], insertedShapeId = null, maxAttempts = 180) {
+  const allIndices = geometries.map((_, index) => index);
+  const isolation = {
+    insertedShapeId: insertedShapeId || null,
+    attemptCount: 0,
+    maxAttempts,
+    truncated: false,
+    failurePersistsWithoutInsertedShape: null,
+    insertedShapeIndex: null,
+    minimalFailingSubsetIndices: allIndices,
+    minimalFailingSubsetSize: allIndices.length,
+    minimalFailingSubsetSourceShapeIds: allIndices.map((index) => sourceShapeIds[index] || `input-${index}`),
+    minimalFailingSubsetSummaries: allIndices.map((index) => ({
+      index,
+      sourceShapeId: sourceShapeIds[index] || `input-${index}`,
+      summary: summarizeGeometry(geometries[index]),
+    })),
+  };
+
+  const insertedShapeIndex = insertedShapeId ? sourceShapeIds.indexOf(insertedShapeId) : -1;
+  isolation.insertedShapeIndex = insertedShapeIndex >= 0 ? insertedShapeIndex : null;
+
+  if (insertedShapeIndex >= 0 && geometries.length > 1) {
+    const candidateIndices = allIndices.filter((index) => index !== insertedShapeIndex);
+    const withoutInsertedAttempt = runUnionAttempt(candidateIndices.map((index) => geometries[index]));
+    isolation.attemptCount += 1;
+    isolation.failurePersistsWithoutInsertedShape = !withoutInsertedAttempt.ok;
+    isolation.withoutInsertedShape = {
+      sourceShapeId: sourceShapeIds[insertedShapeIndex] || insertedShapeId,
+      index: insertedShapeIndex,
+      outcome: withoutInsertedAttempt.ok ? "success" : "failure",
+      resultSummary: withoutInsertedAttempt.ok ? withoutInsertedAttempt.resultSummary : null,
+      error: withoutInsertedAttempt.ok ? null : withoutInsertedAttempt.error,
+    };
+  }
+
+  let activeIndices = [...allIndices];
+  let changed = true;
+
+  while (changed && activeIndices.length > 2 && isolation.attemptCount < maxAttempts) {
+    changed = false;
+
+    for (let position = 0; position < activeIndices.length; position += 1) {
+      if (isolation.attemptCount >= maxAttempts) {
+        isolation.truncated = true;
+        break;
+      }
+
+      const candidateIndices = activeIndices.filter((_, index) => index !== position);
+      const attempt = runUnionAttempt(candidateIndices.map((index) => geometries[index]));
+      isolation.attemptCount += 1;
+
+      if (!attempt.ok) {
+        activeIndices = candidateIndices;
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  isolation.minimalFailingSubsetIndices = activeIndices;
+  isolation.minimalFailingSubsetSize = activeIndices.length;
+  isolation.minimalFailingSubsetSourceShapeIds = activeIndices.map((index) => sourceShapeIds[index] || `input-${index}`);
+  isolation.minimalFailingSubsetSummaries = activeIndices.map((index) => ({
+    index,
+    sourceShapeId: sourceShapeIds[index] || `input-${index}`,
+    summary: summarizeGeometry(geometries[index]),
+  }));
+
+  return isolation;
+}
+
+function analyzeUnionFailurePairs(geometries, sourceShapeIds = [], maxPairs = 24) {
+  const analysis = [];
+  let pairwiseUnionErrorCount = 0;
+  let overlappingPairCount = 0;
+  let pairCount = 0;
+
+  for (let i = 0; i < geometries.length; i += 1) {
+    for (let j = i + 1; j < geometries.length; j += 1) {
+      pairCount += 1;
+
+      const overlapInfo = collectCollinearOverlapDiagnostics(geometries[i], geometries[j]);
+      if (overlapInfo.overlapCount > 0) {
+        overlappingPairCount += 1;
+      }
+
+      const attempt = runUnionAttempt([geometries[i], geometries[j]]);
+      if (!attempt.ok) {
+        pairwiseUnionErrorCount += 1;
+      }
+
+      analysis.push({
+        pair: [i, j],
+        sourceShapeIds: [sourceShapeIds[i] || `input-${i}`, sourceShapeIds[j] || `input-${j}`],
+        inputs: [summarizeGeometry(geometries[i]), summarizeGeometry(geometries[j])],
+        collinearOverlapCount: overlapInfo.overlapCount,
+        collinearOverlapHints: overlapInfo.hints.slice(0, 6),
+        pairwiseUnionStatus: attempt.ok ? "ok" : "error",
+        pairwiseUnionResult: attempt.ok ? attempt.resultSummary : null,
+        pairwiseUnionError: attempt.ok ? null : attempt.error,
+      });
+    }
+  }
+
+  analysis.sort((a, b) => {
+    const aErrorScore = a.pairwiseUnionStatus === "error" ? 1 : 0;
+    const bErrorScore = b.pairwiseUnionStatus === "error" ? 1 : 0;
+    if (aErrorScore !== bErrorScore) return bErrorScore - aErrorScore;
+    if (a.collinearOverlapCount !== b.collinearOverlapCount) return b.collinearOverlapCount - a.collinearOverlapCount;
+    return a.pair[0] - b.pair[0] || a.pair[1] - b.pair[1];
+  });
+
+  return {
+    pairCount,
+    pairwiseUnionErrorCount,
+    overlappingPairCount,
+    truncated: pairCount > maxPairs,
+    pairs: analysis.slice(0, maxPairs),
+  };
+}
+
+function getSourceShapeIdForDebug(index, sourceShapeIds = []) {
+  return sourceShapeIds[index] || `input-${index}`;
+}
+
+function collectDebugGeometryItems(indices, geometries, sourceShapeIds = []) {
+  return indices.map((index) => ({
+    index,
+    sourceShapeId: getSourceShapeIdForDebug(index, sourceShapeIds),
+    geometry: deepCopyGeometry(geometries[index]),
+    summary: summarizeGeometry(geometries[index]),
+    integrity: analyzeGeometryIntegrity(geometries[index]),
+  }));
+}
+
+function geometryToSvgPathData(geometry) {
+  const commands = [];
+
+  forEachRing(geometry, (ring) => {
+    if (!ring.length) return;
+    commands.push(`M ${ring[0][0]} ${ring[0][1]}`);
+
+    for (let index = 1; index < ring.length; index += 1) {
+      commands.push(`L ${ring[index][0]} ${ring[index][1]}`);
+    }
+
+    commands.push("Z");
+  });
+
+  return commands.join(" ");
+}
+
+function buildGeometryDebugSvg(geometryItems) {
+  const validItems = geometryItems.filter((item) => item && item.geometry && item.geometry.length);
+  if (!validItems.length) return null;
+
+  let bounds = null;
+  for (const item of validItems) {
+    const itemBounds = getGeometryBounds(item.geometry);
+    bounds = bounds ? mergeBounds(bounds, itemBounds) : itemBounds;
+  }
+
+  if (!bounds) return null;
+
+  const padding = 8;
+  const viewBox = [
+    roundDebugNumber(bounds.x - padding, 1000),
+    roundDebugNumber(bounds.y - padding, 1000),
+    roundDebugNumber(Math.max(bounds.w + padding * 2, 1), 1000),
+    roundDebugNumber(Math.max(bounds.h + padding * 2, 1), 1000),
+  ].join(" ");
+  const fills = ["rgba(239,68,68,0.25)", "rgba(14,165,233,0.25)", "rgba(245,158,11,0.25)", "rgba(34,197,94,0.25)"];
+  const strokes = ["#dc2626", "#0284c7", "#f59e0b", "#16a34a"];
+  const paths = validItems
+    .map((item, index) => {
+      const fill = fills[index % fills.length];
+      const stroke = strokes[index % strokes.length];
+      const pathData = geometryToSvgPathData(item.geometry);
+      return `<path d="${pathData}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" fill-rule="evenodd" />`;
+    })
+    .join("");
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${paths}</svg>`;
+}
+
+function buildIntegrityDelta(rawItem, processedItem) {
+  return {
+    sourceShapeId: rawItem.sourceShapeId,
+    pointCountDelta: processedItem.summary.pointCount - rawItem.summary.pointCount,
+    repeatedVertexDelta: processedItem.integrity.repeatedVertexCount - rawItem.integrity.repeatedVertexCount,
+    repeatedSegmentDelta: processedItem.integrity.repeatedSegmentCount - rawItem.integrity.repeatedSegmentCount,
+    selfIntersectionDelta: processedItem.integrity.selfIntersectionCount - rawItem.integrity.selfIntersectionCount,
+    selfOverlapDelta: processedItem.integrity.selfOverlapCount - rawItem.integrity.selfOverlapCount,
+  };
+}
+
+function buildUnionFailurePairSnapshot(payload) {
+  const sourceShapeIds = Array.isArray(payload?.context?.sourceShapeIds) ? payload.context.sourceShapeIds : [];
+  const pairIndices = payload?.focus?.topPairwiseError?.pair;
+  const rawInputs = Array.isArray(payload?.inputs) ? payload.inputs : [];
+  const processedInputs = Array.isArray(payload?.preSplit?.processedInputs) ? payload.preSplit.processedInputs : rawInputs;
+
+  if (!Array.isArray(pairIndices) || pairIndices.length !== 2) return null;
+  if (pairIndices.some((index) => index < 0 || index >= processedInputs.length)) return null;
+
+  const rawPair = collectDebugGeometryItems(pairIndices, rawInputs, sourceShapeIds);
+  const processedPair = collectDebugGeometryItems(pairIndices, processedInputs, sourceShapeIds);
+  const rawOverlap = collectCollinearOverlapDiagnostics(rawInputs[pairIndices[0]], rawInputs[pairIndices[1]]);
+  const processedOverlap = collectCollinearOverlapDiagnostics(processedInputs[pairIndices[0]], processedInputs[pairIndices[1]]);
+  const rawUnionAttempt = runUnionAttempt([rawInputs[pairIndices[0]], rawInputs[pairIndices[1]]]);
+  const processedUnionAttempt = runUnionAttempt([processedInputs[pairIndices[0]], processedInputs[pairIndices[1]]]);
+  const pairOnlyPreprocess = preprocessUnionInputs([rawInputs[pairIndices[0]], rawInputs[pairIndices[1]]]);
+  const pairOnlyProcessed = collectDebugGeometryItems([0, 1], pairOnlyPreprocess.geometries, [
+    getSourceShapeIdForDebug(pairIndices[0], sourceShapeIds),
+    getSourceShapeIdForDebug(pairIndices[1], sourceShapeIds),
+  ]);
+  const pairOnlyProcessedUnionAttempt = runUnionAttempt(pairOnlyPreprocess.geometries);
+  const fullSplitPoints = Array.isArray(payload?.preSplit?.splitPointsByInput) ? payload.preSplit.splitPointsByInput : [];
+  const integrityDelta = rawPair.map((item, index) => buildIntegrityDelta(item, processedPair[index]));
+  const regression = {
+    isPreSplitRegression: rawUnionAttempt.ok && !processedUnionAttempt.ok,
+    rawUnionSucceeded: rawUnionAttempt.ok,
+    processedUnionSucceeded: processedUnionAttempt.ok,
+    pairOnlyProcessedUnionSucceeded: pairOnlyProcessedUnionAttempt.ok,
+    fullPreprocessSplitPointCounts: pairIndices.map((index) => payload?.preSplit?.splitPointCounts?.[index] || 0),
+    fullPreprocessSplitPoints: pairIndices.map((index) => fullSplitPoints[index] || []),
+    pairOnlySplitPointCounts: pairOnlyPreprocess.splitPointCounts,
+    pairOnlySplitPoints: pairOnlyPreprocess.splitPointsByGeometry.map((points) => serializeDebugPointList(points)),
+    integrityDelta,
+  };
+
+  return {
+    pairIndices,
+    sourceShapeIds: pairIndices.map((index) => getSourceShapeIdForDebug(index, sourceShapeIds)),
+    rawPair,
+    processedPair,
+    pairOnlyProcessed,
+    rawOverlap: {
+      overlapCount: rawOverlap.overlapCount,
+      hints: rawOverlap.hints,
+    },
+    processedOverlap: {
+      overlapCount: processedOverlap.overlapCount,
+      hints: processedOverlap.hints,
+    },
+    rawUnionAttempt,
+    processedUnionAttempt,
+    pairOnlyProcessedUnionAttempt,
+    regression,
+    rawSvg: buildGeometryDebugSvg(rawPair),
+    processedSvg: buildGeometryDebugSvg(processedPair),
+    pairOnlyProcessedSvg: buildGeometryDebugSvg(pairOnlyProcessed),
+  };
+}
+
+function buildUnionFailureFocus(payload) {
+  const sourceShapeIds = Array.isArray(payload?.context?.sourceShapeIds) ? payload.context.sourceShapeIds : [];
+  const allGeometries = Array.isArray(payload?.preSplit?.processedInputs) ? payload.preSplit.processedInputs : payload.inputs || [];
+  const failureIsolation = payload?.failureIsolation || null;
+  const pairwiseAnalysis = payload?.pairwiseAnalysis || null;
+  const topPairwiseError = pairwiseAnalysis?.pairs?.find((pair) => pair.pairwiseUnionStatus === "error") || null;
+  const minimalSubsetIndices = Array.isArray(failureIsolation?.minimalFailingSubsetIndices)
+    ? failureIsolation.minimalFailingSubsetIndices
+    : allGeometries.map((_, index) => index);
+  const focusShapeIds = topPairwiseError?.sourceShapeIds || failureIsolation?.minimalFailingSubsetSourceShapeIds || [];
+
+  let diagnosis = "needs-deeper-analysis";
+  if (topPairwiseError) {
+    diagnosis = "pairwise-union-error";
+  } else if (failureIsolation?.failurePersistsWithoutInsertedShape) {
+    diagnosis = "existing-layer-state";
+  } else if (failureIsolation && failureIsolation.failurePersistsWithoutInsertedShape === false) {
+    diagnosis = "inserted-shape-interaction";
+  }
+
+  const focus = {
+    diagnosis,
+    insertedShapeId: payload?.context?.insertedShapeId || null,
+    layerId: payload?.context?.layerId || null,
+    sourceShapeCount: payload?.context?.sourceShapeCount || payload?.inputCount || allGeometries.length,
+    preSplitDidChange: !!payload?.preSplit?.didChange,
+    preSplitOverlapCount: payload?.preSplit?.overlapCount || 0,
+    pairwiseUnionErrorCount: pairwiseAnalysis?.pairwiseUnionErrorCount || 0,
+    overlappingPairCount: pairwiseAnalysis?.overlappingPairCount || 0,
+    failurePersistsWithoutInsertedShape: failureIsolation?.failurePersistsWithoutInsertedShape ?? null,
+    minimalFailingSubsetSize: failureIsolation?.minimalFailingSubsetSize || minimalSubsetIndices.length,
+    minimalFailingSubsetSourceShapeIds:
+      failureIsolation?.minimalFailingSubsetSourceShapeIds ||
+      minimalSubsetIndices.map((index) => getSourceShapeIdForDebug(index, sourceShapeIds)),
+    topPairwiseError,
+    topPairwiseErrorOverlapHints: topPairwiseError?.collinearOverlapHints || [],
+    focusShapeIds,
+    focusGeometry:
+      topPairwiseError && Array.isArray(topPairwiseError.pair)
+        ? collectDebugGeometryItems(topPairwiseError.pair, allGeometries, sourceShapeIds)
+        : collectDebugGeometryItems(minimalSubsetIndices, allGeometries, sourceShapeIds),
+    minimalFailingSubsetGeometry: collectDebugGeometryItems(minimalSubsetIndices, allGeometries, sourceShapeIds),
+  };
+
+  focus.summary = topPairwiseError
+    ? `pairwise union failure: ${focusShapeIds.join(" + ")}`
+    : `minimal failing subset (${focus.minimalFailingSubsetSize}): ${focus.minimalFailingSubsetSourceShapeIds.join(", ")}`;
+
+  return focus;
+}
+
+function unionGeometryList(geometries, context = {}) {
   const cleanGeometries = [];
 
   for (const geometry of geometries) {
@@ -568,20 +1464,244 @@ function unionGeometryList(geometries) {
     if (cleanGeometry.length) cleanGeometries.push(cleanGeometry);
   }
 
-  if (!cleanGeometries.length) return [];
-  if (cleanGeometries.length === 1) return deepCopyGeometry(cleanGeometries[0]);
+  const payload = {
+    operation: "union",
+    timestamp: new Date().toISOString(),
+    context: cloneDebugValue(context),
+    inputCount: cleanGeometries.length,
+    inputs: cleanGeometries.map((geometry) => deepCopyGeometry(geometry)),
+    inputSummaries: summarizeGeometryList(cleanGeometries),
+  };
 
-  return sanitizeGeometry(polygonBoolean.union(cleanGeometries[0], ...cleanGeometries.slice(1)));
+  if (!cleanGeometries.length) {
+    payload.shortCircuit = "empty";
+    payload.result = [];
+    payload.resultSummary = summarizeGeometry([]);
+    storeDebugGlobal("__cadDebugLastUnion", payload);
+    storeDebugGlobal("__cadDebugLastUnionFocus", null);
+    storeDebugGlobal("__cadDebugLastUnionPairSnapshot", null);
+    storeDebugGlobal("__cadDebugLastUnionRegression", null);
+    pushDebugEntry("boolean.union", "empty input list", payload);
+    return [];
+  }
+
+  if (cleanGeometries.length === 1) {
+    const result = deepCopyGeometry(cleanGeometries[0]);
+    payload.shortCircuit = "single";
+    payload.result = result;
+    payload.resultSummary = summarizeGeometry(result);
+    storeDebugGlobal("__cadDebugLastUnion", payload);
+    storeDebugGlobal("__cadDebugLastUnionFocus", null);
+    storeDebugGlobal("__cadDebugLastUnionPairSnapshot", null);
+    storeDebugGlobal("__cadDebugLastUnionRegression", null);
+    pushDebugEntry("boolean.union", "single input passthrough", {
+      context,
+      inputSummary: payload.inputSummaries[0],
+      resultSummary: payload.resultSummary,
+    });
+    return result;
+  }
+
+  const preprocessed = preprocessUnionInputs(cleanGeometries);
+  payload.preSplit = {
+    didChange: preprocessed.didChange,
+    splitPointCounts: preprocessed.splitPointCounts,
+    splitPointsByInput: preprocessed.splitPointsByGeometry.map((points) => serializeDebugPointList(points)),
+    overlapCount: preprocessed.overlapCount,
+    overlapHints: preprocessed.overlapHints,
+    processedInputs: preprocessed.geometries.map((geometry) => deepCopyGeometry(geometry)),
+    processedInputSummaries: summarizeGeometryList(preprocessed.geometries),
+  };
+
+  pushDebugEntry("boolean.union", "start", {
+    context,
+    inputCount: payload.inputCount,
+    inputSummaries: payload.inputSummaries,
+    preSplit: {
+      didChange: payload.preSplit.didChange,
+      splitPointCounts: payload.preSplit.splitPointCounts,
+      overlapCount: payload.preSplit.overlapCount,
+    },
+  });
+
+  try {
+    const result = sanitizeGeometry(polygonBoolean.union(preprocessed.geometries[0], ...preprocessed.geometries.slice(1)));
+    payload.result = deepCopyGeometry(result);
+    payload.resultSummary = summarizeGeometry(result);
+    storeDebugGlobal("__cadDebugLastUnion", payload);
+    storeDebugGlobal("__cadDebugLastUnionFocus", null);
+    storeDebugGlobal("__cadDebugLastUnionPairSnapshot", null);
+    storeDebugGlobal("__cadDebugLastUnionRegression", null);
+    pushDebugEntry("boolean.union", "success", {
+      context,
+      inputCount: payload.inputCount,
+      resultSummary: payload.resultSummary,
+      preSplit: {
+        didChange: payload.preSplit.didChange,
+        splitPointCounts: payload.preSplit.splitPointCounts,
+        overlapCount: payload.preSplit.overlapCount,
+      },
+    });
+    return result;
+  } catch (error) {
+    payload.error = serializeError(error);
+    payload.failureIsolation = analyzeUnionFailureIsolation(
+      preprocessed.geometries,
+      Array.isArray(context.sourceShapeIds) ? context.sourceShapeIds : [],
+      context.insertedShapeId || null
+    );
+    payload.pairwiseAnalysis = analyzeUnionFailurePairs(
+      preprocessed.geometries,
+      Array.isArray(context.sourceShapeIds) ? context.sourceShapeIds : []
+    );
+    payload.focus = buildUnionFailureFocus(payload);
+    payload.pairSnapshot = buildUnionFailurePairSnapshot(payload);
+    storeDebugGlobal("__cadDebugLastUnion", payload);
+    storeDebugGlobal("__cadDebugLastBooleanFailure", payload);
+    storeDebugGlobal("__cadDebugLastUnionFocus", payload.focus);
+    storeDebugGlobal("__cadDebugLastBooleanFailureFocus", payload.focus);
+    storeDebugGlobal("__cadDebugLastUnionPairSnapshot", payload.pairSnapshot);
+    storeDebugGlobal("__cadDebugLastBooleanFailurePairSnapshot", payload.pairSnapshot);
+    storeDebugGlobal("__cadDebugLastUnionRegression", payload.pairSnapshot?.regression || null);
+    storeDebugGlobal("__cadDebugLastBooleanFailureRegression", payload.pairSnapshot?.regression || null);
+    pushDebugEntry("boolean.union", "failure", {
+      context,
+      error: payload.error,
+      inputSummaries: payload.inputSummaries,
+      preSplit: {
+        didChange: payload.preSplit.didChange,
+        splitPointCounts: payload.preSplit.splitPointCounts,
+        overlapCount: payload.preSplit.overlapCount,
+      },
+      failureIsolation: payload.failureIsolation,
+      pairwiseAnalysis: payload.pairwiseAnalysis,
+    }, "error");
+    pushDebugEntry("boolean.union.focus", payload.focus.summary, payload.focus, "error");
+    if (payload.pairSnapshot) {
+      pushDebugEntry(
+        "boolean.union.pair",
+        `raw=${payload.pairSnapshot.rawUnionAttempt.ok ? "ok" : "error"} processed=${
+          payload.pairSnapshot.processedUnionAttempt.ok ? "ok" : "error"
+        } overlap=${payload.pairSnapshot.processedOverlap.overlapCount}`,
+        payload.pairSnapshot,
+        "error"
+      );
+      if (payload.pairSnapshot.regression?.isPreSplitRegression) {
+        pushDebugEntry(
+          "boolean.union.regression",
+          `pre-split regression: ${payload.pairSnapshot.sourceShapeIds.join(" + ")}`,
+          payload.pairSnapshot.regression,
+          "error"
+        );
+      }
+    }
+    throw error;
+  }
 }
 
-function differenceGeometry(subjectGeometry, clipGeometry) {
+function differenceGeometry(subjectGeometry, clipGeometry, context = {}) {
   const cleanSubject = sanitizeGeometry(subjectGeometry);
   const cleanClip = sanitizeGeometry(clipGeometry);
+  const payload = {
+    operation: "difference",
+    timestamp: new Date().toISOString(),
+    context: cloneDebugValue(context),
+    subject: deepCopyGeometry(cleanSubject),
+    clip: deepCopyGeometry(cleanClip),
+    subjectSummary: summarizeGeometry(cleanSubject),
+    clipSummary: summarizeGeometry(cleanClip),
+  };
 
-  if (!cleanSubject.length) return [];
-  if (!cleanClip.length) return deepCopyGeometry(cleanSubject);
+  if (!cleanSubject.length) {
+    payload.shortCircuit = "empty-subject";
+    payload.result = [];
+    payload.resultSummary = summarizeGeometry([]);
+    storeDebugGlobal("__cadDebugLastDifference", payload);
+    storeDebugGlobal("__cadDebugLastBooleanFailureFocus", null);
+    storeDebugGlobal("__cadDebugLastBooleanFailurePairSnapshot", null);
+    storeDebugGlobal("__cadDebugLastBooleanFailureRegression", null);
+    pushDebugEntry("boolean.difference", "empty subject", payload);
+    return [];
+  }
 
-  return sanitizeGeometry(polygonBoolean.difference(cleanSubject, cleanClip));
+  if (!cleanClip.length) {
+    const result = deepCopyGeometry(cleanSubject);
+    payload.shortCircuit = "empty-clip";
+    payload.result = result;
+    payload.resultSummary = summarizeGeometry(result);
+    storeDebugGlobal("__cadDebugLastDifference", payload);
+    storeDebugGlobal("__cadDebugLastBooleanFailureFocus", null);
+    storeDebugGlobal("__cadDebugLastBooleanFailurePairSnapshot", null);
+    storeDebugGlobal("__cadDebugLastBooleanFailureRegression", null);
+    pushDebugEntry("boolean.difference", "empty clip passthrough", {
+      context,
+      subjectSummary: payload.subjectSummary,
+    });
+    return result;
+  }
+
+  const preprocessed = preprocessDifferenceInputs(cleanSubject, cleanClip);
+  payload.preSplit = {
+    didChange: preprocessed.didChange,
+    splitPointCounts: preprocessed.splitPointCounts,
+    overlapCount: preprocessed.overlapCount,
+    overlapHints: preprocessed.overlapHints,
+    subject: deepCopyGeometry(preprocessed.subject),
+    clip: deepCopyGeometry(preprocessed.clip),
+    subjectSummary: summarizeGeometry(preprocessed.subject),
+    clipSummary: summarizeGeometry(preprocessed.clip),
+  };
+
+  pushDebugEntry("boolean.difference", "start", {
+    context,
+    subjectSummary: payload.subjectSummary,
+    clipSummary: payload.clipSummary,
+    preSplit: {
+      didChange: payload.preSplit.didChange,
+      splitPointCounts: payload.preSplit.splitPointCounts,
+      overlapCount: payload.preSplit.overlapCount,
+    },
+  });
+
+  try {
+    const result = sanitizeGeometry(polygonBoolean.difference(preprocessed.subject, preprocessed.clip));
+    payload.result = deepCopyGeometry(result);
+    payload.resultSummary = summarizeGeometry(result);
+    storeDebugGlobal("__cadDebugLastDifference", payload);
+    storeDebugGlobal("__cadDebugLastBooleanFailureFocus", null);
+    storeDebugGlobal("__cadDebugLastBooleanFailurePairSnapshot", null);
+    storeDebugGlobal("__cadDebugLastBooleanFailureRegression", null);
+    pushDebugEntry("boolean.difference", "success", {
+      context,
+      resultSummary: payload.resultSummary,
+      preSplit: {
+        didChange: payload.preSplit.didChange,
+        splitPointCounts: payload.preSplit.splitPointCounts,
+        overlapCount: payload.preSplit.overlapCount,
+      },
+    });
+    return result;
+  } catch (error) {
+    payload.error = serializeError(error);
+    storeDebugGlobal("__cadDebugLastDifference", payload);
+    storeDebugGlobal("__cadDebugLastBooleanFailure", payload);
+    storeDebugGlobal("__cadDebugLastBooleanFailureFocus", null);
+    storeDebugGlobal("__cadDebugLastBooleanFailurePairSnapshot", null);
+    storeDebugGlobal("__cadDebugLastBooleanFailureRegression", null);
+    pushDebugEntry("boolean.difference", "failure", {
+      context,
+      error: payload.error,
+      subjectSummary: payload.subjectSummary,
+      clipSummary: payload.clipSummary,
+      preSplit: {
+        didChange: payload.preSplit.didChange,
+        splitPointCounts: payload.preSplit.splitPointCounts,
+        overlapCount: payload.preSplit.overlapCount,
+        overlapHints: payload.preSplit.overlapHints,
+      },
+    }, "error");
+    throw error;
+  }
 }
 
 function worldToDraft(point) {
@@ -1291,9 +2411,22 @@ function createLayerShapeRecordsFromGeometry(layerId, geometry) {
   return nextShapes;
 }
 
-function buildUnionShapes(layerId, sourceShapes) {
+function buildUnionShapes(layerId, sourceShapes, context = {}) {
   if (!sourceShapes.length) return [];
-  return createLayerShapeRecordsFromGeometry(layerId, unionGeometryList(sourceShapes.map((shape) => shape.geometry)));
+
+  return createLayerShapeRecordsFromGeometry(
+    layerId,
+    unionGeometryList(
+      sourceShapes.map((shape) => shape.geometry),
+      {
+        layerId,
+        stage: "buildUnionShapes",
+        sourceShapeIds: sourceShapes.map((shape) => shape.id),
+        sourceShapeCount: sourceShapes.length,
+        ...context,
+      }
+    )
+  );
 }
 
 function replaceLayerShapes(layerId, nextLayerShapes) {
@@ -1301,29 +2434,103 @@ function replaceLayerShapes(layerId, nextLayerShapes) {
   state.shapes = [...otherShapes, ...nextLayerShapes];
 }
 
-function rebuildLayerShapes(layerId) {
+function rebuildLayerShapes(layerId, context = {}) {
   const layerShapes = state.shapes.filter((shape) => shape.layerId === layerId);
-  replaceLayerShapes(layerId, buildUnionShapes(layerId, layerShapes));
+
+  pushDebugEntry("rebuildLayerShapes", "start", {
+    layerId,
+    context,
+    sourceShapeCount: layerShapes.length,
+    sourceShapes: layerShapes.map((shape) => summarizeShape(shape)),
+  });
+
+  const nextLayerShapes = buildUnionShapes(layerId, layerShapes, {
+    stage: "rebuildLayerShapes",
+    ...context,
+  });
+
+  replaceLayerShapes(layerId, nextLayerShapes);
+
+  pushDebugEntry("rebuildLayerShapes", "complete", {
+    layerId,
+    context,
+    sourceShapeCount: layerShapes.length,
+    resultShapeCount: nextLayerShapes.length,
+    resultShapes: nextLayerShapes.map((shape) => summarizeShape(shape)),
+  });
+
+  return nextLayerShapes;
 }
 
 function insertShapeToLayer(layerId, shape) {
+  pushDebugEntry("insertShapeToLayer", "append incoming shape", {
+    layerId,
+    shape: summarizeShape(shape),
+    layerShapeCountBeforeInsert: state.shapes.filter((candidate) => candidate.layerId === layerId).length,
+  });
+
   state.shapes.push(shape);
-  rebuildLayerShapes(layerId);
+
+  pushDebugEntry("insertShapeToLayer", "shape inserted before rebuild", {
+    layerId,
+    insertedShapeId: shape.id,
+    layerShapeCountAfterInsert: state.shapes.filter((candidate) => candidate.layerId === layerId).length,
+  });
+
+  rebuildLayerShapes(layerId, {
+    reason: "insertShapeToLayer",
+    insertedShapeId: shape.id,
+  });
 }
 
 function subtractGeometryFromLayer(layerId, subtractionGeometry) {
   const layerShapes = state.shapes.filter((shape) => shape.layerId === layerId);
-  if (!layerShapes.length) return;
+  if (!layerShapes.length) {
+    pushDebugEntry("subtractGeometryFromLayer", "no-op; layer has no shapes", {
+      layerId,
+      subtractionGeometry: summarizeGeometry(subtractionGeometry),
+    }, "warn");
+    return;
+  }
 
   const affectsSelection = getSelectedShapes().some((shape) => shape.layerId === layerId);
+  pushDebugEntry("subtractGeometryFromLayer", "start", {
+    layerId,
+    affectsSelection,
+    layerShapeCount: layerShapes.length,
+    layerShapes: layerShapes.map((shape) => summarizeShape(shape)),
+    subtractionGeometry: summarizeGeometry(subtractionGeometry),
+  });
+
   const nextGeometry = differenceGeometry(
-    unionGeometryList(layerShapes.map((shape) => shape.geometry)),
-    subtractionGeometry
+    unionGeometryList(layerShapes.map((shape) => shape.geometry), {
+      layerId,
+      stage: "subtractGeometryFromLayer",
+      phase: "subject-union",
+      sourceShapeIds: layerShapes.map((shape) => shape.id),
+    }),
+    subtractionGeometry,
+    {
+      layerId,
+      stage: "subtractGeometryFromLayer",
+      phase: "difference",
+      sourceShapeIds: layerShapes.map((shape) => shape.id),
+      subtractionSummary: summarizeGeometry(subtractionGeometry),
+    }
   );
 
-  replaceLayerShapes(layerId, createLayerShapeRecordsFromGeometry(layerId, nextGeometry));
+  const nextLayerShapes = createLayerShapeRecordsFromGeometry(layerId, nextGeometry);
+  replaceLayerShapes(layerId, nextLayerShapes);
 
   if (affectsSelection) clearSelectionForLayer(layerId);
+
+  pushDebugEntry("subtractGeometryFromLayer", "complete", {
+    layerId,
+    affectsSelection,
+    resultGeometry: summarizeGeometry(nextGeometry),
+    resultShapeCount: nextLayerShapes.length,
+    resultShapes: nextLayerShapes.map((shape) => summarizeShape(shape)),
+  });
 }
 
 function renderLayersPanel() {
@@ -2240,98 +3447,187 @@ canvas.addEventListener("pointermove", (e) => {
 });
 
 function finishDrag(e) {
-  if (e && e.type !== "pointerleave") {
-    const screen = getPos(e);
-    state.pointerScreen = { x: screen.x, y: screen.y };
-    const rawDraft = screenToDraft(screen);
-    state.draftCurrent = resolvePointerDraftPoint(rawDraft, e.shiftKey, screen);
-    state.current = draftToWorld(state.draftCurrent);
-  }
+  const startedDragging = state.dragging;
+  const startedTool = state.tool;
+  const startedDrawOperation = state.drawOperation;
+  const finishContext = {
+    eventType: e ? e.type : "synthetic",
+    tool: startedTool,
+    drawOperation: startedDrawOperation,
+    activeLayerId: state.activeLayerId,
+    startedDragging,
+    draftShape: state.draftShape
+      ? {
+          small: !!state.draftShape.small,
+          bounds: serializeDebugBounds(state.draftShape.bounds),
+          geometry: summarizeGeometry(state.draftShape.geometry),
+        }
+      : null,
+  };
+  let finishError = null;
 
-  if (state.draggingDraftAlign) {
-    const canApply = !e || e.type !== "pointerleave";
-    let didApply = false;
-    if (canApply) {
-      state.draftAlignCurrentSnap = cloneSnapTarget(getDraftTransformSnapTarget(state.current));
-      didApply = applyDraftAlignFromDrag();
+  pushDebugEntry("finishDrag", "start", finishContext);
+
+  try {
+    if (e && e.type !== "pointerleave") {
+      const screen = getPos(e);
+      state.pointerScreen = { x: screen.x, y: screen.y };
+      const rawDraft = screenToDraft(screen);
+      state.draftCurrent = resolvePointerDraftPoint(rawDraft, e.shiftKey, screen);
+      state.current = draftToWorld(state.draftCurrent);
     }
 
-    cancelDraftAlignDrag();
-    if (didApply) refreshPointerDerivedState();
-    updateCursor();
-    render();
-    return;
-  }
-
-  if (state.draggingDraftOrigin) {
-    state.draggingDraftOrigin = false;
-    state.current = draftToWorld(state.draftCurrent);
-    updateCursor();
-    render();
-    return;
-  }
-
-  if (state.panning) {
-    state.panning = false;
-    updateCursor();
-    render();
-    return;
-  }
-
-  if (!state.dragging) return;
-
-  if (state.tool === "select") {
-    if (state.selection.mode === "toggle-pending") {
-      setSelectedShapeIds(
-        getToggledShapeIds(state.selection.boxBaseShapeIds || [], state.selection.pendingShapeId ? [state.selection.pendingShapeId] : [])
-      );
-      resetSelectionInteraction();
-      state.dragging = false;
-      render();
-      return;
-    }
-
-    if (state.selection.mode === "box") {
-      updateSelectionBoxSelection(state.draftCurrent);
-      resetSelectionInteraction();
-      state.dragging = false;
-      render();
-      return;
-    }
-
-    const movedGeometriesByLayer = state.selection.modified ? collectSelectedGeometriesByLayer() : null;
-    const affectedLayerIds = movedGeometriesByLayer ? Object.keys(movedGeometriesByLayer) : [];
-
-    resetSelectionInteraction();
-    state.dragging = false;
-
-    if (affectedLayerIds.length) {
-      for (const layerId of affectedLayerIds) {
-        rebuildLayerShapes(layerId);
+    if (state.draggingDraftAlign) {
+      const canApply = !e || e.type !== "pointerleave";
+      let didApply = false;
+      if (canApply) {
+        state.draftAlignCurrentSnap = cloneSnapTarget(getDraftTransformSnapTarget(state.current));
+        didApply = applyDraftAlignFromDrag();
       }
 
-      setSelectedShapeIds(getShapeIdsIntersectingLayerGeometries(movedGeometriesByLayer));
+      pushDebugEntry("finishDrag", "complete draft align drag", {
+        ...finishContext,
+        canApply,
+        didApply,
+      });
+      cancelDraftAlignDrag();
+      if (didApply) refreshPointerDerivedState();
+      updateCursor();
+      render();
+      return;
     }
 
-    render();
-    return;
-  }
+    if (state.draggingDraftOrigin) {
+      state.draggingDraftOrigin = false;
+      state.current = draftToWorld(state.draftCurrent);
+      pushDebugEntry("finishDrag", "complete draft origin drag", finishContext);
+      updateCursor();
+      render();
+      return;
+    }
 
-  if (state.tool === "draw") {
-    if (state.draftShape && !state.draftShape.small) {
-      if (state.drawOperation === "subtract") {
-        subtractGeometryFromLayer(state.activeLayerId, state.draftShape.geometry);
+    if (state.panning) {
+      state.panning = false;
+      pushDebugEntry("finishDrag", "complete pan drag", finishContext);
+      updateCursor();
+      render();
+      return;
+    }
+
+    if (!state.dragging) return;
+
+    if (state.tool === "select") {
+      if (state.selection.mode === "toggle-pending") {
+        setSelectedShapeIds(
+          getToggledShapeIds(state.selection.boxBaseShapeIds || [], state.selection.pendingShapeId ? [state.selection.pendingShapeId] : [])
+        );
+        resetSelectionInteraction();
+        state.dragging = false;
+        pushDebugEntry("finishDrag", "select toggle commit", {
+          ...finishContext,
+          selectionShapeIds: [...state.selection.shapeIds],
+        });
+        render();
+        return;
+      }
+
+      if (state.selection.mode === "box") {
+        updateSelectionBoxSelection(state.draftCurrent);
+        resetSelectionInteraction();
+        state.dragging = false;
+        pushDebugEntry("finishDrag", "select box commit", {
+          ...finishContext,
+          selectionShapeIds: [...state.selection.shapeIds],
+        });
+        render();
+        return;
+      }
+
+      const movedGeometriesByLayer = state.selection.modified ? collectSelectedGeometriesByLayer() : null;
+      const affectedLayerIds = movedGeometriesByLayer ? Object.keys(movedGeometriesByLayer) : [];
+
+      pushDebugEntry("finishDrag", "select move commit", {
+        ...finishContext,
+        selectionModified: state.selection.modified,
+        affectedLayerIds,
+      });
+
+      resetSelectionInteraction();
+      state.dragging = false;
+
+      if (affectedLayerIds.length) {
+        for (const layerId of affectedLayerIds) {
+          rebuildLayerShapes(layerId, {
+            reason: "finishDrag-select-move",
+          });
+        }
+
+        setSelectedShapeIds(getShapeIdsIntersectingLayerGeometries(movedGeometriesByLayer));
+      }
+
+      render();
+      return;
+    }
+
+    if (state.tool === "draw") {
+      if (state.draftShape && !state.draftShape.small) {
+        pushDebugEntry("finishDrag", "draw commit begin", {
+          ...finishContext,
+          drawOperation: state.drawOperation,
+          draftGeometry: summarizeGeometry(state.draftShape.geometry),
+        });
+
+        if (state.drawOperation === "subtract") {
+          subtractGeometryFromLayer(state.activeLayerId, state.draftShape.geometry);
+        } else {
+          const shape = createShapeRecord(state.activeLayerId, state.draftShape.geometry);
+          pushDebugEntry("finishDrag", "created layer insert candidate", {
+            ...finishContext,
+            createdShape: summarizeShape(shape),
+          });
+          if (shape) insertShapeToLayer(state.activeLayerId, shape);
+        }
+
+        pushDebugEntry("finishDrag", "draw commit complete", {
+          ...finishContext,
+          activeLayerId: state.activeLayerId,
+        });
       } else {
-        const shape = createShapeRecord(state.activeLayerId, state.draftShape.geometry);
-        if (shape) insertShapeToLayer(state.activeLayerId, shape);
+        pushDebugEntry("finishDrag", "draw commit skipped; draft shape empty or small", finishContext, "warn");
       }
     }
-  }
 
-  state.dragging = false;
-  state.drawOperation = "add";
-  resetDrawSession();
-  render();
+    state.dragging = false;
+    state.drawOperation = "add";
+    resetDrawSession();
+    render();
+  } catch (error) {
+    finishError = error;
+    pushDebugEntry("finishDrag", "failure", {
+      ...finishContext,
+      currentLayerShapes: state.shapes
+        .filter((shape) => shape.layerId === state.activeLayerId)
+        .map((shape) => summarizeShape(shape)),
+      error: serializeError(error),
+      lastUnion: window.__cadDebugLastUnion,
+      lastDifference: window.__cadDebugLastDifference,
+      lastBooleanFailure: window.__cadDebugLastBooleanFailure,
+    }, "error");
+  } finally {
+    if (finishError) {
+      if (startedDragging && startedTool === "draw") {
+        state.dragging = false;
+        state.drawOperation = "add";
+        resetDrawSession();
+      } else if (startedDragging && startedTool === "select") {
+        state.dragging = false;
+        resetSelectionInteraction();
+      }
+
+      updateCursor();
+      render();
+    }
+  }
 }
 
 canvas.addEventListener("pointerup", finishDrag);
@@ -2513,10 +3809,34 @@ window.addEventListener("keyup", (e) => {
   }
 });
 
+window.addEventListener("error", (event) => {
+  pushDebugEntry("runtime.error", "uncaught window error", {
+    message: event.message,
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+    error: serializeError(event.error),
+    lastBooleanFailure: window.__cadDebugLastBooleanFailure,
+  }, "error");
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  pushDebugEntry("runtime.error", "unhandled promise rejection", {
+    reason:
+      event.reason instanceof Error
+        ? serializeError(event.reason)
+        : {
+            value: cloneDebugValue(event.reason),
+          },
+    lastBooleanFailure: window.__cadDebugLastBooleanFailure,
+  }, "error");
+});
+
 window.addEventListener("resize", resizeCanvas);
 
 updateZoomLabel();
 updateWorkplaneStatus();
+updateDebugStatus("idle");
 updateCursor();
 renderLayersPanel();
 syncDrawSizeInput();

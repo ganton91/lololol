@@ -1,4 +1,4 @@
-import { ClipType, FillRule, PolyTree64, booleanOpWithPolyTree, isPositive } from "clipper2-ts";
+import { ClipType, FillRule, PolyTree64, booleanOpWithPolyTree, isPositive, simplifyPaths } from "clipper2-ts";
 import {
   DEFAULT_DRAFT_ANGLE_FAMILY_ID,
   DEFAULT_DRAFT_ANGLE_FAMILY_RECORD,
@@ -116,6 +116,7 @@ const clipperScaleFactor = 10 ** clipperDecimals;
 const geometryPrecisionDecimals = clipperDecimals;
 const geometryPrecisionFactor = clipperScaleFactor;
 const clipperFillRule = FillRule.NonZero;
+const clipperSimplifyCollinearEpsilon = 0;
 const draftAngleCandidateFamilyId = "draft-angle-candidate";
 const draftAngleFamilyRuntimes = new Map();
 let draftAngleCandidateRuntime = null;
@@ -823,6 +824,36 @@ function clipperPathToRing(path) {
   if (!Array.isArray(path) || !path.length) return null;
 
   return normalizeRing(path.map((point) => [scaleCoordinateFromClipperInt(point.x), scaleCoordinateFromClipperInt(point.y)]), true);
+}
+
+function simplifyGeometryCollinear(geometry) {
+  const cleanGeometry = sanitizeGeometry(geometry, true);
+  if (!cleanGeometry.length) return [];
+
+  const simplifiedGeometry = [];
+  for (const polygon of cleanGeometry) {
+    const clipperPaths = [];
+
+    for (let ringIndex = 0; ringIndex < polygon.length; ringIndex += 1) {
+      const clipperPath = ringToClipperPath(polygon[ringIndex], ringIndex === 0);
+      if (clipperPath) clipperPaths.push(clipperPath);
+    }
+
+    if (!clipperPaths.length) continue;
+
+    const simplifiedPaths = simplifyPaths(clipperPaths, clipperSimplifyCollinearEpsilon, true);
+    const simplifiedPolygon = [];
+
+    for (let ringIndex = 0; ringIndex < simplifiedPaths.length; ringIndex += 1) {
+      const orientedPath = orientClipperPath(simplifiedPaths[ringIndex], ringIndex === 0);
+      const simplifiedRing = clipperPathToRing(orientedPath);
+      if (simplifiedRing) simplifiedPolygon.push(simplifiedRing);
+    }
+
+    if (simplifiedPolygon.length) simplifiedGeometry.push(simplifiedPolygon);
+  }
+
+  return sanitizeGeometry(simplifiedGeometry, true);
 }
 
 function fromPolyTree(tree) {
@@ -1600,7 +1631,9 @@ function createLayerShapeRecordsFromGeometry(layerId, geometry) {
 
 function buildUnionShapes(layerId, sourceShapes) {
   if (!sourceShapes.length) return [];
-  return createLayerShapeRecordsFromGeometry(layerId, unionGeometryList(sourceShapes.map((shape) => shape.geometry)));
+  const unionGeometry = unionGeometryList(sourceShapes.map((shape) => shape.geometry));
+  const simplifiedGeometry = simplifyGeometryCollinear(unionGeometry);
+  return createLayerShapeRecordsFromGeometry(layerId, simplifiedGeometry);
 }
 
 function replaceLayerShapes(layerId, nextLayerShapes) {

@@ -161,8 +161,21 @@ Layer order controls draw order. The active layer receives new geometry when the
 ## Current Task
 
 - Task: implement a canonical draft-angle lookup-table system for `Space + wheel`, plus dynamic angle families for `Align`.
-- Status: requirements clarified; implementation not started yet.
+- Status: canonical angle-family system is implemented in code, including unresolved `Align` candidates and first-commit dynamic-family adoption; browser validation and user confirmation are still pending.
 - Progress:
+  - Implemented in the current slice:
+    - Added a browser-native `draft-angle.js` module for serializable family records plus runtime lookup-table generation.
+    - Added the canonical default family for `0..359` degree steps, with lookup entries that store stable `sin` and `cos` coefficients rounded to the shared `8`-decimal precision.
+    - Reworked workplane angle state so the active regime is now represented as `family/free base + integer step`, instead of relying on `draftAngleBase + draftAngleStepOffset` float recomputation inside the transform path.
+    - `Space + wheel` now advances the active workplane through integer step identity and the active workplane transform reads coefficients from the current family entry when the plane is in a known family.
+    - `draft -> world` and `world -> draft` now use lookup-backed coefficients for family-driven planes, while the fallback free-angle path still exists for unresolved non-family angles.
+    - `Align` now resolves through the same new angle-state abstraction: if the aligned direction matches a known family signature it re-enters that family, otherwise it falls back to a quantized free-angle regime instead of writing raw base-angle float state directly.
+    - The workplane runtime/state shape is now set up to remain serializable and leaves room for later persistent dynamic families without changing the plain-browser / native-ES-module architecture.
+    - The workplane status readout now formats the rotation value with up to `15` decimal places, while origin coordinates keep the shorter display format.
+    - `Align` to an unknown direction now activates an unresolved temporary candidate family instead of immediately persisting a new dynamic family.
+    - If a later `Align` lands on a direction that belongs to the same unresolved candidate regime, the candidate is reused with the matching step instead of creating another candidate.
+    - The first real committed draw operation under an unresolved candidate regime now materializes that candidate into a persistent dynamic family, for both `Add` and `Subtract`.
+    - Leaving the unresolved regime by resetting the plane or aligning into a known/persistent family now discards the temporary candidate instead of keeping it around as a persistent family.
   - The `Space + wheel` path should become integer-driven:
     - the active wheel rotation must be treated as a canonical integer degree step;
     - app logic should feed the wheel path with that integer degree identity rather than a derived floating-point degree value.

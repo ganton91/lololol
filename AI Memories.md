@@ -23,6 +23,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - `index.html` contains the canvas, toolbar, zoom controls, live workplane status readout, hint area, and layers panel.
 - `app.js` reads those DOM elements and drives the whole interaction loop.
 - The app still runs as a plain browser project without a bundler.
+- The preferred project direction is to remain compatible with plain browser deployment through native ES modules and static hosting (for example GitHub Pages or similar simple web hosting) without requiring a build step just to run the app.
 
 ### Geometry Model
 

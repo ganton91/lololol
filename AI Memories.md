@@ -172,11 +172,15 @@ Layer order controls draw order. The active layer receives new geometry when the
   - The default integer family must remain stable when the user rotates away and back again with `Space + wheel`, so revisiting the same degree step always reuses the exact same canonical trig coefficients.
   - `Align` needs two behaviors:
     - if the aligned edge direction matches a known canonical family direction, `Align` should snap back into that existing family rather than keeping a raw floating angle;
-    - if the aligned edge direction does not match any known family, the app should create a new dynamic angle family for that canonicalized base angle.
+    - if the aligned direction does not match any known family, `Align` should be able to work with a temporary candidate canonical angle even before a persistent family exists.
   - Dynamic angle families should use the same `8`-decimal canonical precision for their base angle and generated trig coefficients.
   - A dynamic family is conceptually a full 360-step regime derived from its base angle:
     - example: a family created at `14.37deg` should also provide canonical entries for `15.37deg`, `16.37deg`, and so on modulo `360deg`.
-  - Dynamic families should be created when the user explicitly adopts a new drafting direction through `Align`, not merely because a newly drawn shape happens to contain an unusual angle.
+  - `Align` can come from nearby geometry, from relationships between different shapes, or from free-space placement in the air, so the app must not assume that every aligned direction corresponds to an already-persistent family.
+  - Dynamic families should not be persisted immediately on `Align` alone, because the user may align to a temporary direction and never draw anything.
+  - A new dynamic family should become persistent only after the user actually commits new geometry while that unresolved aligned direction is active.
+  - If the user aligns to a new unresolved direction but does not commit any new geometry, the temporary candidate should be discarded instead of leaving behind an unused family.
+  - Dynamic families therefore should be materialized on first committed draw/adoption under that angle regime, not merely on detection of a new aligned direction and not merely because a newly drawn shape happens to contain an unusual angle.
   - The current free-angle trig path should remain as a temporary fallback for non-integer/non-family angles until the full family system is implemented.
   - A future `Select`-mode rotate transform is also expected to follow the same canonical angle model:
     - selected shapes should rotate in exact `1deg` wheel steps;

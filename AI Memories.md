@@ -191,3 +191,4 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `Select`-mode rotate should not create persistent angle families by itself.
   - If the user later `Align`s to an edge direction of a rotated shape, the app should then resolve or create the corresponding canonical family from that edge direction.
   - Dynamic families created from rotated-shape edge directions should still behave as full 360-step families, so earlier and later directions of that same rotated regime remain reachable within the same family.
+  - Even before export/import exists in the UI, angle families should be designed as serializable project data rather than as ad-hoc runtime-only helpers, because future export must preserve existing families and future import must restore them.

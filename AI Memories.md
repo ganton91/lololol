@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-03-29
+- Last updated: 2026-03-30
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -159,4 +159,30 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- No active task currently recorded.
+- Task: implement a canonical draft-angle lookup-table system for `Space + wheel`, plus dynamic angle families for `Align`.
+- Status: requirements clarified; implementation not started yet.
+- Progress:
+  - The `Space + wheel` path should become integer-driven:
+    - the active wheel rotation must be treated as a canonical integer degree step;
+    - app logic should feed the wheel path with that integer degree identity rather than a derived floating-point degree value.
+  - A fixed default lookup table should cover the base draft-angle family for `0..359` degree steps.
+  - Each default table entry should store canonical `sin` and `cos` coefficients rounded to the same shared `8`-decimal precision used elsewhere in the geometry pipeline.
+  - During `draft -> world` and `world -> draft` transforms, the wheel-driven path should read trig coefficients from the active lookup-table family instead of recomputing `Math.sin(...)` / `Math.cos(...)` on demand.
+  - This matters even when the user draws geometry at non-axis draft angles inside the current plane: the internal draft geometry may have its own relative direction, but the plane transfer into world space must still use the canonical trig coefficients of the active draft-angle family.
+  - The default integer family must remain stable when the user rotates away and back again with `Space + wheel`, so revisiting the same degree step always reuses the exact same canonical trig coefficients.
+  - `Align` needs two behaviors:
+    - if the aligned edge direction matches a known canonical family direction, `Align` should snap back into that existing family rather than keeping a raw floating angle;
+    - if the aligned edge direction does not match any known family, the app should create a new dynamic angle family for that canonicalized base angle.
+  - Dynamic angle families should use the same `8`-decimal canonical precision for their base angle and generated trig coefficients.
+  - A dynamic family is conceptually a full 360-step regime derived from its base angle:
+    - example: a family created at `14.37deg` should also provide canonical entries for `15.37deg`, `16.37deg`, and so on modulo `360deg`.
+  - Dynamic families should be created when the user explicitly adopts a new drafting direction through `Align`, not merely because a newly drawn shape happens to contain an unusual angle.
+  - The current free-angle trig path should remain as a temporary fallback for non-integer/non-family angles until the full family system is implemented.
+  - A future `Select`-mode rotate transform is also expected to follow the same canonical angle model:
+    - selected shapes should rotate in exact `1deg` wheel steps;
+    - the rotate interaction should be integer-step driven rather than cumulative floating-angle driven;
+    - preview and commit should be computed from the original selection snapshot plus the total integer step delta, not by repeatedly re-rotating already-rotated geometry.
+    - the rotation pivot should be the centroid/selection center of the current selection, whether the user has selected one shape or multiple shapes.
+  - `Select`-mode rotate should not create persistent angle families by itself.
+  - If the user later `Align`s to an edge direction of a rotated shape, the app should then resolve or create the corresponding canonical family from that edge direction.
+  - Dynamic families created from rotated-shape edge directions should still behave as full 360-step families, so earlier and later directions of that same rotated regime remain reachable within the same family.

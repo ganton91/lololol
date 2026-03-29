@@ -96,8 +96,10 @@ const draftTransformCornerSnapRadiusPx = 20;
 const draftTransformCornerPriorityRadiusPx = 16;
 const selectionToggleDragThresholdPx = 5;
 const layerPalette = ["#93c5fd", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#fdba74", "#67e8f9"];
-const clipperDecimals = 6;
+const clipperDecimals = 8;
 const clipperScaleFactor = 10 ** clipperDecimals;
+const geometryPrecisionDecimals = clipperDecimals;
+const geometryPrecisionFactor = clipperScaleFactor;
 const clipperFillRule = FillRule.NonZero;
 
 function updateZoomLabel() {
@@ -435,13 +437,24 @@ function deepCopyGeometry(geometry) {
   return geometry.map((polygon) => polygon.map((ring) => ring.map((point) => [point[0], point[1]])));
 }
 
-function rotatePoint(point, angle) {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
+function quantizeCoordinate(value) {
+  return Math.round(value * geometryPrecisionFactor) / geometryPrecisionFactor;
+}
+
+function quantizePoint(point) {
   return {
+    x: quantizeCoordinate(point.x),
+    y: quantizeCoordinate(point.y),
+  };
+}
+
+function rotatePoint(point, angle) {
+  const cos = quantizeCoordinate(Math.cos(angle));
+  const sin = quantizeCoordinate(Math.sin(angle));
+  return quantizePoint({
     x: point.x * cos - point.y * sin,
     y: point.x * sin + point.y * cos,
-  };
+  });
 }
 
 function normalizeAngle(angle) {
@@ -494,10 +507,10 @@ function worldToDraftWithPlane(point, origin, angle) {
 
 function draftToWorldWithPlane(point, origin, angle) {
   const rotated = rotatePoint(point, angle);
-  return {
+  return quantizePoint({
     x: rotated.x + origin.x,
     y: rotated.y + origin.y,
-  };
+  });
 }
 
 function transformGeometry(geometry, transformer) {
@@ -509,10 +522,6 @@ function transformGeometry(geometry, transformer) {
       })
     )
   );
-}
-
-function quantizeCoordinate(value) {
-  return Math.round(value * clipperScaleFactor) / clipperScaleFactor;
 }
 
 function scaleCoordinateToClipperInt(value) {
@@ -812,7 +821,9 @@ function createEllipseGeometry(rect) {
 
   for (let i = 0; i < ellipseSegments; i += 1) {
     const angle = (i / ellipseSegments) * Math.PI * 2;
-    points.push([cx + Math.cos(angle) * rx, cy + Math.sin(angle) * ry]);
+    const cos = quantizeCoordinate(Math.cos(angle));
+    const sin = quantizeCoordinate(Math.sin(angle));
+    points.push([quantizeCoordinate(cx + cos * rx), quantizeCoordinate(cy + sin * ry)]);
   }
 
   return [[points]];

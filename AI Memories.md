@@ -8,7 +8,7 @@
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
-- Main geometry dependency: `polygon-clipping`
+- Main geometry dependency: `clipper2-ts`
 
 ## What The Application Currently Is
 
@@ -34,8 +34,9 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
   - `layerId`
   - `geometry`
   - `bounds`
-- Boolean union is handled through `polygon-clipping`.
-- Boolean subtraction is also handled through `polygon-clipping.difference`.
+- Boolean union, subtraction, and overlap/intersection checks are handled through `clipper2-ts`.
+- The boolean boundary is wrapped by an in-file Clipper adapter layer that preserves the app's nested `[[outer, hole1...]]` multipolygon model.
+- The Clipper adapter uses fixed precision integer scaling with a shared `8`-decimal coordinate policy.
 - Layer geometry is rebuilt by unioning the shapes that belong to the layer.
 
 ### Important Geometry Note
@@ -52,6 +53,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - The visible grid stays screen-aligned even when the drafting angle changes.
 - World content is rendered through a drafting/workplane transform with both `origin` and `angle`, so stored geometry stays in world coordinates while the user can draw against a translated and rotated drafting frame.
 - Wheel-based draft-plane rotation is now canonical instead of accumulated: the workplane keeps a normalized base angle plus an integer wheel-step offset, so rotating away and back returns to the same exact plane instead of a float-near-zero residual angle.
+- Trig-generated workplane coordinates and the Clipper adapter now share the same `8`-decimal quantization policy, so rotated world-space geometry enters boolean operations on the same canonical coordinate grid.
 - There is no raster-mask union pipeline anymore.
 - Each visible layer is drawn from its current merged vector shapes.
 - Selection highlighting is drawn by tracing the selected shape geometries.
@@ -100,6 +102,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The app maintains a workplane with separate `origin` and `angle`, independent from stored geometry.
 - Existing geometry is displayed relative to the current workplane, while the visible grid remains horizontal and vertical on screen.
 - New drawing input is created in drafting coordinates relative to the current workplane and converted back into world geometry before boolean union with the layer.
+- World-space vertices produced from rotated draft geometry are quantized to the same shared `8`-decimal precision used by the Clipper boolean boundary.
 - Wheel-based workplane rotation no longer accumulates float angle drift: returning by the same number of wheel steps restores the exact same derived plane angle, which prevents post-rotate seams caused by near-zero residual rotation.
 - While `Space` is held, the normal draw/select interaction is temporarily suspended and the pointer is used for drafting transformations instead.
 - `Space + Left Drag` workplane alignment can start and end anywhere in space, but nearby geometry acts like a magnetic snap target.
@@ -121,11 +124,13 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Dependency Notes
 
-### `polygon-clipping`
+### `clipper2-ts`
 
 - Installed through `npm`.
 - Stored under `node_modules`.
-- Used for polygon boolean union.
+- Used for polygon boolean union, subtraction, and intersection/overlap checks.
+- Used through an adapter layer in `app.js` that converts between the app's nested multipolygon geometry model and Clipper `Paths64` / `PolyTree64` structures.
+- Uses fixed precision integer scaling with a shared `8`-decimal coordinate policy across both trig-generated geometry and boolean operations.
 - Current package file: `package.json`
 
 ## Working Agreement For Future Changes
@@ -142,43 +147,16 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ### 1. Rotated Draft Plane Boolean Merge / Topology Bug
 
-- Status: identified, not fixed yet.
+- Status: fixed and kept here only as historical record.
 - Symptom: at non-zero draft-plane rotation, shapes that should merge can remain separate even when the draw itself succeeds and no runtime boolean error is thrown.
-- Current diagnosis: the main suspicion is that the problem begins when clean snapped draft-plane geometry is transformed into world space through rotation. At `0deg` the user has not reproduced this class of issue, but at non-zero angles the world-space coordinates are produced through trig-based floating-point transforms. That can turn exact shared draft edges into near-matching world-space vertices, micro-gaps, zero-area edge contact, or awkward collinear/topology cases before `polygon-clipping` runs.
-- Chosen next method: `Fixed Precision Quantization`.
-- Planned implementation details:
-  - Choose one canonical world-space decimal precision that is fine enough to remove floating-point noise from the rotated transform without visibly deforming the geometry.
-  - Apply that same precision consistently to every world-space vertex produced from draft geometry before any boolean union or difference call.
-  - Apply the same precision again to boolean outputs before storing rebuilt layer geometry, so the whole pipeline keeps using the same canonical coordinate system.
-  - After quantization, sanitize rings by collapsing near-identical consecutive points, removing degenerate zero-length edges, and preserving valid closed polygon loops.
-  - Re-test the already known failure family under non-zero rotation: adjacent cells sharing an edge, rectangle-to-merged-shape contact, and shape-to-hole-boundary contact.
-  - Compare those same scenarios against the `0deg` workplane to confirm that the method is specifically removing rotation-induced float mismatch rather than changing the intended snap rules.
-  - If fixed precision quantization reduces the rotation-driven mismatch but some zero-area edge-adjacency cases still remain, treat those as a second-stage topology policy problem instead of mixing them into the quantization work.
-- Progress toward the fix: no code has been written for this method yet. Earlier debug and pre-split experiments were discarded so the next chat can start from a clean baseline and implement this approach directly.
+- Root cause: rotated draft-plane geometry was entering the world-space boolean pipeline with trig-based floating-point noise, so edges that should have matched exactly could arrive as near-matching coordinates instead of a single canonical edge.
+- Fix that resolved it:
+  - The app now uses `clipper2-ts` as the boolean engine through the Clipper adapter in `app.js`.
+  - The Clipper boundary uses fixed precision scaling with a shared `8`-decimal coordinate policy.
+  - `rotatePoint(...)` now rounds `Math.sin(...)` / `Math.cos(...)` to that same `8`-decimal precision and quantizes the rotated coordinates it returns.
+  - Ellipse point generation uses that same `8`-decimal trig precision before geometry enters boolean operations.
+- Result: the rotated draft-plane merge/topology failure is considered resolved.
 
 ## Current Task
 
-- Task: migrate the app from `polygon-clipping` to `clipper2-ts` with a Clipper adapter layer while keeping the existing nested multipolygon geometry model.
-- Status: implementation completed in code; awaiting user verification before promoting the new dependency and behavior into the permanent sections above.
-- Progress:
-  - Replaced the npm dependency in `package.json` and `package-lock.json` with `clipper2-ts`.
-  - Switched browser loading to ES modules:
-    - `index.html` now uses an import map for `clipper2-ts`.
-    - `app.js` now loads as `<script type="module">`.
-    - `package.json` now includes `npm run dev` using `python3 -m http.server 4173` because the module-based setup should be served over a local HTTP server instead of relying on direct `file://` loading.
-  - Implemented a Clipper adapter boundary inside `app.js`:
-    - fixed precision uses `clipperDecimals = 6` with explicit `SCALE_FACTOR = 1_000_000` style integer scaling at the adapter boundary;
-    - `toClipperPaths(...)` flattens the app's `[[outer, hole1...]]` geometry into Clipper `Paths64` after quantizing every coordinate to 6 decimal places and scaling to integers;
-    - `fromPolyTree(...)` reconstructs the app's nested polygon-with-holes model from Clipper `PolyTree64` results and explicitly normalizes outer/hole winding orientation before converting back into the app's stored geometry;
-    - boolean execution now uses `booleanOpWithPolyTree(...)` for union, difference, and intersection/overlap checks.
-  - Rewired the previous `polygon-clipping` integration points:
-    - `unionGeometryList(...)`
-    - `differenceGeometry(...)`
-    - `geometriesOverlap(...)`
-  - Verification completed so far:
-    - local dev server served `index.html` and `node_modules/clipper2-ts/dist/index.js` successfully over HTTP;
-    - synthetic rotated-geometry union probes with the same precision strategy produced a single merged polygon for adjacent rotated cells;
-    - synthetic rotated T-junction union probes also produced a single merged polygon;
-    - a synthetic rotated hole-boundary fill probe produced one solid polygon with no remaining hole.
-  - Still pending:
-    - direct in-browser manual verification inside the real app UI, especially on rotated workplanes.
+- No active task currently recorded.

@@ -87,6 +87,8 @@ const squareBrushAxisDecisionBiasPx = 8;
 const draftRotationStepDegrees = 1;
 const draftRotationStep = (Math.PI / 180) * draftRotationStepDegrees;
 const draftRotationStepsPerTurn = Math.round(360 / draftRotationStepDegrees);
+const draftRotationLookupDecimals = 8;
+const draftRotationLookupToleranceDegrees = 1e-3;
 const gridCellSize = 24;
 const gridMidCellInterval = 10;
 const gridMajorCellInterval = 20;
@@ -96,9 +98,10 @@ const draftTransformCornerSnapRadiusPx = 20;
 const draftTransformCornerPriorityRadiusPx = 16;
 const selectionToggleDragThresholdPx = 5;
 const layerPalette = ["#93c5fd", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#fdba74", "#67e8f9"];
-const clipperDecimals = 6;
+const clipperDecimals = Math.max(8, draftRotationLookupDecimals);
 const clipperScaleFactor = 10 ** clipperDecimals;
 const clipperFillRule = FillRule.NonZero;
+const draftPlaneRotationLookupTable = buildDraftPlaneRotationLookupTable();
 
 function updateZoomLabel() {
   zoomLevel.textContent = Math.round(state.camera.zoom * 100) + "%";
@@ -435,9 +438,57 @@ function deepCopyGeometry(geometry) {
   return geometry.map((polygon) => polygon.map((ring) => ring.map((point) => [point[0], point[1]])));
 }
 
+function quantizeRotationBasisValue(value) {
+  const rounded = Math.round(value * clipperScaleFactor) / clipperScaleFactor;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function buildDraftPlaneRotationLookupTable() {
+  return Array.from({ length: draftRotationStepsPerTurn }, (_, degree) => {
+    const radians = degree * draftRotationStep;
+    return {
+      degree,
+      radians,
+      cos: quantizeRotationBasisValue(Math.cos(radians)),
+      sin: quantizeRotationBasisValue(Math.sin(radians)),
+    };
+  });
+}
+
+function normalizeRotationLookupDegree(degree) {
+  let nextDegree = Math.round(degree) % draftRotationStepsPerTurn;
+  if (nextDegree < 0) nextDegree += draftRotationStepsPerTurn;
+  return nextDegree;
+}
+
+function getDraftPlaneLookupRotation(angle) {
+  const normalizedAngle = normalizeAngle(angle);
+  const degrees = (normalizedAngle * 180) / Math.PI;
+  const nearestDegree = Math.round(degrees);
+  if (Math.abs(degrees - nearestDegree) > draftRotationLookupToleranceDegrees) return null;
+  return draftPlaneRotationLookupTable[normalizeRotationLookupDegree(nearestDegree)];
+}
+
+function getCanonicalDraftPlaneAngle(angle) {
+  const knownRotation = getDraftPlaneLookupRotation(angle);
+  return knownRotation ? normalizeAngle(knownRotation.radians) : normalizeAngle(angle);
+}
+
+function getRotationBasis(angle) {
+  const knownRotation = getDraftPlaneLookupRotation(angle);
+  if (knownRotation) return knownRotation;
+
+  const normalizedAngle = normalizeAngle(angle);
+  return {
+    degree: null,
+    radians: normalizedAngle,
+    cos: quantizeRotationBasisValue(Math.cos(normalizedAngle)),
+    sin: quantizeRotationBasisValue(Math.sin(normalizedAngle)),
+  };
+}
+
 function rotatePoint(point, angle) {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
+  const { cos, sin } = getRotationBasis(angle);
   return {
     x: point.x * cos - point.y * sin,
     y: point.x * sin + point.y * cos,
@@ -467,7 +518,7 @@ function getDraftAngle() {
 }
 
 function setDraftAngleBase(angle) {
-  state.draftAngleBase = normalizeAngle(angle);
+  state.draftAngleBase = getCanonicalDraftPlaneAngle(angle);
   state.draftAngleStepOffset = 0;
 }
 
@@ -580,25 +631,29 @@ function orientClipperPath(path, wantsPositiveOrientation) {
   return isPositive(path) === wantsPositiveOrientation ? path : [...path].reverse();
 }
 
-function ringToClipperPath(ring, wantsPositiveOrientation) {
+function toClipperPoint64(point) {
+  return {
+    x: scaleCoordinateToClipperInt(point[0]),
+    y: scaleCoordinateToClipperInt(point[1]),
+  };
+}
+
+function ringToClipperPath64(ring, wantsPositiveOrientation) {
   const cleanRing = normalizeRing(ring, true);
   if (!cleanRing) return null;
 
-  const path = cleanRing.map((point) => ({
-    x: scaleCoordinateToClipperInt(point[0]),
-    y: scaleCoordinateToClipperInt(point[1]),
-  }));
+  const path = cleanRing.map(toClipperPoint64);
 
   return orientClipperPath(path, wantsPositiveOrientation);
 }
 
-function toClipperPaths(geometry) {
+function toClipperPaths64(geometry) {
   const cleanGeometry = sanitizeGeometry(geometry, true);
   const paths = [];
 
   for (const polygon of cleanGeometry) {
     for (let ringIndex = 0; ringIndex < polygon.length; ringIndex += 1) {
-      const path = ringToClipperPath(polygon[ringIndex], ringIndex === 0);
+      const path = ringToClipperPath64(polygon[ringIndex], ringIndex === 0);
       if (path) paths.push(path);
     }
   }
@@ -648,15 +703,15 @@ function fromPolyTree(tree) {
 }
 
 function executeClipperBoolean(clipType, subjectGeometry, clipGeometry = null) {
-  const subjectPaths = toClipperPaths(subjectGeometry);
-  if (!subjectPaths.length) return [];
+  const subjectPaths64 = toClipperPaths64(subjectGeometry);
+  if (!subjectPaths64.length) return [];
 
-  const clipPaths = clipGeometry ? toClipperPaths(clipGeometry) : null;
+  const clipPaths64 = clipGeometry ? toClipperPaths64(clipGeometry) : null;
   const tree = new PolyTree64();
   booleanOpWithPolyTree(
     clipType,
-    subjectPaths,
-    clipPaths && clipPaths.length ? clipPaths : null,
+    subjectPaths64,
+    clipPaths64 && clipPaths64.length ? clipPaths64 : null,
     tree,
     clipperFillRule
   );
@@ -1398,9 +1453,14 @@ function rebuildLayerShapes(layerId) {
   replaceLayerShapes(layerId, buildUnionShapes(layerId, layerShapes));
 }
 
-function insertShapeToLayer(layerId, shape) {
-  state.shapes.push(shape);
-  rebuildLayerShapes(layerId);
+function unionGeometryIntoLayer(layerId, additionGeometry) {
+  const layerShapes = state.shapes.filter((shape) => shape.layerId === layerId);
+  const affectsSelection = getSelectedShapes().some((shape) => shape.layerId === layerId);
+  const nextGeometry = unionGeometryList([...layerShapes.map((shape) => shape.geometry), additionGeometry]);
+
+  replaceLayerShapes(layerId, createLayerShapeRecordsFromGeometry(layerId, nextGeometry));
+
+  if (affectsSelection) clearSelectionForLayer(layerId);
 }
 
 function subtractGeometryFromLayer(layerId, subtractionGeometry) {
@@ -2414,8 +2474,7 @@ function finishDrag(e) {
       if (state.drawOperation === "subtract") {
         subtractGeometryFromLayer(state.activeLayerId, state.draftShape.geometry);
       } else {
-        const shape = createShapeRecord(state.activeLayerId, state.draftShape.geometry);
-        if (shape) insertShapeToLayer(state.activeLayerId, shape);
+        unionGeometryIntoLayer(state.activeLayerId, state.draftShape.geometry);
       }
     }
   }

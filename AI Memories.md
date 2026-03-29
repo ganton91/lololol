@@ -8,7 +8,7 @@
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
-- Main geometry dependency: `polygon-clipping`
+- Main geometry dependency: `clipper2-ts`
 
 ## What The Application Currently Is
 
@@ -34,8 +34,8 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
   - `layerId`
   - `geometry`
   - `bounds`
-- Boolean union is handled through `polygon-clipping`.
-- Boolean subtraction is also handled through `polygon-clipping.difference`.
+- Boolean union is handled through `clipper2-ts`.
+- Boolean subtraction is also handled through `clipper2-ts`.
 - Layer geometry is rebuilt by unioning the shapes that belong to the layer.
 
 ### Important Geometry Note
@@ -121,11 +121,11 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Dependency Notes
 
-### `polygon-clipping`
+### `clipper2-ts`
 
 - Installed through `npm`.
 - Stored under `node_modules`.
-- Used for polygon boolean union.
+- Used for polygon boolean union and subtraction through the Clipper integer `Paths64` pipeline.
 - Current package file: `package.json`
 
 ## Working Agreement For Future Changes
@@ -142,43 +142,35 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ### 1. Rotated Draft Plane Boolean Merge / Topology Bug
 
-- Status: identified, not fixed yet.
+- Status: fixed in the active `clipper2-ts` geometry pipeline.
 - Symptom: at non-zero draft-plane rotation, shapes that should merge can remain separate even when the draw itself succeeds and no runtime boolean error is thrown.
-- Current diagnosis: the main suspicion is that the problem begins when clean snapped draft-plane geometry is transformed into world space through rotation. At `0deg` the user has not reproduced this class of issue, but at non-zero angles the world-space coordinates are produced through trig-based floating-point transforms. That can turn exact shared draft edges into near-matching world-space vertices, micro-gaps, zero-area edge contact, or awkward collinear/topology cases before `polygon-clipping` runs.
-- Chosen next method: `Fixed Precision Quantization`.
-- Planned implementation details:
-  - Choose one canonical world-space decimal precision that is fine enough to remove floating-point noise from the rotated transform without visibly deforming the geometry.
-  - Apply that same precision consistently to every world-space vertex produced from draft geometry before any boolean union or difference call.
-  - Apply the same precision again to boolean outputs before storing rebuilt layer geometry, so the whole pipeline keeps using the same canonical coordinate system.
-  - After quantization, sanitize rings by collapsing near-identical consecutive points, removing degenerate zero-length edges, and preserving valid closed polygon loops.
-  - Re-test the already known failure family under non-zero rotation: adjacent cells sharing an edge, rectangle-to-merged-shape contact, and shape-to-hole-boundary contact.
-  - Compare those same scenarios against the `0deg` workplane to confirm that the method is specifically removing rotation-induced float mismatch rather than changing the intended snap rules.
-  - If fixed precision quantization reduces the rotation-driven mismatch but some zero-area edge-adjacency cases still remain, treat those as a second-stage topology policy problem instead of mixing them into the quantization work.
-- Progress toward the fix: no code has been written for this method yet. Earlier debug and pre-split experiments were discarded so the next chat can start from a clean baseline and implement this approach directly.
+- Current diagnosis: the main failure was precision mismatch. The draft-plane rotation basis and the Clipper integer boundary were not guaranteed to live on the same decimal lattice, so rotated shared edges that should stay collinear could drift apart at the boolean boundary and refuse to merge.
+- Chosen fix: keep the rotation basis decimals matched to Clipper.
+- Implemented fix details:
+  - A seeded lookup table covers the known whole-degree draft-plane rotations used by the wheel-step workplane flow.
+  - The draft-plane rotation boundary routes canonical whole-degree angles through that table so `Draft <-> World` transforms reuse frozen `sin/cos` values instead of recalculating them each time.
+  - Arbitrary non-LUT angles also quantize their `sin/cos` values onto the same decimal lattice as Clipper through the fallback `getRotationBasis(...)` path.
+  - The rotated repro family was re-tested against the new precision boundary to confirm that matching basis decimals with Clipper decimals is the important fix.
+- Progress toward the fix:
+  - FIX: the durable bug fix is that the rotation basis decimals must match Clipper decimals. Both LUT and non-LUT `sin/cos` values now quantize onto the same `1e8` decimal lattice as the active Clipper boundary, so the transform basis and the boolean kernel no longer disagree about rotated shared edges.
+  - Added a seeded `0..359` whole-degree lookup table in `app.js`.
+  - The seeded whole-degree table currently stores the known plane-step `sin/cos` values rounded to `8` decimal places.
+  - Whole-degree lookup tolerance is now intentionally loose enough to catch near-whole-degree angles re-derived from existing geometry, such as `atan2(...)` results coming back from aligned edges that were originally created on a seeded whole-degree plane.
+  - The whole-degree lookup tolerance was later increased again so `getRotationBasis(...)` snaps more aggressively onto the LUT before falling back to direct trig for near-step angles.
+  - `setDraftAngleBase(...)` now canonicalizes those near-whole-degree plane angles back onto the exact seeded whole-degree basis so both the plane state and the `Draft <-> World` transforms use the same table entry.
+  - `rotatePoint(...)` now reuses that table whenever the requested angle matches a canonical whole-degree rotation step, so the existing `draftToWorldWithPlane(...)` and `worldToDraftWithPlane(...)` paths automatically use the frozen basis for those plane rotations.
+  - The draw add commit path no longer does `push + rebuildLayerShapes(...)`; it now unions `state.draftShape.geometry` directly into the active layer on mouse-up and replaces the layer with the merged result.
+  - `clipper2-ts` is now the active boolean backend, and the Clipper adapter boundary names the integer conversion path explicitly as `toClipperPoint64(...)`, `ringToClipperPath64(...)`, and `toClipperPaths64(...)` before calling `booleanOpWithPolyTree(...)`.
+  - A direct repro showed that the real breakage point was `clipperDecimals = 6`: before quantization, rotated sub-edge contacts were still exactly collinear, but after rounding to `1e-6` world units they were no longer exactly on the same line, so Clipper would keep them as separate polygons.
+  - The Clipper scale was increased to `Math.max(8, draftRotationLookupDecimals)`, which preserves the LUT-generated rotated coordinates through the integer conversion boundary closely enough for the failing rotated rectangle-on-base union repro to merge into a single polygon again.
+  - A direct comparison across four combinations on the same rotated repro showed:
+    - `raw trig + 1e6` can partially merge but is not reliable;
+    - `LUT + 1e6` fails badly because the `8`-decimal LUT basis is being cut again at `1e6`;
+    - `raw trig + 1e8` is still not fully reliable on the larger multi-contact repro, because independently rounded irrational coordinates do not stay exactly collinear as integer sub-edges;
+    - `LUT + 1e8` is the first combination that consistently merged the tested rotated whole-degree repros into a single polygon.
+  - Arbitrary derived directions are now also quantized through the non-LUT fallback in `getRotationBasis(...)`, so they no longer mix raw trig output with a snapped Clipper boundary.
+  - The user confirmed this direction as the bug fix to keep in memory.
 
 ## Current Task
 
-- Task: migrate the app from `polygon-clipping` to `clipper2-ts` with a Clipper adapter layer while keeping the existing nested multipolygon geometry model.
-- Status: implementation completed in code; awaiting user verification before promoting the new dependency and behavior into the permanent sections above.
-- Progress:
-  - Replaced the npm dependency in `package.json` and `package-lock.json` with `clipper2-ts`.
-  - Switched browser loading to ES modules:
-    - `index.html` now uses an import map for `clipper2-ts`.
-    - `app.js` now loads as `<script type="module">`.
-    - `package.json` now includes `npm run dev` using `python3 -m http.server 4173` because the module-based setup should be served over a local HTTP server instead of relying on direct `file://` loading.
-  - Implemented a Clipper adapter boundary inside `app.js`:
-    - fixed precision uses `clipperDecimals = 6` with explicit `SCALE_FACTOR = 1_000_000` style integer scaling at the adapter boundary;
-    - `toClipperPaths(...)` flattens the app's `[[outer, hole1...]]` geometry into Clipper `Paths64` after quantizing every coordinate to 6 decimal places and scaling to integers;
-    - `fromPolyTree(...)` reconstructs the app's nested polygon-with-holes model from Clipper `PolyTree64` results and explicitly normalizes outer/hole winding orientation before converting back into the app's stored geometry;
-    - boolean execution now uses `booleanOpWithPolyTree(...)` for union, difference, and intersection/overlap checks.
-  - Rewired the previous `polygon-clipping` integration points:
-    - `unionGeometryList(...)`
-    - `differenceGeometry(...)`
-    - `geometriesOverlap(...)`
-  - Verification completed so far:
-    - local dev server served `index.html` and `node_modules/clipper2-ts/dist/index.js` successfully over HTTP;
-    - synthetic rotated-geometry union probes with the same precision strategy produced a single merged polygon for adjacent rotated cells;
-    - synthetic rotated T-junction union probes also produced a single merged polygon;
-    - a synthetic rotated hole-boundary fill probe produced one solid polygon with no remaining hole.
-  - Still pending:
-    - direct in-browser manual verification inside the real app UI, especially on rotated workplanes.
+- No active in-progress task is recorded right now.

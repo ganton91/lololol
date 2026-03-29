@@ -179,6 +179,7 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `Align` can come from nearby geometry, from relationships between different shapes, or from free-space placement in the air, so the app must not assume that every aligned direction corresponds to an already-persistent family.
   - Dynamic families should not be persisted immediately on `Align` alone, because the user may align to a temporary direction and never draw anything.
   - A new dynamic family should become persistent only after the user actually commits new geometry while that unresolved aligned direction is active.
+  - A committed drawing operation should count whether it adds geometry or subtracts geometry, because a new aligned family may be adopted specifically for a precise subtractive edit.
   - If the user aligns to a new unresolved direction but does not commit any new geometry, the temporary candidate should be discarded instead of leaving behind an unused family.
   - Dynamic families therefore should be materialized on first committed draw/adoption under that angle regime, not merely on detection of a new aligned direction and not merely because a newly drawn shape happens to contain an unusual angle.
   - The current free-angle trig path should remain as a temporary fallback for non-integer/non-family angles until the full family system is implemented.

@@ -158,4 +158,27 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- No active task recorded right now.
+- Task: migrate the app from `polygon-clipping` to `clipper2-ts` with a Clipper adapter layer while keeping the existing nested multipolygon geometry model.
+- Status: implementation completed in code; awaiting user verification before promoting the new dependency and behavior into the permanent sections above.
+- Progress:
+  - Replaced the npm dependency in `package.json` and `package-lock.json` with `clipper2-ts`.
+  - Switched browser loading to ES modules:
+    - `index.html` now uses an import map for `clipper2-ts`.
+    - `app.js` now loads as `<script type="module">`.
+    - `package.json` now includes `npm run dev` using `python3 -m http.server 4173` because the module-based setup should be served over a local HTTP server instead of relying on direct `file://` loading.
+  - Implemented a Clipper adapter boundary inside `app.js`:
+    - fixed precision uses `clipperDecimals = 6` with explicit `SCALE_FACTOR = 1_000_000` style integer scaling at the adapter boundary;
+    - `toClipperPaths(...)` flattens the app's `[[outer, hole1...]]` geometry into Clipper `Paths64` after quantizing every coordinate to 6 decimal places and scaling to integers;
+    - `fromPolyTree(...)` reconstructs the app's nested polygon-with-holes model from Clipper `PolyTree64` results and explicitly normalizes outer/hole winding orientation before converting back into the app's stored geometry;
+    - boolean execution now uses `booleanOpWithPolyTree(...)` for union, difference, and intersection/overlap checks.
+  - Rewired the previous `polygon-clipping` integration points:
+    - `unionGeometryList(...)`
+    - `differenceGeometry(...)`
+    - `geometriesOverlap(...)`
+  - Verification completed so far:
+    - local dev server served `index.html` and `node_modules/clipper2-ts/dist/index.js` successfully over HTTP;
+    - synthetic rotated-geometry union probes with the same precision strategy produced a single merged polygon for adjacent rotated cells;
+    - synthetic rotated T-junction union probes also produced a single merged polygon;
+    - a synthetic rotated hole-boundary fill probe produced one solid polygon with no remaining hole.
+  - Still pending:
+    - direct in-browser manual verification inside the real app UI, especially on rotated workplanes.

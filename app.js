@@ -1,8 +1,4 @@
-const polygonBoolean = window.polygonClipping;
-
-if (!polygonBoolean) {
-  throw new Error("polygon-clipping failed to load. Run `npm install` in this project.");
-}
+import { ClipType, FillRule, PolyTree64, booleanOpWithPolyTree, isPositive } from "clipper2-ts";
 
 const canvas = document.getElementById("cad-canvas");
 const ctx = canvas.getContext("2d");
@@ -100,6 +96,9 @@ const draftTransformCornerSnapRadiusPx = 20;
 const draftTransformCornerPriorityRadiusPx = 16;
 const selectionToggleDragThresholdPx = 5;
 const layerPalette = ["#93c5fd", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#fdba74", "#67e8f9"];
+const clipperDecimals = 6;
+const clipperScaleFactor = 10 ** clipperDecimals;
+const clipperFillRule = FillRule.NonZero;
 
 function updateZoomLabel() {
   zoomLevel.textContent = Math.round(state.camera.zoom * 100) + "%";
@@ -512,15 +511,31 @@ function transformGeometry(geometry, transformer) {
   );
 }
 
-function normalizeRing(ring) {
+function quantizeCoordinate(value) {
+  return Math.round(value * clipperScaleFactor) / clipperScaleFactor;
+}
+
+function scaleCoordinateToClipperInt(value) {
+  return Math.round(quantizeCoordinate(value) * clipperScaleFactor);
+}
+
+function scaleCoordinateFromClipperInt(value) {
+  return quantizeCoordinate(Number(value) / clipperScaleFactor);
+}
+
+function normalizeRing(ring, quantize = false) {
   if (!Array.isArray(ring)) return null;
 
   const clean = [];
   for (const point of ring) {
     if (!Array.isArray(point) || point.length < 2) continue;
-    const x = Number(point[0]);
-    const y = Number(point[1]);
+    let x = Number(point[0]);
+    let y = Number(point[1]);
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (quantize) {
+      x = quantizeCoordinate(x);
+      y = quantizeCoordinate(y);
+    }
 
     const prev = clean[clean.length - 1];
     if (prev && Math.abs(prev[0] - x) <= 1e-9 && Math.abs(prev[1] - y) <= 1e-9) {
@@ -541,7 +556,7 @@ function normalizeRing(ring) {
   return clean.length >= 3 ? clean : null;
 }
 
-function sanitizeGeometry(geometry) {
+function sanitizeGeometry(geometry, quantize = false) {
   if (!Array.isArray(geometry)) return [];
 
   const polygons = [];
@@ -550,7 +565,7 @@ function sanitizeGeometry(geometry) {
 
     const rings = [];
     for (const ring of polygon) {
-      const cleanRing = normalizeRing(ring);
+      const cleanRing = normalizeRing(ring, quantize);
       if (cleanRing) rings.push(cleanRing);
     }
 
@@ -560,28 +575,109 @@ function sanitizeGeometry(geometry) {
   return polygons;
 }
 
-function unionGeometryList(geometries) {
-  const cleanGeometries = [];
+function orientClipperPath(path, wantsPositiveOrientation) {
+  if (!Array.isArray(path) || !path.length) return null;
+  return isPositive(path) === wantsPositiveOrientation ? path : [...path].reverse();
+}
 
-  for (const geometry of geometries) {
-    const cleanGeometry = sanitizeGeometry(geometry);
-    if (cleanGeometry.length) cleanGeometries.push(cleanGeometry);
+function ringToClipperPath(ring, wantsPositiveOrientation) {
+  const cleanRing = normalizeRing(ring, true);
+  if (!cleanRing) return null;
+
+  const path = cleanRing.map((point) => ({
+    x: scaleCoordinateToClipperInt(point[0]),
+    y: scaleCoordinateToClipperInt(point[1]),
+  }));
+
+  return orientClipperPath(path, wantsPositiveOrientation);
+}
+
+function toClipperPaths(geometry) {
+  const cleanGeometry = sanitizeGeometry(geometry, true);
+  const paths = [];
+
+  for (const polygon of cleanGeometry) {
+    for (let ringIndex = 0; ringIndex < polygon.length; ringIndex += 1) {
+      const path = ringToClipperPath(polygon[ringIndex], ringIndex === 0);
+      if (path) paths.push(path);
+    }
   }
 
-  if (!cleanGeometries.length) return [];
-  if (cleanGeometries.length === 1) return deepCopyGeometry(cleanGeometries[0]);
+  return paths;
+}
 
-  return sanitizeGeometry(polygonBoolean.union(cleanGeometries[0], ...cleanGeometries.slice(1)));
+function clipperPathToRing(path) {
+  if (!Array.isArray(path) || !path.length) return null;
+
+  return normalizeRing(path.map((point) => [scaleCoordinateFromClipperInt(point.x), scaleCoordinateFromClipperInt(point.y)]), true);
+}
+
+function fromPolyTree(tree) {
+  const polygons = [];
+
+  function visit(node) {
+    for (let i = 0; i < node.count; i += 1) {
+      const child = node.child(i);
+      if (!child) continue;
+
+      if (!child.isHole) {
+        const polygon = [];
+        const outerPath = orientClipperPath(child.poly, true);
+        const outerRing = clipperPathToRing(outerPath);
+        if (outerRing) polygon.push(outerRing);
+
+        for (let holeIndex = 0; holeIndex < child.count; holeIndex += 1) {
+          const holeNode = child.child(holeIndex);
+          if (!holeNode || !holeNode.isHole) continue;
+
+          const holePath = orientClipperPath(holeNode.poly, false);
+          const holeRing = clipperPathToRing(holePath);
+          if (holeRing) polygon.push(holeRing);
+        }
+
+        if (polygon.length) polygons.push(polygon);
+      }
+
+      // Islands inside holes re-enter as non-hole descendants and become separate polygons.
+      visit(child);
+    }
+  }
+
+  visit(tree);
+  return sanitizeGeometry(polygons, true);
+}
+
+function executeClipperBoolean(clipType, subjectGeometry, clipGeometry = null) {
+  const subjectPaths = toClipperPaths(subjectGeometry);
+  if (!subjectPaths.length) return [];
+
+  const clipPaths = clipGeometry ? toClipperPaths(clipGeometry) : null;
+  const tree = new PolyTree64();
+  booleanOpWithPolyTree(
+    clipType,
+    subjectPaths,
+    clipPaths && clipPaths.length ? clipPaths : null,
+    tree,
+    clipperFillRule
+  );
+
+  return fromPolyTree(tree);
+}
+
+function unionGeometryList(geometries) {
+  const subjectGeometry = [];
+
+  for (const geometry of geometries) {
+    const cleanGeometry = sanitizeGeometry(geometry, true);
+    if (!cleanGeometry.length) continue;
+    subjectGeometry.push(...cleanGeometry);
+  }
+
+  return executeClipperBoolean(ClipType.Union, subjectGeometry);
 }
 
 function differenceGeometry(subjectGeometry, clipGeometry) {
-  const cleanSubject = sanitizeGeometry(subjectGeometry);
-  const cleanClip = sanitizeGeometry(clipGeometry);
-
-  if (!cleanSubject.length) return [];
-  if (!cleanClip.length) return deepCopyGeometry(cleanSubject);
-
-  return sanitizeGeometry(polygonBoolean.difference(cleanSubject, cleanClip));
+  return executeClipperBoolean(ClipType.Difference, subjectGeometry, clipGeometry);
 }
 
 function worldToDraft(point) {
@@ -1239,11 +1335,7 @@ function getShapeIdsInDraftSelectionBox(startDraft, currentDraft) {
 }
 
 function geometriesOverlap(a, b) {
-  const cleanA = sanitizeGeometry(a);
-  const cleanB = sanitizeGeometry(b);
-  if (!cleanA.length || !cleanB.length) return false;
-
-  return sanitizeGeometry(polygonBoolean.intersection(cleanA, cleanB)).length > 0;
+  return executeClipperBoolean(ClipType.Intersection, a, b).length > 0;
 }
 
 function collectSelectedGeometriesByLayer(shapeIds = state.selection.shapeIds) {

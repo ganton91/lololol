@@ -145,26 +145,24 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Status: identified, not fixed yet.
 - Symptom: at non-zero draft-plane rotation, shapes that should merge can remain separate even when the draw itself succeeds and no runtime boolean error is thrown.
 - Current diagnosis: the main suspicion is that the problem begins when clean snapped draft-plane geometry is transformed into world space through rotation. At `0deg` the user has not reproduced this class of issue, but at non-zero angles the world-space coordinates are produced through trig-based floating-point transforms. That can turn exact shared draft edges into near-matching world-space vertices, micro-gaps, zero-area edge contact, or awkward collinear/topology cases before `polygon-clipping` runs.
-- Chosen next method: `Fixed Precision Quantization`.
-- Planned implementation details:
-  - Choose one canonical world-space decimal precision that is fine enough to remove floating-point noise from the rotated transform without visibly deforming the geometry.
-  - Apply that same precision consistently to every world-space vertex produced from draft geometry before any boolean union or difference call.
-  - Apply the same precision again to boolean outputs before storing rebuilt layer geometry, so the whole pipeline keeps using the same canonical coordinate system.
-  - After quantization, sanitize rings by collapsing near-identical consecutive points, removing degenerate zero-length edges, and preserving valid closed polygon loops.
-  - Re-test the already known failure family under non-zero rotation: adjacent cells sharing an edge, rectangle-to-merged-shape contact, and shape-to-hole-boundary contact.
-  - Compare those same scenarios against the `0deg` workplane to confirm that the method is specifically removing rotation-induced float mismatch rather than changing the intended snap rules.
-  - If fixed precision quantization reduces the rotation-driven mismatch but some zero-area edge-adjacency cases still remain, treat those as a second-stage topology policy problem instead of mixing them into the quantization work.
-- Progress toward the fix:
-  - Added `coordinateRoundingFactor = 1e8` constant (8 decimal places) near the other geometry constants.
-  - Added `roundCoordinate(value)` helper that applies `Math.round(value * 1e8) / 1e8`.
-  - Modified `draftToWorldWithPlane()` to apply `roundCoordinate()` to both x and y outputs after rotation + origin offset, so every world coordinate produced from draft space is quantized to 8 decimal places before storage or boolean operations.
-  - This is the Fixed Precision Quantization step. It removes trig-induced float noise at the source (the draft-to-world transform) without visibly affecting geometry — 8 decimal places gives ~0.01 nanometer precision at 1 unit = 1mm scale.
-  - **Attempt 1 — input-only rounding**: Added `roundCoordinate()` to `draftToWorldWithPlane()` output (8 decimal places, `coordinateRoundingFactor = 1e8`). Shapes still failed to merge and introduced a new subtract artifact (stray line after erase). Diagnosis: `polygon-clipping` modifies coordinates internally during boolean operations, so existing layer geometry drifts off the quantized grid while new shapes stay on it.
-  - **Attempt 2 — input + output rounding**: Added `quantizeGeometry()` that rounds all coordinates in a geometry to 8 decimal places. Applied it to the output of both `unionGeometryList()` and `differenceGeometry()`. Still did not fix the merge failures — square brush shapes drawn adjacent to existing geometry remain separate, and the subtract artifact persisted. Screenshot confirmed shapes still showing separation lines between what should be merged geometry.
-  - **Conclusion so far**: Fixed Precision Quantization at 1e-8 on both inputs and outputs is not sufficient to resolve the issue. The problem may be deeper than float noise — it could be a topology/edge-adjacency issue in how `polygon-clipping` handles shared edges between shapes, or the quantization precision may need to be coarser, or the approach itself may need rethinking.
-  - The code currently still contains the quantization changes (constant, `roundCoordinate`, `quantizeGeometry`, modified `draftToWorldWithPlane`, modified `unionGeometryList`, modified `differenceGeometry`). The next chat should decide whether to keep, modify, or revert these before trying a different approach.
-  - Earlier debug and pre-split experiments were discarded; the codebase was reverted to a clean baseline before the quantization attempts.
+- Root cause (confirmed via diagnostic): The real problem is **T-junctions**, not float noise in shared vertices. When a new shape is drawn adjacent to an existing merged shape at a rotated angle, the new shape's vertex lands exactly on an edge of the existing shape — but there is no corresponding vertex on that edge. `polygon-clipping` does not resolve T-junctions (vertex-on-edge without a matching vertex) and treats the shapes as non-intersecting, so they remain separate. At `0deg` this works because integer coordinates hit a special code path in the library; at any other angle the T-junction causes merge failure.
+- Diagnostic evidence:
+  - Added vertex-to-edge distance measurement before `polygon-clipping.union` calls.
+  - With `roundCoordinate` active (1e-8 rounding): `minVertexToEdgeDist` was `2.477e-9` — rounding each point independently broke collinearity and pushed the T-junction vertex slightly off the edge.
+  - After removing `roundCoordinate`: `minVertexToEdgeDist` dropped to `0` — perfect collinearity restored. But `polygon-clipping` still did not merge, confirming the library cannot handle T-junctions even with exact collinearity.
+- Previous failed approaches:
+  - **Attempt 1 — input-only rounding**: Added `roundCoordinate()` to `draftToWorldWithPlane()` output (8 decimal places). Shapes still failed to merge and introduced a new subtract artifact (stray line after erase).
+  - **Attempt 2 — input + output rounding**: Added `quantizeGeometry()` to outputs of `unionGeometryList()` and `differenceGeometry()`. Still did not fix merge failures; subtract artifact persisted.
+  - **Attempt 3 — epsilon expansion**: Expanded new geometry by 0.05 units outward from centroid before boolean operations. Union improved but subtract created visible artifacts because the expanded subtraction shape cut beyond intended boundaries.
+- Current approach (in code, under testing): **T-junction edge splitting**.
+  - Added `pointOnEdgeDist()` helper that computes the distance from a point to an edge segment interior (excludes endpoints).
+  - Added `splitEdgesAtTJunctions(geometries, tolerance)` that finds every vertex of one geometry that lies on an edge of another geometry (within tolerance `1e-6`) and inserts that vertex into the edge, splitting it. This converts T-junctions into proper shared vertices that `polygon-clipping` can handle.
+  - Applied in both `unionGeometryList()` and `differenceGeometry()` — geometries are split before being passed to `polygon-clipping`.
+  - Removed `roundCoordinate` from `draftToWorldWithPlane()` so rotation preserves collinearity (raw float precision ~1e-15 instead of 1e-8 rounding noise).
+  - Removed `quantizeGeometry()` from `unionGeometryList()` and `differenceGeometry()` outputs.
+  - Dead code remaining: `roundCoordinate()`, `quantizeGeometry()`, `coordinateRoundingFactor` constant — still in source, no longer called from the active pipeline.
+  - Status: no runtime errors observed in initial testing. Needs thorough testing of union merge, subtract, and edge cases at multiple rotation angles.
 
 ## Current Task
 
-- No active task recorded right now.
+- Testing the T-junction edge splitting fix for the rotated draft plane boolean merge bug. Needs user testing at multiple angles for both union and subtract operations.

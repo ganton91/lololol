@@ -92,6 +92,7 @@ const draftRotationStepDegrees = 1;
 const draftRotationStep = (Math.PI / 180) * draftRotationStepDegrees;
 const draftRotationStepsPerTurn = Math.round(360 / draftRotationStepDegrees);
 const gridCellSize = 24;
+const coordinateRoundingFactor = 1e8;
 const gridMidCellInterval = 10;
 const gridMajorCellInterval = 20;
 const snapPreviewSize = 8;
@@ -436,6 +437,10 @@ function deepCopyGeometry(geometry) {
   return geometry.map((polygon) => polygon.map((ring) => ring.map((point) => [point[0], point[1]])));
 }
 
+function roundCoordinate(value) {
+  return Math.round(value * coordinateRoundingFactor) / coordinateRoundingFactor;
+}
+
 function rotatePoint(point, angle) {
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
@@ -560,6 +565,83 @@ function sanitizeGeometry(geometry) {
   return polygons;
 }
 
+function quantizeGeometry(geometry) {
+  return geometry.map((polygon) =>
+    polygon.map((ring) =>
+      ring.map((point) => [roundCoordinate(point[0]), roundCoordinate(point[1])])
+    )
+  );
+}
+
+function pointOnEdgeDist(px, py, ax, ay, bx, by) {
+  const ex = bx - ax;
+  const ey = by - ay;
+  const len2 = ex * ex + ey * ey;
+  if (len2 < 1e-20) return { dist: Math.hypot(px - ax, py - ay), t: 0 };
+  const t = ((px - ax) * ex + (py - ay) * ey) / len2;
+  if (t <= 1e-9 || t >= 1 - 1e-9) return { dist: Infinity, t };
+  const projX = ax + t * ex;
+  const projY = ay + t * ey;
+  return { dist: Math.hypot(px - projX, py - projY), t };
+}
+
+function splitEdgesAtTJunctions(geometries, tolerance) {
+  const allVerts = [];
+  for (let gi = 0; gi < geometries.length; gi++) {
+    for (const polygon of geometries[gi]) {
+      for (const ring of polygon) {
+        for (const v of ring) {
+          allVerts.push({ v, geomIndex: gi });
+        }
+      }
+    }
+  }
+
+  const result = geometries.map((geom) =>
+    geom.map((polygon) =>
+      polygon.map((ring) => ring.map((v) => [v[0], v[1]]))
+    )
+  );
+
+  for (let gi = 0; gi < result.length; gi++) {
+    for (const polygon of result[gi]) {
+      for (const ring of polygon) {
+        let i = 0;
+        while (i < ring.length) {
+          const a = ring[i];
+          const b = ring[(i + 1) % ring.length];
+          const inserts = [];
+
+          for (const { v, geomIndex } of allVerts) {
+            if (geomIndex === gi) continue;
+            const { dist, t } = pointOnEdgeDist(v[0], v[1], a[0], a[1], b[0], b[1]);
+            if (dist <= tolerance) {
+              inserts.push({ t, point: [v[0], v[1]] });
+            }
+          }
+
+          if (inserts.length) {
+            inserts.sort((a, b) => a.t - b.t);
+            const uniqueInserts = [inserts[0]];
+            for (let k = 1; k < inserts.length; k++) {
+              if (Math.abs(inserts[k].t - inserts[k - 1].t) > 1e-9) {
+                uniqueInserts.push(inserts[k]);
+              }
+            }
+            const newPoints = uniqueInserts.map((ins) => ins.point);
+            ring.splice(i + 1, 0, ...newPoints);
+            i += newPoints.length + 1;
+          } else {
+            i++;
+          }
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 function unionGeometryList(geometries) {
   const cleanGeometries = [];
 
@@ -571,7 +653,8 @@ function unionGeometryList(geometries) {
   if (!cleanGeometries.length) return [];
   if (cleanGeometries.length === 1) return deepCopyGeometry(cleanGeometries[0]);
 
-  return sanitizeGeometry(polygonBoolean.union(cleanGeometries[0], ...cleanGeometries.slice(1)));
+  const split = splitEdgesAtTJunctions(cleanGeometries, 1e-6);
+  return sanitizeGeometry(polygonBoolean.union(split[0], ...split.slice(1)));
 }
 
 function differenceGeometry(subjectGeometry, clipGeometry) {
@@ -581,7 +664,8 @@ function differenceGeometry(subjectGeometry, clipGeometry) {
   if (!cleanSubject.length) return [];
   if (!cleanClip.length) return deepCopyGeometry(cleanSubject);
 
-  return sanitizeGeometry(polygonBoolean.difference(cleanSubject, cleanClip));
+  const split = splitEdgesAtTJunctions([cleanSubject, cleanClip], 1e-6);
+  return sanitizeGeometry(polygonBoolean.difference(split[0], split[1]));
 }
 
 function worldToDraft(point) {

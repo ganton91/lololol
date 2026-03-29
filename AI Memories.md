@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-03-28
+- Last updated: 2026-03-29
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -135,10 +135,27 @@ Layer order controls draw order. The active layer receives new geometry when the
 - If a task is still in progress, track it only in the "Current Task" section until the user has tested it and confirmed it is complete.
 - Before user confirmation, update only the "Progress" inside "Current Task" rather than moving unfinished work into the permanent sections.
 - Once the user confirms the task is complete, move the lasting result into the permanent sections above and clear the task section.
+- When bugs are identified, record them in a `Known Bugs` section placed above `Current Task`, and include both the current status and any progress or chosen next method for fixing them.
 - The `Reference Only` folder is not part of the default startup reading context for new chats. Only inspect files in `Reference Only` when the user explicitly asks to look at a specific reference example or behavior from that folder.
+
+## Known Bugs
+
+### 1. Rotated Draft Plane Boolean Merge / Topology Bug
+
+- Status: identified, not fixed yet.
+- Symptom: at non-zero draft-plane rotation, shapes that should merge can remain separate even when the draw itself succeeds and no runtime boolean error is thrown.
+- Current diagnosis: the main suspicion is that the problem begins when clean snapped draft-plane geometry is transformed into world space through rotation. At `0deg` the user has not reproduced this class of issue, but at non-zero angles the world-space coordinates are produced through trig-based floating-point transforms. That can turn exact shared draft edges into near-matching world-space vertices, micro-gaps, zero-area edge contact, or awkward collinear/topology cases before `polygon-clipping` runs.
+- Chosen next method: `Fixed Precision Quantization`.
+- Planned implementation details:
+  - Choose one canonical world-space decimal precision that is fine enough to remove floating-point noise from the rotated transform without visibly deforming the geometry.
+  - Apply that same precision consistently to every world-space vertex produced from draft geometry before any boolean union or difference call.
+  - Apply the same precision again to boolean outputs before storing rebuilt layer geometry, so the whole pipeline keeps using the same canonical coordinate system.
+  - After quantization, sanitize rings by collapsing near-identical consecutive points, removing degenerate zero-length edges, and preserving valid closed polygon loops.
+  - Re-test the already known failure family under non-zero rotation: adjacent cells sharing an edge, rectangle-to-merged-shape contact, and shape-to-hole-boundary contact.
+  - Compare those same scenarios against the `0deg` workplane to confirm that the method is specifically removing rotation-induced float mismatch rather than changing the intended snap rules.
+  - If fixed precision quantization reduces the rotation-driven mismatch but some zero-area edge-adjacency cases still remain, treat those as a second-stage topology policy problem instead of mixing them into the quantization work.
+- Progress toward the fix: no code has been written for this method yet. Earlier debug and pre-split experiments were discarded so the next chat can start from a clean baseline and implement this approach directly.
 
 ## Current Task
 
-- Goal: add real-world dimensions to the canvas so drawing operates with real-world measurements and scale, not only abstract grid cells.
-- Framing: the painting/drawing workflow should gain `Real World Dimensions`.
-- Progress: noted for discussion and planning only; no code changes have been made yet.
+- No active task recorded right now.

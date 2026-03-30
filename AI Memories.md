@@ -177,6 +177,7 @@ Layer order controls draw order. The active layer receives new geometry when the
     - The first real committed draw operation under an unresolved candidate regime now materializes that candidate into a persistent dynamic family, for both `Add` and `Subtract`.
     - Leaving the unresolved regime by resetting the plane or aligning into a known/persistent family now discards the temporary candidate instead of keeping it around as a persistent family.
     - The union rebuild path now runs Clipper simplification on the union result before recreating layer shapes, so exact collinear vertices can be removed instead of surviving as extra snap corners along straight sides.
+    - A console-side live registry monitor is now available for persistent draft-angle families, showing each family's `baseAngleDeg` plus canonical `baseVectorDx/baseVectorDy`, and it refreshes automatically whenever a new family is materialized on commit.
   - The `Space + wheel` path should become integer-driven:
     - the active wheel rotation must be treated as a canonical integer degree step;
     - app logic should feed the wheel path with that integer degree identity rather than a derived floating-point degree value.

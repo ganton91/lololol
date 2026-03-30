@@ -314,10 +314,30 @@ function materializeActiveDraftAngleCandidateOnCommit() {
   state.draftAngleFamilies = [...state.draftAngleFamilies, familyRecord];
   syncDraftAngleFamilyRuntimes();
   setActiveDraftAngleFamily(familyRecord.id, activeStepIndex);
+  renderLiveRegistry();
   return familyRecord;
 }
 
 syncDraftAngleFamilyRuntimes();
+
+function renderLiveRegistry() {
+  console.clear();
+  console.table(
+    state.draftAngleFamilies.map((familyRecord) => {
+      const familyRuntime = getDraftAngleFamilyRuntime(familyRecord.id);
+      const baseRotation = familyRuntime ? getDraftAngleFamilyEntry(familyRuntime, 0) : null;
+      return {
+        id: familyRecord.id,
+        kind: familyRecord.kind,
+        baseAngleDeg: familyRecord.baseAngleDeg,
+        baseVectorDx: baseRotation ? baseRotation.cos : null,
+        baseVectorDy: baseRotation ? baseRotation.sin : null,
+        stepDegrees: familyRecord.stepDegrees,
+        stepCount: familyRecord.stepCount,
+      };
+    })
+  );
+}
 
 function updateZoomLabel() {
   zoomLevel.textContent = Math.round(state.camera.zoom * 100) + "%";
@@ -2872,3 +2892,4 @@ resizeCanvas();
 window.state = state;
 window.getActiveDraftAngleRotation = getActiveDraftAngleRotation;
 window.draftAngleFamilyRuntimes = draftAngleFamilyRuntimes;
+window.renderLiveRegistry = renderLiveRegistry;

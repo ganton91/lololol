@@ -53,12 +53,23 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - The active workplane origin is visualized with dedicated draft X=0 and Y=0 axis lines.
 - The visible grid stays screen-aligned even when the drafting angle changes.
 - World content is rendered through a drafting/workplane transform with both `origin` and `angle`, so stored geometry stays in world coordinates while the user can draw against a translated and rotated drafting frame.
-- Wheel-based draft-plane rotation is now canonical instead of accumulated: the workplane keeps a normalized base angle plus an integer wheel-step offset, so rotating away and back returns to the same exact plane instead of a float-near-zero residual angle.
+- Wheel-based draft-plane rotation is now canonical instead of accumulated: the workplane tracks a canonical angle family/candidate plus integer step identity, so rotating away and back returns to the same exact plane coefficients instead of a float-near-zero residual angle.
 - Trig-generated workplane coordinates and the Clipper adapter now share the same `8`-decimal quantization policy, so rotated world-space geometry enters boolean operations on the same canonical coordinate grid.
 - There is no raster-mask union pipeline anymore.
 - Each visible layer is drawn from its current merged vector shapes.
 - Visible layer shapes also render small black vertex markers at each stored polygon vertex.
 - Selection highlighting is drawn by tracing the selected shape geometries.
+
+### Draft Angle Model
+
+- Draft-angle logic is split between `draft-angle.js` for family/lookup-table construction and `app.js` for workplane runtime state.
+- Family records are designed as serializable project data with `id`, `kind`, `baseAngleDeg`, optional normalized `baseVectorDx/baseVectorDy`, `stepDegrees`, and `stepCount`.
+- The default canonical family covers `0..359` degree steps at `1deg` increments, and each lookup entry stores canonical `cos` and `sin` coefficients rounded to the shared `8`-decimal precision.
+- The active workplane rotation is represented as `mode` (`family`, `candidate`, or fallback `free`) plus a family/base descriptor and integer `stepIndex`.
+- Family-driven `draft -> world`, `world -> draft`, and world-content canvas rendering all read the active lookup entry's canonical coefficients instead of recomputing trig from a floating angle.
+- `Align` can resolve into an existing known family or into a temporary unresolved candidate family derived from a normalized direction vector; candidate records and persistent dynamic families share the same 360-step lookup-table structure.
+- A temporary candidate becomes a persistent dynamic family only when the user commits a real draw or subtract operation under that regime; otherwise it is discarded when the plane is reset or switched back into a known or already-persistent family.
+- The browser console exposes a live registry view for persistent draft-angle families and logs detailed per-align debug vectors for comparing align input against stored family directions.
 
 ### Layer Model
 
@@ -82,9 +93,9 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Mouse wheel`: zooms at cursor position.
 - `Middle mouse` or `right mouse` outside draw mode: pans the camera.
 - Holding `Space` enters a drafting-transforms mode without switching away from `Draw` or `Select`.
-- `Space + mouse wheel`: rotates the drafting angle around the current workplane origin in exact `1deg` step positions.
+- `Space + mouse wheel`: rotates through the active draft-angle family or candidate around the current workplane origin in exact `1deg` integer step positions.
 - `Space + middle drag`: moves the current workplane origin while the canvas stays fixed and the world shifts underneath.
-- `Space + left drag`: aligns the workplane from a start point toward a dragged direction, with magnetic snap to nearby geometry plus free placement anywhere in space.
+- `Space + left drag`: aligns the workplane from a start point toward a dragged direction, with magnetic snap to nearby geometry plus free placement anywhere in space, and resolves that direction into either an existing family or a temporary candidate regime.
 - `Space + R`: resets the workplane back to the world plane by restoring origin `0,0` and rotation `0deg`.
 
 ### Current Behavioral Rules
@@ -101,18 +112,23 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Square Brush` remembers the previous brush point between strokes, so starting a new square-brush stroke with `Shift` can continue immediately from that remembered point.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
 - Zoom is currently clamped between a minimum of `0.09` and a maximum of `2`.
-- The app maintains a workplane with separate `origin` and `angle`, independent from stored geometry.
+- The app maintains a workplane with separate `origin` and canonical draft-angle state, independent from stored geometry.
 - Existing geometry is displayed relative to the current workplane, while the visible grid remains horizontal and vertical on screen.
 - New drawing input is created in drafting coordinates relative to the current workplane and converted back into world geometry before boolean union with the layer.
 - World-space vertices produced from rotated draft geometry are quantized to the same shared `8`-decimal precision used by the Clipper boolean boundary.
+- `Space + wheel` mutates only the integer `stepIndex` of the active draft-angle family or candidate, so returning to a previous step reuses the exact same canonical lookup coefficients.
 - Wheel-based workplane rotation no longer accumulates float angle drift: returning by the same number of wheel steps restores the exact same derived plane angle, which prevents post-rotate seams caused by near-zero residual rotation.
+- Known-family transforms, candidate-family transforms, and world-content canvas rendering all use the same active canonical `cos/sin` coefficients.
 - While `Space` is held, the normal draw/select interaction is temporarily suspended and the pointer is used for drafting transformations instead.
 - `Space + Left Drag` workplane alignment can start and end anywhere in space, but nearby geometry acts like a magnetic snap target.
 - During `Space + Left Drag`, corners can capture from slightly farther away than edges, and corner snaps use a different preview marker from edge snaps.
 - During `Space + Left Drag`, if there is no nearby geometry, the preview and resulting alignment still use the free pointer position instead of forcing a snap.
+- During `Space + Left Drag`, snapping affects only the chosen start/end points; the resulting alignment direction is always derived from the raw point-to-point `end - start` vector of those resolved endpoints.
+- If an aligned direction matches a known family signature, the workplane re-enters that family; otherwise it activates or reuses a temporary unresolved candidate family for that direction regime.
+- The first committed draw or subtract operation while a candidate family is active materializes it into a persistent dynamic family; resetting the plane or leaving that regime without a commit discards the temporary candidate.
 - Pressing `R` while `Space` is held resets the current workplane to the world-aligned plane, cancels any in-progress draft transform drag, and leaves drafting-transforms mode active as long as `Space` remains held.
 - Releasing `Space` during a pending workplane alignment cancels that alignment and returns control to the underlying tool.
-- The toolbar shows a live workplane status readout with the current plane mode, rotation in degrees, and origin coordinates.
+- The toolbar shows a live workplane status readout with the current plane mode, rotation in degrees formatted to up to `15` decimal places, and origin coordinates.
 - `Select` supports marquee selection in draft/screen space: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed by or intersect the box.
 - Holding `Shift` in `Select` toggles selection membership for both click and marquee selection: newly hit shapes are added while already selected shapes captured by the click or box are removed.
 - Multi-selected shapes move together when dragged from a selected shape.
@@ -162,54 +178,9 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: implement a canonical draft-angle lookup-table system for `Space + wheel`, plus dynamic angle families for `Align`.
-- Status: canonical angle-family system is implemented in code, including unresolved `Align` candidates and first-commit dynamic-family adoption; browser validation and user confirmation are still pending.
-- Progress:
-  - Implemented in the current slice:
-    - Added a browser-native `draft-angle.js` module for serializable family records plus runtime lookup-table generation.
-    - Added the canonical default family for `0..359` degree steps, with lookup entries that store stable `sin` and `cos` coefficients rounded to the shared `8`-decimal precision.
-    - Reworked workplane angle state so the active regime is now represented as `family/free base + integer step`, instead of relying on `draftAngleBase + draftAngleStepOffset` float recomputation inside the transform path.
-    - `Space + wheel` now advances the active workplane through integer step identity and the active workplane transform reads coefficients from the current family entry when the plane is in a known family.
-    - `draft -> world` and `world -> draft` now use lookup-backed coefficients for family-driven planes, while the fallback free-angle path still exists for unresolved non-family angles.
-    - `Align` now resolves through the same new angle-state abstraction: if the aligned direction matches a known family signature it re-enters that family, otherwise it enters an unresolved candidate family instead of writing raw floating-angle state directly.
-    - The workplane runtime/state shape is now set up to remain serializable and leaves room for later persistent dynamic families without changing the plain-browser / native-ES-module architecture.
-    - The workplane status readout now formats the rotation value with up to `15` decimal places, while origin coordinates keep the shorter display format.
-    - `Align` to an unknown direction now activates an unresolved temporary candidate family instead of immediately persisting a new dynamic family.
-    - If a later `Align` lands on a direction that belongs to the same unresolved candidate regime, the candidate is reused with the matching step instead of creating another candidate.
-    - The first real committed draw operation under an unresolved candidate regime now materializes that candidate into a persistent dynamic family, for both `Add` and `Subtract`.
-    - Leaving the unresolved regime by resetting the plane or aligning into a known/persistent family now discards the temporary candidate instead of keeping it around as a persistent family.
-    - A console-side live registry monitor is now available for persistent draft-angle families, showing each family's `baseAngleDeg` plus canonical `baseVectorDx/baseVectorDy`, and it refreshes automatically whenever a new family is materialized on commit.
-    - The `Align` path now logs a dedicated debug console block for each successful align event, including the computed align angle in degrees, the raw `dx/dy` align vector, and the normalized align base vector at `15` decimal places so it can be compared directly against the stored family table vectors.
-    - The live registry monitor no longer clears the browser console before printing, so align/debug output now accumulates as scrollable console history for side-by-side comparison across events.
-    - As the current deeper alignment experiment, geometry snapping during `Align` now affects only the snapped start/end points; the alignment direction itself is always derived from the same point-to-point `end - start` vector regardless of whether either endpoint was free, corner-snapped, or edge-snapped. That normalized drag vector materializes candidate/persistent dynamic families instead of an angle-quantized representation, and the runtime angle display/transform fields are derived from those same vector-authored step coefficients.
-    - To keep interaction and rendering on the same numerical transform, world-content canvas rendering now uses the active rotation's canonical `cos/sin` coefficients directly instead of re-rotating the canvas from `angleRad`.
-  - The `Space + wheel` path should become integer-driven:
-    - the active wheel rotation must be treated as a canonical integer degree step;
-    - app logic should feed the wheel path with that integer degree identity rather than a derived floating-point degree value.
-  - A fixed default lookup table should cover the base draft-angle family for `0..359` degree steps.
-  - Each default table entry should store canonical `sin` and `cos` coefficients rounded to the same shared `8`-decimal precision used elsewhere in the geometry pipeline.
-  - During `draft -> world` and `world -> draft` transforms, the wheel-driven path should read trig coefficients from the active lookup-table family instead of recomputing `Math.sin(...)` / `Math.cos(...)` on demand.
-  - This matters even when the user draws geometry at non-axis draft angles inside the current plane: the internal draft geometry may have its own relative direction, but the plane transfer into world space must still use the canonical trig coefficients of the active draft-angle family.
-  - The default integer family must remain stable when the user rotates away and back again with `Space + wheel`, so revisiting the same degree step always reuses the exact same canonical trig coefficients.
-  - `Align` needs two behaviors:
-    - if the aligned edge direction matches a known canonical family direction, `Align` should snap back into that existing family rather than keeping a raw floating angle;
-    - if the aligned direction does not match any known family, `Align` should be able to work with a temporary candidate canonical angle even before a persistent family exists.
-  - Dynamic angle families should use the same `8`-decimal canonical precision for their base angle and generated trig coefficients.
-  - A dynamic family is conceptually a full 360-step regime derived from its base angle:
-    - example: a family created at `14.37deg` should also provide canonical entries for `15.37deg`, `16.37deg`, and so on modulo `360deg`.
-  - `Align` can come from nearby geometry, from relationships between different shapes, or from free-space placement in the air, so the app must not assume that every aligned direction corresponds to an already-persistent family.
-  - Dynamic families should not be persisted immediately on `Align` alone, because the user may align to a temporary direction and never draw anything.
-  - A new dynamic family should become persistent only after the user actually commits new geometry while that unresolved aligned direction is active.
-  - A committed drawing operation should count whether it adds geometry or subtracts geometry, because a new aligned family may be adopted specifically for a precise subtractive edit.
-  - If the user aligns to a new unresolved direction but does not commit any new geometry, the temporary candidate should be discarded instead of leaving behind an unused family.
-  - Dynamic families therefore should be materialized on first committed draw/adoption under that angle regime, not merely on detection of a new aligned direction and not merely because a newly drawn shape happens to contain an unusual angle.
-  - The current free-angle trig path should remain as a temporary fallback for non-integer/non-family angles until the full family system is implemented.
-  - A future `Select`-mode rotate transform is also expected to follow the same canonical angle model:
-    - selected shapes should rotate in exact `1deg` wheel steps;
-    - the rotate interaction should be integer-step driven rather than cumulative floating-angle driven;
-    - preview and commit should be computed from the original selection snapshot plus the total integer step delta, not by repeatedly re-rotating already-rotated geometry.
-    - the rotation pivot should be the centroid/selection center of the current selection, whether the user has selected one shape or multiple shapes.
-  - `Select`-mode rotate should not create persistent angle families by itself.
-  - If the user later `Align`s to an edge direction of a rotated shape, the app should then resolve or create the corresponding canonical family from that edge direction.
-  - Dynamic families created from rotated-shape edge directions should still behave as full 360-step families, so earlier and later directions of that same rotated regime remain reachable within the same family.
-  - Even before export/import exists in the UI, angle families should be designed as serializable project data rather than as ad-hoc runtime-only helpers, because future export must preserve existing families and future import must restore them.
+- Task: browser-validate the canonical draft-angle family system for `Space + wheel` and `Align`.
+- Status: the implemented architecture and behavior have been moved into the permanent sections above; browser validation and explicit user confirmation are still pending.
+- Remaining checks:
+  - Confirm in the browser that revisiting the same `Space + wheel` step always restores the exact same family coefficients and no merge seams reappear.
+  - Confirm that `Align` reuses matching unresolved candidate regimes, promotes them on first committed `Add` or `Subtract`, and discards them when the plane is reset or switched away before a commit.
+  - Decide in a later slice whether `Select`-mode rotate should adopt the same canonical family model.

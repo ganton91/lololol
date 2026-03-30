@@ -179,6 +179,7 @@ Layer order controls draw order. The active layer receives new geometry when the
     - The union rebuild path now runs Clipper simplification on the union result before recreating layer shapes, so exact collinear vertices can be removed instead of surviving as extra snap corners along straight sides.
     - A console-side live registry monitor is now available for persistent draft-angle families, showing each family's `baseAngleDeg` plus canonical `baseVectorDx/baseVectorDy`, and it refreshes automatically whenever a new family is materialized on commit.
     - The `Align` path now logs a dedicated debug console block for each successful align event, including the computed align angle in degrees and the raw `dx/dy` vector components at `15` decimal places for testing.
+    - The live registry monitor no longer clears the browser console before printing, so align/debug output now accumulates as scrollable console history for side-by-side comparison across events.
   - The `Space + wheel` path should become integer-driven:
     - the active wheel rotation must be treated as a canonical integer degree step;
     - app logic should feed the wheel path with that integer degree identity rather than a derived floating-point degree value.

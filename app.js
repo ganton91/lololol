@@ -321,7 +321,6 @@ function materializeActiveDraftAngleCandidateOnCommit() {
 syncDraftAngleFamilyRuntimes();
 
 function renderLiveRegistry() {
-  console.clear();
   console.table(
     state.draftAngleFamilies.map((familyRecord) => {
       const familyRuntime = getDraftAngleFamilyRuntime(familyRecord.id);

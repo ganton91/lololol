@@ -1920,12 +1920,16 @@ function applyDraftAlignFromDrag() {
 
   const dx = endSnap.world.x - startSnap.world.x;
   const dy = endSnap.world.y - startSnap.world.y;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  const normalizedDx = dx / length;
+  const normalizedDy = dy / length;
   const currentAlignAngleRad = Math.atan2(dy, dx);
   const currentAlignAngleDeg = (currentAlignAngleRad * 180) / Math.PI;
 
   console.log('--- NEW ALIGN EVENT ---');
   console.log('Align Angle (Deg):', currentAlignAngleDeg.toFixed(15));
   console.log('Align Vector (DX, DY):', dx.toFixed(15), dy.toFixed(15));
+  console.log('Align Base Vector (DX, DY):', normalizedDx.toFixed(15), normalizedDy.toFixed(15));
 
   state.draftOrigin = cloneDraftPoint(startSnap.world);
   setDraftAngleFromAlignedRadians(currentAlignAngleRad);

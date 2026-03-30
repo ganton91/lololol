@@ -8,6 +8,7 @@ import {
   getDraftAngleFamilyEntry,
   normalizeDegrees360,
   normalizeDraftAngleStep,
+  quantizeAngleValue,
 } from "./draft-angle.js";
 
 const canvas = document.getElementById("cad-canvas");
@@ -121,6 +122,59 @@ const draftAngleCandidateFamilyId = "draft-angle-candidate";
 const draftAngleFamilyRuntimes = new Map();
 let draftAngleCandidateRuntime = null;
 
+function normalizeDirectionVector(dx, dy) {
+  const length = Math.hypot(dx, dy);
+  if (!Number.isFinite(length) || length <= 1e-12) return null;
+
+  return {
+    dx: dx / length,
+    dy: dy / length,
+    length,
+  };
+}
+
+function getDirectionAngleDegrees(dx, dy) {
+  return normalizeDegrees360((Math.atan2(dy, dx) * 180) / Math.PI);
+}
+
+function getDirectionSignature(dx, dy) {
+  const normalized = normalizeDirectionVector(dx, dy);
+  if (!normalized) return null;
+  return `${quantizeAngleValue(normalized.dx, geometryPrecisionDecimals)}:${quantizeAngleValue(normalized.dy, geometryPrecisionDecimals)}`;
+}
+
+function findDraftAngleFamilyMatchBySignature(signature, familyRuntimes) {
+  if (!signature) return null;
+
+  for (const familyRuntime of familyRuntimes) {
+    const stepIndex = familyRuntime.signatureToStepIndex.get(signature);
+    if (stepIndex === undefined) continue;
+
+    return getDraftAngleFamilyEntry(familyRuntime, stepIndex);
+  }
+
+  return null;
+}
+
+function getDraftAngleRecordBaseDirection(record) {
+  if (!record) return null;
+
+  if (Number.isFinite(record.baseVectorDx) && Number.isFinite(record.baseVectorDy)) {
+    return normalizeDirectionVector(record.baseVectorDx, record.baseVectorDy);
+  }
+
+  if (Number.isFinite(record.baseAngleDeg)) {
+    const angleRad = (record.baseAngleDeg * Math.PI) / 180;
+    return {
+      dx: Math.cos(angleRad),
+      dy: Math.sin(angleRad),
+      length: 1,
+    };
+  }
+
+  return null;
+}
+
 function createDraftAngleFamilyRecord(id, baseAngleDeg, kind = "dynamic", name = null) {
   const canonicalBaseAngleDeg = normalizeDegrees360(baseAngleDeg);
   return {
@@ -130,6 +184,18 @@ function createDraftAngleFamilyRecord(id, baseAngleDeg, kind = "dynamic", name =
     baseAngleDeg: canonicalBaseAngleDeg,
     stepDegrees: DEFAULT_DRAFT_ANGLE_FAMILY_RECORD.stepDegrees,
     stepCount: DEFAULT_DRAFT_ANGLE_FAMILY_RECORD.stepCount,
+  };
+}
+
+function createDraftAngleFamilyRecordFromVector(id, dx, dy, kind = "dynamic", name = null) {
+  const normalized = normalizeDirectionVector(dx, dy);
+  if (!normalized) return createDraftAngleFamilyRecord(id, 0, kind, name);
+
+  const baseAngleDeg = getDirectionAngleDegrees(normalized.dx, normalized.dy);
+  return {
+    ...createDraftAngleFamilyRecord(id, baseAngleDeg, kind, name),
+    baseVectorDx: normalized.dx,
+    baseVectorDy: normalized.dy,
   };
 }
 
@@ -222,6 +288,19 @@ function setActiveDraftAngleCandidate(baseAngleDeg, stepIndex = 0, existingRecor
   };
 }
 
+function setActiveDraftAngleCandidateFromVector(dx, dy, stepIndex = 0, existingRecord = null) {
+  const candidateRecord =
+    existingRecord ||
+    createDraftAngleFamilyRecordFromVector(draftAngleCandidateFamilyId, dx, dy, "candidate", "Candidate");
+  setDraftAngleCandidateRecord(candidateRecord);
+  state.draftAngle = {
+    mode: "candidate",
+    familyId: null,
+    stepIndex: normalizeDraftAngleStep(stepIndex, candidateRecord.stepCount),
+    baseAngleDeg: candidateRecord.baseAngleDeg,
+  };
+}
+
 function setActiveDraftAngleFree(baseAngleDeg, stepIndex = 0) {
   clearDraftAngleCandidate();
   state.draftAngle = {
@@ -253,6 +332,16 @@ function findDraftAngleCandidateMatchByDegrees(angleDeg) {
   return getDraftAngleFamilyEntry(candidateRuntime, stepIndex);
 }
 
+function findDraftAngleCandidateMatchBySignature(signature) {
+  const candidateRuntime = getDraftAngleCandidateRuntime();
+  if (!candidateRuntime || !signature) return null;
+
+  const stepIndex = candidateRuntime.signatureToStepIndex.get(signature);
+  if (stepIndex === undefined) return null;
+
+  return getDraftAngleFamilyEntry(candidateRuntime, stepIndex);
+}
+
 function setDraftAngleFromAlignedDegrees(angleDeg) {
   const familyMatch = findDraftAngleFamilyMatchByDegrees(angleDeg, draftAngleFamilyRuntimes.values(), geometryPrecisionDecimals);
   if (familyMatch) {
@@ -267,6 +356,37 @@ function setDraftAngleFromAlignedDegrees(angleDeg) {
   }
 
   setActiveDraftAngleCandidate(angleDeg, 0);
+}
+
+function setDraftAngleFromAlignedDirection(dx, dy) {
+  const normalized = normalizeDirectionVector(dx, dy);
+  if (!normalized) return;
+
+  const signature = getDirectionSignature(normalized.dx, normalized.dy);
+  const familyMatch = findDraftAngleFamilyMatchBySignature(signature, draftAngleFamilyRuntimes.values());
+  if (familyMatch) {
+    setActiveDraftAngleFamily(familyMatch.familyId, familyMatch.stepIndex);
+    return;
+  }
+
+  const candidateMatch = findDraftAngleCandidateMatchBySignature(signature);
+  if (candidateMatch && state.draftAngleCandidate) {
+    const candidateBaseDirection = getDraftAngleRecordBaseDirection(state.draftAngleCandidate);
+    if (candidateBaseDirection) {
+      setActiveDraftAngleCandidateFromVector(
+        candidateBaseDirection.dx,
+        candidateBaseDirection.dy,
+        candidateMatch.stepIndex,
+        state.draftAngleCandidate
+      );
+      return;
+    }
+
+    setActiveDraftAngleCandidate(state.draftAngleCandidate.baseAngleDeg, candidateMatch.stepIndex, state.draftAngleCandidate);
+    return;
+  }
+
+  setActiveDraftAngleCandidateFromVector(normalized.dx, normalized.dy, 0);
 }
 
 function setDraftAngleFromRadians(angleRad) {
@@ -287,22 +407,29 @@ function materializeActiveDraftAngleCandidateOnCommit() {
   }
 
   const activeStepIndex = state.draftAngle.stepIndex;
-  const activeAngleDeg = getActiveDraftAngleRotation().angleDeg;
-  const existingFamilyMatch = findDraftAngleFamilyMatchByDegrees(
-    activeAngleDeg,
-    draftAngleFamilyRuntimes.values(),
-    geometryPrecisionDecimals
+  const activeRotation = getActiveDraftAngleRotation();
+  const existingFamilyMatch = findDraftAngleFamilyMatchBySignature(
+    activeRotation.signature,
+    draftAngleFamilyRuntimes.values()
   );
   if (existingFamilyMatch) {
     setActiveDraftAngleFamily(existingFamilyMatch.familyId, existingFamilyMatch.stepIndex);
     return existingFamilyMatch;
   }
 
-  const familyRecord = createDraftAngleFamilyRecord(
-    `draft-angle-family-${state.nextDraftAngleFamilyId++}`,
-    candidateRecord.baseAngleDeg,
-    "dynamic"
-  );
+  const candidateBaseDirection = getDraftAngleRecordBaseDirection(candidateRecord);
+  const familyRecord = candidateBaseDirection
+    ? createDraftAngleFamilyRecordFromVector(
+        `draft-angle-family-${state.nextDraftAngleFamilyId++}`,
+        candidateBaseDirection.dx,
+        candidateBaseDirection.dy,
+        "dynamic"
+      )
+    : createDraftAngleFamilyRecord(
+        `draft-angle-family-${state.nextDraftAngleFamilyId++}`,
+        candidateRecord.baseAngleDeg,
+        "dynamic"
+      );
   state.draftAngleFamilies = [...state.draftAngleFamilies, familyRecord];
   syncDraftAngleFamilyRuntimes();
   setActiveDraftAngleFamily(familyRecord.id, activeStepIndex);
@@ -1343,6 +1470,8 @@ function cloneSnapTarget(target) {
     kind: target.kind,
     world: cloneDraftPoint(target.world),
     distance: target.distance,
+    edgeStart: target.edgeStart ? cloneDraftPoint(target.edgeStart) : null,
+    edgeEnd: target.edgeEnd ? cloneDraftPoint(target.edgeEnd) : null,
   };
 }
 
@@ -1389,6 +1518,8 @@ function getDraftTransformSnapTarget(worldPoint, maxDistance = draftTransformSna
             kind: "edge",
             world: projection,
             distance: edgeDistance,
+            edgeStart: { x: corner[0], y: corner[1] },
+            edgeEnd: { x: next[0], y: next[1] },
           };
         }
       }
@@ -1880,10 +2011,21 @@ function worldToScreen(point) {
 
 function applyWorldCameraTransform(targetCtx) {
   const draftRotation = getActiveDraftAngleRotation();
-  targetCtx.translate(state.camera.x, state.camera.y);
-  targetCtx.scale(state.camera.zoom, state.camera.zoom);
-  targetCtx.rotate(-draftRotation.angleRad);
-  targetCtx.translate(-state.draftOrigin.x, -state.draftOrigin.y);
+  const zoom = state.camera.zoom;
+  const cos = draftRotation.cos;
+  const sin = draftRotation.sin;
+  const originX = state.draftOrigin.x;
+  const originY = state.draftOrigin.y;
+
+  // Keep the render transform numerically identical to worldToDraft/draftToWorld.
+  targetCtx.transform(
+    zoom * cos,
+    -zoom * sin,
+    zoom * sin,
+    zoom * cos,
+    state.camera.x + zoom * (-originX * cos - originY * sin),
+    state.camera.y + zoom * (originX * sin - originY * cos)
+  );
 }
 
 function refreshPointerDerivedState() {
@@ -1922,19 +2064,31 @@ function applyDraftAlignFromDrag() {
 
   const dx = endSnap.world.x - startSnap.world.x;
   const dy = endSnap.world.y - startSnap.world.y;
-  const length = Math.sqrt(dx * dx + dy * dy);
-  const normalizedDx = dx / length;
-  const normalizedDy = dy / length;
-  const currentAlignAngleRad = Math.atan2(dy, dx);
+  let alignDx = dx;
+  let alignDy = dy;
+
+  if (endSnap.kind === "edge" && endSnap.edgeStart && endSnap.edgeEnd) {
+    alignDx = endSnap.edgeEnd.x - endSnap.edgeStart.x;
+    alignDy = endSnap.edgeEnd.y - endSnap.edgeStart.y;
+    if (alignDx * dx + alignDy * dy < 0) {
+      alignDx *= -1;
+      alignDy *= -1;
+    }
+  }
+
+  const baseDirection = normalizeDirectionVector(alignDx, alignDy);
+  if (!baseDirection) return false;
+
+  const currentAlignAngleRad = Math.atan2(baseDirection.dy, baseDirection.dx);
   const currentAlignAngleDeg = (currentAlignAngleRad * 180) / Math.PI;
 
   console.log('--- NEW ALIGN EVENT ---');
   console.log('Align Angle (Deg):', currentAlignAngleDeg.toFixed(15));
   console.log('Align Vector (DX, DY):', dx.toFixed(15), dy.toFixed(15));
-  console.log('Align Base Vector (DX, DY):', normalizedDx.toFixed(15), normalizedDy.toFixed(15));
+  console.log('Align Base Vector (DX, DY):', baseDirection.dx.toFixed(15), baseDirection.dy.toFixed(15));
 
   state.draftOrigin = cloneDraftPoint(startSnap.world);
-  setDraftAngleFromAlignedRadians(currentAlignAngleRad);
+  setDraftAngleFromAlignedDirection(baseDirection.dx, baseDirection.dy);
   updateWorkplaneStatus();
   return true;
 }

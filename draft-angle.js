@@ -19,6 +19,13 @@ function createRotationSignature(cos, sin) {
   return `${cos}:${sin}`;
 }
 
+function createQuantizedRotationSignature(cos, sin, precisionDecimals = 8) {
+  return createRotationSignature(
+    quantizeAngleValue(cos, precisionDecimals),
+    quantizeAngleValue(sin, precisionDecimals)
+  );
+}
+
 export function quantizeAngleValue(value, precisionDecimals = 8) {
   const factor = getPrecisionFactor(precisionDecimals);
   return Math.round(value * factor) / factor;
@@ -41,13 +48,46 @@ export function normalizeDraftAngleStep(stepIndex, stepCount = FULL_TURN_DEGREES
   return ((integerStep % stepCount) + stepCount) % stepCount;
 }
 
+function normalizeRotationVector(dx, dy) {
+  const length = Math.hypot(dx, dy);
+  if (!Number.isFinite(length) || length <= 1e-12) return null;
+
+  return {
+    dx: dx / length,
+    dy: dy / length,
+  };
+}
+
 function buildDraftAngleEntry(record, stepIndex, trigPrecisionDecimals) {
   const canonicalStepIndex = normalizeDraftAngleStep(stepIndex, record.stepCount);
-  const canonicalAngleDeg = normalizeDegrees360(record.baseAngleDeg + canonicalStepIndex * record.stepDegrees);
-  const signedAngleDeg = normalizeDegreesSigned(canonicalAngleDeg);
-  const angleRad = (signedAngleDeg * Math.PI) / 180;
-  const cos = quantizeAngleValue(Math.cos(angleRad), trigPrecisionDecimals);
-  const sin = quantizeAngleValue(Math.sin(angleRad), trigPrecisionDecimals);
+  let cos;
+  let sin;
+  let canonicalAngleDeg;
+  let signedAngleDeg;
+  let angleRad;
+  if (Number.isFinite(record.baseVectorDx) && Number.isFinite(record.baseVectorDy)) {
+    const baseVector = normalizeRotationVector(record.baseVectorDx, record.baseVectorDy) || { dx: 1, dy: 0 };
+    const stepAngleRad = ((canonicalStepIndex * record.stepDegrees) * Math.PI) / 180;
+    const stepCos = quantizeAngleValue(Math.cos(stepAngleRad), trigPrecisionDecimals);
+    const stepSin = quantizeAngleValue(Math.sin(stepAngleRad), trigPrecisionDecimals);
+    const composedVector =
+      normalizeRotationVector(
+        baseVector.dx * stepCos - baseVector.dy * stepSin,
+        baseVector.dy * stepCos + baseVector.dx * stepSin
+      ) || baseVector;
+    cos = quantizeAngleValue(composedVector.dx, trigPrecisionDecimals);
+    sin = quantizeAngleValue(composedVector.dy, trigPrecisionDecimals);
+    angleRad = Math.atan2(sin, cos);
+    canonicalAngleDeg = normalizeDegrees360((angleRad * 180) / Math.PI);
+    signedAngleDeg = normalizeDegreesSigned(canonicalAngleDeg);
+    angleRad = (signedAngleDeg * Math.PI) / 180;
+  } else {
+    canonicalAngleDeg = normalizeDegrees360(record.baseAngleDeg + canonicalStepIndex * record.stepDegrees);
+    signedAngleDeg = normalizeDegreesSigned(canonicalAngleDeg);
+    angleRad = (signedAngleDeg * Math.PI) / 180;
+    cos = quantizeAngleValue(Math.cos(angleRad), trigPrecisionDecimals);
+    sin = quantizeAngleValue(Math.sin(angleRad), trigPrecisionDecimals);
+  }
 
   return {
     mode: "family",
@@ -58,14 +98,23 @@ function buildDraftAngleEntry(record, stepIndex, trigPrecisionDecimals) {
     angleRad,
     cos,
     sin,
-    signature: createRotationSignature(cos, sin),
+    signature: createQuantizedRotationSignature(cos, sin, trigPrecisionDecimals),
   };
 }
 
 export function buildDraftAngleFamilyRuntime(record, trigPrecisionDecimals = 8) {
+  const normalizedBaseVector =
+    Number.isFinite(record.baseVectorDx) && Number.isFinite(record.baseVectorDy)
+      ? normalizeRotationVector(record.baseVectorDx, record.baseVectorDy)
+      : null;
+  const normalizedBaseAngleDeg = normalizedBaseVector
+    ? normalizeDegrees360((Math.atan2(normalizedBaseVector.dy, normalizedBaseVector.dx) * 180) / Math.PI)
+    : normalizeDegrees360(record.baseAngleDeg);
   const normalizedRecord = {
     ...record,
-    baseAngleDeg: normalizeDegrees360(record.baseAngleDeg),
+    baseAngleDeg: normalizedBaseAngleDeg,
+    baseVectorDx: normalizedBaseVector ? normalizedBaseVector.dx : undefined,
+    baseVectorDy: normalizedBaseVector ? normalizedBaseVector.dy : undefined,
   };
   const entries = Array.from({ length: normalizedRecord.stepCount }, (_, stepIndex) =>
     buildDraftAngleEntry(normalizedRecord, stepIndex, trigPrecisionDecimals)
@@ -102,7 +151,7 @@ export function createFreeDraftAngleRotation(baseAngleDeg, stepIndex = 0, trigPr
     angleRad,
     cos,
     sin,
-    signature: createRotationSignature(cos, sin),
+    signature: createQuantizedRotationSignature(cos, sin, trigPrecisionDecimals),
   };
 }
 

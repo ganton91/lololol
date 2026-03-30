@@ -114,6 +114,7 @@ const layerPalette = ["#93c5fd", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#f
 const clipperDecimals = 8;
 const clipperScaleFactor = 10 ** clipperDecimals;
 const geometryPrecisionDecimals = clipperDecimals;
+const draftAngleDegreePrecisionDecimals = 20;
 const geometryPrecisionFactor = clipperScaleFactor;
 const clipperFillRule = FillRule.NonZero;
 const clipperSimplifyCollinearEpsilon = 0;
@@ -122,7 +123,7 @@ const draftAngleFamilyRuntimes = new Map();
 let draftAngleCandidateRuntime = null;
 
 function createDraftAngleFamilyRecord(id, baseAngleDeg, kind = "dynamic", name = null) {
-  const canonicalBaseAngleDeg = quantizeAngleValue(normalizeDegrees360(baseAngleDeg), geometryPrecisionDecimals);
+  const canonicalBaseAngleDeg = quantizeAngleValue(normalizeDegrees360(baseAngleDeg), draftAngleDegreePrecisionDecimals);
   return {
     id,
     kind,
@@ -136,7 +137,11 @@ function createDraftAngleFamilyRecord(id, baseAngleDeg, kind = "dynamic", name =
 function setDraftAngleCandidateRecord(record) {
   state.draftAngleCandidate = record ? { ...record } : null;
   draftAngleCandidateRuntime = state.draftAngleCandidate
-    ? buildDraftAngleFamilyRuntime(state.draftAngleCandidate, geometryPrecisionDecimals)
+    ? buildDraftAngleFamilyRuntime(
+        state.draftAngleCandidate,
+        geometryPrecisionDecimals,
+        draftAngleDegreePrecisionDecimals
+      )
     : null;
 }
 
@@ -151,7 +156,10 @@ function getDraftAngleCandidateRuntime() {
 function syncDraftAngleFamilyRuntimes() {
   draftAngleFamilyRuntimes.clear();
   for (const familyRecord of state.draftAngleFamilies) {
-    draftAngleFamilyRuntimes.set(familyRecord.id, buildDraftAngleFamilyRuntime(familyRecord, geometryPrecisionDecimals));
+    draftAngleFamilyRuntimes.set(
+      familyRecord.id,
+      buildDraftAngleFamilyRuntime(familyRecord, geometryPrecisionDecimals, draftAngleDegreePrecisionDecimals)
+    );
   }
 }
 
@@ -189,7 +197,8 @@ function getActiveDraftAngleRotation() {
   return createFreeDraftAngleRotation(
     state.draftAngle.baseAngleDeg || 0,
     state.draftAngle.stepIndex || 0,
-    geometryPrecisionDecimals
+    geometryPrecisionDecimals,
+    draftAngleDegreePrecisionDecimals
   );
 }
 
@@ -228,7 +237,7 @@ function setActiveDraftAngleFree(baseAngleDeg, stepIndex = 0) {
     mode: "free",
     familyId: null,
     stepIndex: normalizeDraftAngleStep(stepIndex),
-    baseAngleDeg: quantizeAngleValue(normalizeDegrees360(baseAngleDeg), geometryPrecisionDecimals),
+    baseAngleDeg: quantizeAngleValue(normalizeDegrees360(baseAngleDeg), draftAngleDegreePrecisionDecimals),
   };
 }
 
@@ -236,7 +245,8 @@ function setDraftAngleFromDegrees(angleDeg) {
   const familyMatch = findDraftAngleFamilyMatchByDegrees(
     angleDeg,
     draftAngleFamilyRuntimes.values(),
-    geometryPrecisionDecimals
+    geometryPrecisionDecimals,
+    draftAngleDegreePrecisionDecimals
   );
   if (familyMatch) {
     setActiveDraftAngleFamily(familyMatch.familyId, familyMatch.stepIndex);
@@ -250,7 +260,12 @@ function findDraftAngleCandidateMatchByDegrees(angleDeg) {
   const candidateRuntime = getDraftAngleCandidateRuntime();
   if (!candidateRuntime) return null;
 
-  const freeRotation = createFreeDraftAngleRotation(angleDeg, 0, geometryPrecisionDecimals);
+  const freeRotation = createFreeDraftAngleRotation(
+    angleDeg,
+    0,
+    geometryPrecisionDecimals,
+    draftAngleDegreePrecisionDecimals
+  );
   const stepIndex = candidateRuntime.signatureToStepIndex.get(freeRotation.signature);
   if (stepIndex === undefined) return null;
 
@@ -261,7 +276,8 @@ function setDraftAngleFromAlignedDegrees(angleDeg) {
   const familyMatch = findDraftAngleFamilyMatchByDegrees(
     angleDeg,
     draftAngleFamilyRuntimes.values(),
-    geometryPrecisionDecimals
+    geometryPrecisionDecimals,
+    draftAngleDegreePrecisionDecimals
   );
   if (familyMatch) {
     setActiveDraftAngleFamily(familyMatch.familyId, familyMatch.stepIndex);
@@ -299,7 +315,8 @@ function materializeActiveDraftAngleCandidateOnCommit() {
   const existingFamilyMatch = findDraftAngleFamilyMatchByDegrees(
     activeAngleDeg,
     draftAngleFamilyRuntimes.values(),
-    geometryPrecisionDecimals
+    geometryPrecisionDecimals,
+    draftAngleDegreePrecisionDecimals
   );
   if (existingFamilyMatch) {
     setActiveDraftAngleFamily(existingFamilyMatch.familyId, existingFamilyMatch.stepIndex);
@@ -1679,8 +1696,9 @@ function subtractGeometryFromLayer(layerId, subtractionGeometry) {
     unionGeometryList(layerShapes.map((shape) => shape.geometry)),
     subtractionGeometry
   );
+  const simplifiedGeometry = simplifyGeometryCollinear(nextGeometry);
 
-  replaceLayerShapes(layerId, createLayerShapeRecordsFromGeometry(layerId, nextGeometry));
+  replaceLayerShapes(layerId, createLayerShapeRecordsFromGeometry(layerId, simplifiedGeometry));
 
   if (affectsSelection) clearSelectionForLayer(layerId);
 }

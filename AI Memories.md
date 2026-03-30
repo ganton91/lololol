@@ -119,6 +119,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Right click in `Draw` uses the current shape mode as subtraction geometry and applies boolean difference against the active layer's merged vector geometry.
 - After drawing, the new geometry is inserted into the layer and the layer is rebuilt through boolean union.
 - After subtractive drawing, the active layer is replaced with the resulting difference geometry instead of deleting whole merged objects by hit-test.
+- After subtractive drawing, the resulting difference geometry is also passed through Clipper collinear simplification before the layer shapes are recreated, so exact straight-line extra vertices can be removed in subtract results as well.
 - After moving selected geometry, the affected layer or layers are rebuilt again so intersections and merges stay correct.
 - Hidden layers are not rendered.
 - Locked layers do not accept edits.
@@ -180,6 +181,7 @@ Layer order controls draw order. The active layer receives new geometry when the
     - A console-side live registry monitor is now available for persistent draft-angle families, showing each family's `baseAngleDeg` plus canonical `baseVectorDx/baseVectorDy`, and it refreshes automatically whenever a new family is materialized on commit.
     - The `Align` path now logs a dedicated debug console block for each successful align event, including the computed align angle in degrees, the raw `dx/dy` align vector, and the normalized align base vector at `15` decimal places so it can be compared directly against the stored family table vectors.
     - The live registry monitor no longer clears the browser console before printing, so align/debug output now accumulates as scrollable console history for side-by-side comparison across events.
+    - As the current first-pass alignment drift reduction tweak, draft-angle `baseAngleDeg` storage/runtime precision is now kept at `20` decimal places while canonical family `sin/cos` coefficients remain at the shared `8`-decimal precision.
   - The `Space + wheel` path should become integer-driven:
     - the active wheel rotation must be treated as a canonical integer degree step;
     - app logic should feed the wheel path with that integer degree identity rather than a derived floating-point degree value.

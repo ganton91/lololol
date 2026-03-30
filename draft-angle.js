@@ -41,13 +41,10 @@ export function normalizeDraftAngleStep(stepIndex, stepCount = FULL_TURN_DEGREES
   return ((integerStep % stepCount) + stepCount) % stepCount;
 }
 
-function buildDraftAngleEntry(record, stepIndex, trigPrecisionDecimals, anglePrecisionDecimals = 20) {
+function buildDraftAngleEntry(record, stepIndex, trigPrecisionDecimals) {
   const canonicalStepIndex = normalizeDraftAngleStep(stepIndex, record.stepCount);
-  const canonicalAngleDeg = quantizeAngleValue(
-    normalizeDegrees360(record.baseAngleDeg + canonicalStepIndex * record.stepDegrees),
-    anglePrecisionDecimals
-  );
-  const signedAngleDeg = quantizeAngleValue(normalizeDegreesSigned(canonicalAngleDeg), anglePrecisionDecimals);
+  const canonicalAngleDeg = normalizeDegrees360(record.baseAngleDeg + canonicalStepIndex * record.stepDegrees);
+  const signedAngleDeg = normalizeDegreesSigned(canonicalAngleDeg);
   const angleRad = (signedAngleDeg * Math.PI) / 180;
   const cos = quantizeAngleValue(Math.cos(angleRad), trigPrecisionDecimals);
   const sin = quantizeAngleValue(Math.sin(angleRad), trigPrecisionDecimals);
@@ -65,13 +62,13 @@ function buildDraftAngleEntry(record, stepIndex, trigPrecisionDecimals, anglePre
   };
 }
 
-export function buildDraftAngleFamilyRuntime(record, trigPrecisionDecimals = 8, anglePrecisionDecimals = 20) {
+export function buildDraftAngleFamilyRuntime(record, trigPrecisionDecimals = 8) {
   const normalizedRecord = {
     ...record,
-    baseAngleDeg: quantizeAngleValue(normalizeDegrees360(record.baseAngleDeg), anglePrecisionDecimals),
+    baseAngleDeg: normalizeDegrees360(record.baseAngleDeg),
   };
   const entries = Array.from({ length: normalizedRecord.stepCount }, (_, stepIndex) =>
-    buildDraftAngleEntry(normalizedRecord, stepIndex, trigPrecisionDecimals, anglePrecisionDecimals)
+    buildDraftAngleEntry(normalizedRecord, stepIndex, trigPrecisionDecimals)
   );
   const signatureToStepIndex = new Map(entries.map((entry) => [entry.signature, entry.stepIndex]));
 
@@ -86,14 +83,11 @@ export function getDraftAngleFamilyEntry(familyRuntime, stepIndex) {
   return familyRuntime.entries[normalizeDraftAngleStep(stepIndex, familyRuntime.record.stepCount)];
 }
 
-export function createFreeDraftAngleRotation(baseAngleDeg, stepIndex = 0, trigPrecisionDecimals = 8, anglePrecisionDecimals = 20) {
-  const canonicalBaseAngleDeg = quantizeAngleValue(normalizeDegrees360(baseAngleDeg), anglePrecisionDecimals);
+export function createFreeDraftAngleRotation(baseAngleDeg, stepIndex = 0, trigPrecisionDecimals = 8) {
+  const canonicalBaseAngleDeg = normalizeDegrees360(baseAngleDeg);
   const canonicalStepIndex = normalizeDraftAngleStep(stepIndex);
-  const canonicalAngleDeg = quantizeAngleValue(
-    normalizeDegrees360(canonicalBaseAngleDeg + canonicalStepIndex),
-    anglePrecisionDecimals
-  );
-  const signedAngleDeg = quantizeAngleValue(normalizeDegreesSigned(canonicalAngleDeg), anglePrecisionDecimals);
+  const canonicalAngleDeg = normalizeDegrees360(canonicalBaseAngleDeg + canonicalStepIndex);
+  const signedAngleDeg = normalizeDegreesSigned(canonicalAngleDeg);
   const angleRad = (signedAngleDeg * Math.PI) / 180;
   const cos = quantizeAngleValue(Math.cos(angleRad), trigPrecisionDecimals);
   const sin = quantizeAngleValue(Math.sin(angleRad), trigPrecisionDecimals);
@@ -112,13 +106,8 @@ export function createFreeDraftAngleRotation(baseAngleDeg, stepIndex = 0, trigPr
   };
 }
 
-export function findDraftAngleFamilyMatchByDegrees(
-  angleDeg,
-  familyRuntimes,
-  trigPrecisionDecimals = 8,
-  anglePrecisionDecimals = 20
-) {
-  const freeRotation = createFreeDraftAngleRotation(angleDeg, 0, trigPrecisionDecimals, anglePrecisionDecimals);
+export function findDraftAngleFamilyMatchByDegrees(angleDeg, familyRuntimes, trigPrecisionDecimals = 8) {
+  const freeRotation = createFreeDraftAngleRotation(angleDeg, 0, trigPrecisionDecimals);
 
   for (const familyRuntime of familyRuntimes) {
     const stepIndex = familyRuntime.signatureToStepIndex.get(freeRotation.signature);

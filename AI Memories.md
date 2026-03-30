@@ -57,6 +57,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - Trig-generated workplane coordinates and the Clipper adapter now share the same `8`-decimal quantization policy, so rotated world-space geometry enters boolean operations on the same canonical coordinate grid.
 - There is no raster-mask union pipeline anymore.
 - Each visible layer is drawn from its current merged vector shapes.
+- Visible layer shapes also render small black vertex markers at each stored polygon vertex.
 - Selection highlighting is drawn by tracing the selected shape geometries.
 
 ### Layer Model
@@ -180,7 +181,7 @@ Layer order controls draw order. The active layer receives new geometry when the
     - A console-side live registry monitor is now available for persistent draft-angle families, showing each family's `baseAngleDeg` plus canonical `baseVectorDx/baseVectorDy`, and it refreshes automatically whenever a new family is materialized on commit.
     - The `Align` path now logs a dedicated debug console block for each successful align event, including the computed align angle in degrees, the raw `dx/dy` align vector, and the normalized align base vector at `15` decimal places so it can be compared directly against the stored family table vectors.
     - The live registry monitor no longer clears the browser console before printing, so align/debug output now accumulates as scrollable console history for side-by-side comparison across events.
-    - As the current first-pass alignment drift reduction tweak, draft-angle `baseAngleDeg` storage/runtime precision is now kept at `20` decimal places while canonical family `sin/cos` coefficients remain at the shared `8`-decimal precision.
+    - As the current follow-up alignment experiment, `Align` now passes its detected rotation into candidate and persistent families without angle-degree quantization, while the family matching/signature layer still uses the shared `8`-decimal canonical `sin/cos` coefficients.
   - The `Space + wheel` path should become integer-driven:
     - the active wheel rotation must be treated as a canonical integer degree step;
     - app logic should feed the wheel path with that integer degree identity rather than a derived floating-point degree value.

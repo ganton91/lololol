@@ -1470,8 +1470,6 @@ function cloneSnapTarget(target) {
     kind: target.kind,
     world: cloneDraftPoint(target.world),
     distance: target.distance,
-    edgeStart: target.edgeStart ? cloneDraftPoint(target.edgeStart) : null,
-    edgeEnd: target.edgeEnd ? cloneDraftPoint(target.edgeEnd) : null,
   };
 }
 
@@ -1518,8 +1516,6 @@ function getDraftTransformSnapTarget(worldPoint, maxDistance = draftTransformSna
             kind: "edge",
             world: projection,
             distance: edgeDistance,
-            edgeStart: { x: corner[0], y: corner[1] },
-            edgeEnd: { x: next[0], y: next[1] },
           };
         }
       }
@@ -2064,19 +2060,7 @@ function applyDraftAlignFromDrag() {
 
   const dx = endSnap.world.x - startSnap.world.x;
   const dy = endSnap.world.y - startSnap.world.y;
-  let alignDx = dx;
-  let alignDy = dy;
-
-  if (endSnap.kind === "edge" && endSnap.edgeStart && endSnap.edgeEnd) {
-    alignDx = endSnap.edgeEnd.x - endSnap.edgeStart.x;
-    alignDy = endSnap.edgeEnd.y - endSnap.edgeStart.y;
-    if (alignDx * dx + alignDy * dy < 0) {
-      alignDx *= -1;
-      alignDy *= -1;
-    }
-  }
-
-  const baseDirection = normalizeDirectionVector(alignDx, alignDy);
+  const baseDirection = normalizeDirectionVector(dx, dy);
   if (!baseDirection) return false;
 
   const currentAlignAngleRad = Math.atan2(baseDirection.dy, baseDirection.dx);

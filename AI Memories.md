@@ -119,7 +119,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Right click in `Draw` uses the current shape mode as subtraction geometry and applies boolean difference against the active layer's merged vector geometry.
 - After drawing, the new geometry is inserted into the layer and the layer is rebuilt through boolean union.
 - After subtractive drawing, the active layer is replaced with the resulting difference geometry instead of deleting whole merged objects by hit-test.
-- After subtractive drawing, the resulting difference geometry is also passed through Clipper collinear simplification before the layer shapes are recreated, so exact straight-line extra vertices can be removed in subtract results as well.
+- Before layer shapes are recreated, both boolean union results and subtractive difference results are passed through Clipper collinear simplification, so exact straight-line extra vertices can be removed from both additive and subtractive outcomes.
 - After moving selected geometry, the affected layer or layers are rebuilt again so intersections and merges stay correct.
 - Hidden layers are not rendered.
 - Locked layers do not accept edits.
@@ -177,7 +177,6 @@ Layer order controls draw order. The active layer receives new geometry when the
     - If a later `Align` lands on a direction that belongs to the same unresolved candidate regime, the candidate is reused with the matching step instead of creating another candidate.
     - The first real committed draw operation under an unresolved candidate regime now materializes that candidate into a persistent dynamic family, for both `Add` and `Subtract`.
     - Leaving the unresolved regime by resetting the plane or aligning into a known/persistent family now discards the temporary candidate instead of keeping it around as a persistent family.
-    - The union rebuild path now runs Clipper simplification on the union result before recreating layer shapes, so exact collinear vertices can be removed instead of surviving as extra snap corners along straight sides.
     - A console-side live registry monitor is now available for persistent draft-angle families, showing each family's `baseAngleDeg` plus canonical `baseVectorDx/baseVectorDy`, and it refreshes automatically whenever a new family is materialized on commit.
     - The `Align` path now logs a dedicated debug console block for each successful align event, including the computed align angle in degrees, the raw `dx/dy` align vector, and the normalized align base vector at `15` decimal places so it can be compared directly against the stored family table vectors.
     - The live registry monitor no longer clears the browser console before printing, so align/debug output now accumulates as scrollable console history for side-by-side comparison across events.

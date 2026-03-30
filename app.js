@@ -1919,8 +1919,17 @@ function applyDraftAlignFromDrag() {
   if (!startSnap || !endSnap) return false;
   if (distanceBetweenPoints(startSnap.world, endSnap.world) <= 1e-6) return false;
 
+  const dx = endSnap.world.x - startSnap.world.x;
+  const dy = endSnap.world.y - startSnap.world.y;
+  const currentAlignAngleRad = Math.atan2(dy, dx);
+  const currentAlignAngleDeg = (currentAlignAngleRad * 180) / Math.PI;
+
+  console.log('--- NEW ALIGN EVENT ---');
+  console.log('Align Angle (Deg):', currentAlignAngleDeg.toFixed(15));
+  console.log('Align Vector (DX, DY):', dx.toFixed(15), dy.toFixed(15));
+
   state.draftOrigin = cloneDraftPoint(startSnap.world);
-  setDraftAngleFromAlignedRadians(Math.atan2(endSnap.world.y - startSnap.world.y, endSnap.world.x - startSnap.world.x));
+  setDraftAngleFromAlignedRadians(currentAlignAngleRad);
   updateWorkplaneStatus();
   return true;
 }

@@ -37,6 +37,9 @@ const state = {
   layerSectionCollapsed: false,
   layers: [{ id: "layer-1", drawingId: "drawing-1", name: "Layer 1", visible: true, locked: false, fillColor: "#93c5fd", opacity: 1 }],
   activeLayerId: "layer-1",
+  editingLayerId: null,
+  editingLayerNameDraft: "",
+  editingLayerInitialName: "",
   nextLayerId: 2,
   nextShapeId: 1,
   nextDraftAngleFamilyId: 1,
@@ -773,6 +776,28 @@ function syncActiveLayerControls() {
   const activeLayer = getActiveLayer();
   if (!activeLayer || !layerFillInput) return;
   layerFillInput.value = activeLayer.fillColor;
+}
+
+function beginRenameLayer(layerId) {
+  const layer = getLayerById(layerId);
+  if (!layer) return;
+  state.editingLayerId = layerId;
+  state.editingLayerInitialName = layer.name;
+  state.editingLayerNameDraft = layer.name;
+  renderLayersPanel();
+}
+
+function endRenameLayer(commit = true) {
+  const layer = getLayerById(state.editingLayerId);
+  if (commit && layer) {
+    const nextName = String(state.editingLayerNameDraft || "").trim();
+    layer.name = nextName || state.editingLayerInitialName || layer.name;
+  }
+
+  state.editingLayerId = null;
+  state.editingLayerNameDraft = "";
+  state.editingLayerInitialName = "";
+  renderLayersPanel();
 }
 
 function syncDrawSizeInput() {
@@ -2208,10 +2233,49 @@ function renderLayersPanel() {
       const titleWrap = document.createElement("div");
       titleWrap.className = "card-header-title";
 
-      const label = document.createElement("div");
-      label.className = "layer-name-label";
-      label.textContent = layer.name;
-      titleWrap.appendChild(label);
+      let nameField;
+      if (state.editingLayerId === layer.id) {
+        const input = document.createElement("input");
+        input.className = "layer-name";
+        input.value = state.editingLayerNameDraft || layer.name;
+        input.size = Math.max(1, input.value.length);
+        input.addEventListener("click", (event) => event.stopPropagation());
+        input.addEventListener("pointerdown", (event) => event.stopPropagation());
+        input.addEventListener("input", () => {
+          state.editingLayerNameDraft = input.value;
+          input.size = Math.max(1, input.value.length);
+        });
+        input.addEventListener("blur", endRenameLayer);
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            input.blur();
+            return;
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            endRenameLayer(false);
+          }
+        });
+        queueMicrotask(() => {
+          input.focus();
+          input.select();
+        });
+        nameField = input;
+      } else {
+        const label = document.createElement("div");
+        label.className = "layer-name-label";
+        label.textContent = layer.name;
+        label.addEventListener("click", (event) => {
+          if (state.activeLayerId !== layer.id) return;
+          event.stopPropagation();
+          beginRenameLayer(layer.id);
+        });
+        nameField = label;
+      }
+      titleWrap.appendChild(nameField);
 
       const inlineControls = document.createElement("div");
       inlineControls.className = "inline-controls";

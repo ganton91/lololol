@@ -219,3 +219,4 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The nested `Layers` add button creates real app layers in the current drawing container, while the drawing-level controls are still mostly UI scaffolding for now rather than a fully implemented multi-drawing system.
 - Layer drag-reordering inside the nested `Layers` list now uses a reference-style custom pointer drag interaction with insertion markers and commit-on-drop behavior, without a separate floating preview card.
 - The drag reorder logic translates the visible top-to-bottom layer order in the left panel back into the app's underlying drawing/render order so the panel stack and canvas paint order stay aligned.
+- Clicking the active layer name now swaps the label into a reference-style inline rename input that auto-focuses; `Enter` or blur commits the new name, while `Escape` cancels and restores the previous name.

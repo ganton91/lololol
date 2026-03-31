@@ -227,3 +227,4 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Clicking the expanded drawing name now swaps the label into the same inline rename input pattern used by layers; blur or `Enter` commits, while `Escape` cancels and restores the previous name.
 - Clicking the active layer name now swaps the label into a reference-style inline rename input that auto-focuses; `Enter` or blur commits the new name, while `Escape` cancels and restores the previous name.
 - Current duplicate behavior clones layers/drawings into the same world position with new ids and cloned geometry; there is no confirmed cross-layer or cross-drawing boolean merge bug from that flow, but exact overlap can visually resemble a shared result until one copy is moved or edited.
+- The old bottom-left instructional hint panel inside the canvas shell has been removed completely, including its markup and styling.

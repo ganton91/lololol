@@ -731,19 +731,6 @@
         white-space: nowrap;
       }
 
-      .hint {
-        position: absolute;
-        bottom: 14px;
-        left: 16px;
-        z-index: 9;
-        max-width: calc(100% - 32px);
-        font-size: 12px;
-        color: var(--muted);
-        background: rgba(255, 255, 255, 0.8);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 6px 10px;
-      }
     </style>
   </head>
   <body>
@@ -809,10 +796,6 @@
             <button id="zoom-in" class="tool-btn" type="button" aria-label="Zoom in">+</button>
             <span id="zoom-level" style="font-size: 12px; color: #334155; min-width: 52px">100%</span>
             <span id="workplane-status" class="workplane-status">Plane: world | Rot: 0deg | Origin: 0, 0</span>
-          </div>
-
-          <div class="hint">
-            Drag to draw. Right click in Draw subtracts with the current shape. Select moves merged shapes. Middle mouse pans. Stroke Rect width is set in whole grid cells, snaps differently for odd and even widths, and uses <b>Shift</b> for sticky draft-axis lock while drawing. Square Brush size is set in whole grid cells, shows a centered brush preview, snaps by center parity, and uses <b>Shift</b> for sticky draft-axis lock from the current pointer anchor while brushing. <b>Wheel</b> zoom. Hold <b>Space</b> for drafting transforms: <b>Left Drag</b> aligns the workplane anywhere in space, with magnetic snap to nearby geometry, <b>Wheel</b> rotates the drafting angle, <b>Middle Drag</b> moves the draft origin, and <b>R</b> resets the workplane to world.
           </div>
         </div>
       </div>

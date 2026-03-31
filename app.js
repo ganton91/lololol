@@ -726,7 +726,6 @@ function clearLayerPointerDrag(commit = true) {
   const drag = state.leftPanelPointerDrag;
   if (!drag) return;
 
-  if (drag.preview && drag.preview.parentNode) drag.preview.remove();
   if (drag.sourceCard) drag.sourceCard.classList.remove("dragging");
   clearLayerDropIndicatorClasses(getLayerListElementForDrawing(drag.drawingId));
   if (layersPanel) layersPanel.classList.remove("drag-reordering");
@@ -753,19 +752,6 @@ function beginLayerPointerDrag(event, card, drawingId, layerId) {
   event.stopPropagation();
   clearLayerPointerDrag(false);
 
-  const rect = card.getBoundingClientRect();
-  const preview = card.cloneNode(true);
-  preview.classList.add("left-panel-drag-preview");
-  preview.style.top = "-9999px";
-  preview.style.left = "-9999px";
-  preview.style.width = rect.width + "px";
-  document.body.appendChild(preview);
-
-  const offsetX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
-  const offsetY = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
-  preview.style.left = event.clientX - offsetX + "px";
-  preview.style.top = event.clientY - offsetY + "px";
-
   card.classList.add("dragging");
   if (layersPanel) layersPanel.classList.add("drag-reordering");
 
@@ -775,9 +761,6 @@ function beginLayerPointerDrag(event, card, drawingId, layerId) {
     drawingId,
     layerId,
     sourceCard: card,
-    preview,
-    offsetX,
-    offsetY,
     dropIndex: drop.toIndex,
     rawIndex: drop.rawIndex,
     fromIndex: drop.fromIndex,
@@ -3520,11 +3503,6 @@ if (addDrawingBtn) {
 window.addEventListener("pointermove", (event) => {
   const drag = state.leftPanelPointerDrag;
   if (!drag || event.pointerId !== drag.pointerId) return;
-
-  if (drag.preview) {
-    drag.preview.style.left = event.clientX - drag.offsetX + "px";
-    drag.preview.style.top = event.clientY - drag.offsetY + "px";
-  }
 
   const drop = layerDropPositionFromClientY(drag.drawingId, event.clientY, drag.layerId);
   drag.dropIndex = drop.toIndex;

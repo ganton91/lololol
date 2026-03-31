@@ -178,130 +178,36 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: design and build a reference-style `Renders` workspace for the current vector app. This replaces the old `Views` naming with `Renders` and must cover the render list panel, render box interaction on the main canvas, render tabs, render panes, render properties flows, exports, and optional pop-out window behavior.
-- Status: scope and architecture are now defined from the reference project; no `Renders` UI or behavior has been implemented in the current app yet.
+- Task: build the application's interface according to the reference file at `Reference Only/index.html`, using that file as the current UI source of truth for structure, naming, layout, and visual direction.
+- Status: the active priority is now interface implementation first. The previous `Renders`-workspace task is no longer the current tracked task here.
 
-### Target Product Slice
+### Source Of Truth
 
-- Add a panel named `Renders` modeled after the reference project's `Views` panel.
-- Each render entry should represent a saved render setup, not just a temporary preview.
-- The active render should own a world-space render box that is visible on the main canvas.
-- The render box should behave like the reference view box: selectable, movable, and resizable from normal editing/select interaction rather than being hidden in a separate mode.
-- The application should have a bottom tab switcher with `Main Canvas` plus named render tabs such as `Render 1`, `Render 2`, and so on.
-- `Main Canvas` remains the drafting/editing environment.
-- A render tab opens a dedicated render workspace for that saved render, following the reference pattern rather than replacing the main drawing canvas.
+- Use `Reference Only/index.html` as the reference for the immediate interface build.
+- The `Reference Only` folder should still be inspected only when explicitly needed for matching reference behavior, and the current reference target is that single HTML file.
 
-### Planned Render Workspace UX
+### Interface Scope
 
-- The `Renders` panel should follow the same general structure as the reference:
-  - saved render list
-  - active render selection
-  - per-render actions
-- Each render entry is expected to expose reference-style actions, with current naming direction:
-  - `Layer Properties`
-  - `Render Properties`
-  - `Render Box Properties` or equivalent final label
-- `Layer Properties` should be the place where the render config controls how global layers participate inside that render.
-- `Render Properties` should hold render-level output settings and workspace settings.
-- `Render Box Properties` should hold properties tied to the render box / cut setup, such as section axes, plan height, and related box-scoped documentation settings.
-- A render tab should open a render output workspace similar to the reference multi-pane area rather than just a single flat preview.
-- The workspace should support reference-style pane layout logic and pane direction selection instead of hard-coding a single output view.
-- `Open in New Window` should be supported for the active render tab using the same reference-style pop-out model.
+- Rework the app shell to match the reference-style interface structure as closely as practical in the current project.
+- The target interface now includes:
+  - top bar
+  - left-side panel structure
+  - canvas shell
+  - floating tools
+  - floating side panels
+  - bottom view/tab switcher
+  - modal and properties panel shells
+- The immediate focus is interface layout, component structure, naming, and interaction scaffolding before deeper feature-complete behavior.
 
-### Main Canvas Interaction Requirements
+### Interface Direction Locked In
 
-- Render boxes must exist in the same world-space environment as the normal drawing content.
-- In `Select` mode, the user should be able to pick an active render box directly on the main canvas.
-- The active render box should support move behavior.
-- The active render box should support resize behavior.
-- The render box should remain part of the main-canvas editing context even when the user later switches to a render tab for output review.
-- Render box interaction should follow the reference mental model, where the saved render owns bounds and the bounds can be edited graphically.
-
-### Data Model Direction
-
-- Layers are expected to become global application data for the render system, rather than being duplicated per render.
-- Each render should store its own render-scoped configuration that references global layers.
-- Current working render record direction:
-  - `id`
-  - `name`
-  - `visible`
-  - `bounds` for the render box
-  - render-local layer configs keyed by global layer id
-  - render-local layer order
-  - render-local section / cut definitions
-  - pane directions and pane layout
-  - pane viewport metadata for fit / zoom / pan
-- Runtime-only pop-out window state should stay separate from the saved render document data, following the reference split between saved view state and pop-out synchronization state.
-
-### Rendering Architecture Direction
-
-- The new render system should stay vector-first before final panel rasterization, matching the reference project's documentation/projection approach.
-- The source model should remain the app's merged world-space multipolygon geometry plus vertical metadata.
-- Each participating layer should behave as a `2.5D` footprint extrusion span, not as a true solid model.
-- For a render, the engine should:
-  - clip layer geometry against the render box
-  - project it into render-local documentation geometry
-  - resolve plan / elevation / section logic against that projected representation
-- The projected documentation geometry should be the shared source for:
-  - panel drawing
-  - DXF export
-  - high-resolution PNG export
-  - PDF export
-- Final on-screen pane drawing may still rasterize at the last stage, but only after the vector-first projected result has already been built.
-
-### Crisp Pane Rendering Requirements
-
-- The render panes should match the reference pane behavior as closely as practical.
-- Each pane should auto-fit content once based on projected content bounds and the available panel surface.
-- Each pane should render into a device-pixel aware backing canvas.
-- Each pane should render with `imageSmoothingEnabled = false`.
-- Each pane should support an oversampled backing resolution budget so later pane zoom remains crisp.
-- Pane zoom and pan should be applied as CSS transform on the pane canvas rather than forcing a full re-render on every wheel or drag event.
-- Pane viewport metadata should store at least the panel surface size and maximum safe zoom budget, following the reference fit-and-transform pattern.
-
-### Tabs, Pop-Out, And Workspace Logic To Mirror
-
-- The lower tab strip should work like the reference `Main View` plus named saved view buttons, but renamed around `Main Canvas` and `Renders`.
-- Switching from `Main Canvas` to a render tab should activate that saved render workspace rather than changing the underlying source geometry.
-- A render opened in a separate window should behave like the reference pop-out flow:
-  - the active render tab can be opened in a dedicated window
-  - the main window should know when that external window is open
-  - the main workspace should be able to focus or close the external render window
-  - the pop-out window should mirror the render workspace for that render rather than booting an unrelated stripped-down page
-- The reference uses a snapshot-plus-sync model for the pop-out window; the new render system should follow that pattern rather than inventing a completely different window architecture.
-
-### Reference Research Conclusions Already Locked In
-
-- The reference project stores vertical mass through per-view layer config using `baseElevation` plus `height`, snapped at `0.05m`.
-- The reference project creates a saved view from a dragged world-space box and then uses that box as the scope for render participation.
-- The reference project resolves plans, elevations, and sections from a shared documentation/projection layer rather than from separate one-off renderers.
-- The reference project keeps crisp pane output by combining fit-once rendering, DPR-aware canvas sizing, oversampled backing buffers, and CSS transform zoom/pan.
-- The reference project keeps DXF export vector-first by exporting the same projected geometry used by the documentation layer.
-- The reference project uses high-resolution offscreen rendering for PNG and image-based PDF export while still reusing the same documentation/projection result.
-
-### Build Order For This Slice
-
-- Step 1: add render data structures and rename the future feature direction from `Views` to `Renders`.
-- Step 2: add the `Renders` panel shell and saved render list UI.
-- Step 3: add saved render box records on the main canvas, including select/move/resize behavior.
-- Step 4: add the lower tab switcher with `Main Canvas` plus saved render tabs.
-- Step 5: add the render workspace shell and reference-style pane layout scaffolding.
-- Step 6: add the vector-first render documentation/projection cache layer.
-- Step 7: add crisp pane auto-fit rendering with pane viewport metadata and CSS-transform zoom/pan.
-- Step 8: add `Layer Properties`, `Render Properties`, and `Render Box Properties` flows.
-- Step 9: add export flows and pop-out window synchronization.
+- Match the reference visual hierarchy and spatial organization rather than inventing a new UI direction.
+- Keep the project compatible with plain browser deployment from `index.html` and native browser JavaScript without introducing a build step.
+- Preserve the current app's real geometry and drafting behavior unless a UI change explicitly requires a behavioral integration.
+- When reference naming conflicts with current app naming, the implementation should follow the active interface direction chosen for the current build pass and document that decision as it stabilizes.
 
 ### Current Progress On This Task
 
-- Reference research is complete for the following pieces:
-  - per-view / per-render layer configuration
-  - world-space box creation and transform behavior
-  - vector-first documentation geometry before final panel rasterization
-  - crisp pane auto-fit and CSS-transform viewport behavior
-  - DXF / PNG / PDF output paths
-  - external pop-out window workflow
-- No part of the `Renders` workspace has been implemented in the current app yet.
-
-### Non-Blocking Background
-
-- Browser validation for the canonical draft-angle family system in the current app is still pending, but it is currently a background task and not the critical path for the new `Renders` workspace.
+- The active task has been reset from the old `Renders` planning track to interface implementation.
+- The current reference file has been identified as `Reference Only/index.html`.
+- No new interface implementation has been completed yet under this updated task definition.

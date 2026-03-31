@@ -80,6 +80,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - The default canonical family covers `0..359` degree steps at `1deg` increments, and each lookup entry stores canonical `cos` and `sin` coefficients rounded to the shared `8`-decimal precision.
 - The active workplane rotation is represented as `mode` (`family`, `candidate`, or fallback `free`) plus a family/base descriptor and integer `stepIndex`.
 - Family-driven `draft -> world`, `world -> draft`, and world-content canvas rendering all read the active lookup entry's canonical coefficients instead of recomputing trig from a floating angle.
+- `app.js` now submits the raw snapped `end - start` align vector into the draft-angle store, and the only remaining normalization/signature canonicalization boundary for align-family matching lives inside `draft-angle.js`.
 - `Align` can resolve into an existing known family or into a temporary unresolved candidate family derived from a normalized direction vector; candidate records and persistent dynamic families share the same 360-step lookup-table structure.
 - A temporary candidate becomes a persistent dynamic family only when the user commits a real draw or subtract operation under that regime; otherwise it is discarded when the plane is reset or switched back into a known or already-persistent family.
 - The browser console exposes the draft-angle store and a live registry view for persistent draft-angle families for debugging.

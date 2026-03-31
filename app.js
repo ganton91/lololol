@@ -206,17 +206,6 @@ function isSettingsMenuOpen() {
   return !!settingsMenu && !settingsMenu.classList.contains("hidden");
 }
 
-function normalizeDirectionVector(dx, dy) {
-  const length = Math.hypot(dx, dy);
-  if (!Number.isFinite(length) || length <= 1e-12) return null;
-
-  return {
-    dx: dx / length,
-    dy: dy / length,
-    length,
-  };
-}
-
 function getActiveDraftAngleStepCount() {
   return draftAngleStore.getActiveStepCount();
 }
@@ -2917,19 +2906,18 @@ function applyDraftAlignFromDrag() {
 
   const dx = endSnap.world.x - startSnap.world.x;
   const dy = endSnap.world.y - startSnap.world.y;
-  const baseDirection = normalizeDirectionVector(dx, dy);
-  if (!baseDirection) return false;
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return false;
 
-  const currentAlignAngleRad = Math.atan2(baseDirection.dy, baseDirection.dx);
+  const currentAlignAngleRad = Math.atan2(dy, dx);
   const currentAlignAngleDeg = (currentAlignAngleRad * 180) / Math.PI;
 
   console.log('--- NEW ALIGN EVENT ---');
   console.log('Align Angle (Deg):', currentAlignAngleDeg.toFixed(15));
   console.log('Align Vector (DX, DY):', dx.toFixed(15), dy.toFixed(15));
-  console.log('Align Base Vector (DX, DY):', baseDirection.dx.toFixed(15), baseDirection.dy.toFixed(15));
+  console.log('Align Raw Input To Draft Angle (DX, DY):', dx.toFixed(15), dy.toFixed(15));
 
   state.draftOrigin = cloneDraftPoint(startSnap.world);
-  setDraftAngleFromAlignedDirection(baseDirection.dx, baseDirection.dy);
+  setDraftAngleFromAlignedDirection(dx, dy);
   updateWorkplaneStatus();
   return true;
 }

@@ -36,7 +36,9 @@ const state = {
   drawingsUi: [{ id: "drawing-1", name: "Drawing 1", expanded: true, visible: true, layersSectionCollapsed: false }],
   layerSectionCollapsed: false,
   layers: [{ id: "layer-1", drawingId: "drawing-1", name: "Layer 1", visible: true, locked: false, fillColor: "#93c5fd", opacity: 1 }],
+  activeDrawingId: "drawing-1",
   activeLayerId: "layer-1",
+  nextDrawingId: 2,
   editingDrawingId: null,
   editingDrawingNameDraft: "",
   editingDrawingInitialName: "",
@@ -531,24 +533,141 @@ function getNextLayerColor() {
   return layerPalette[(state.nextLayerId - 1) % layerPalette.length];
 }
 
+function createDrawingUiRecord(name = "Drawing " + state.nextDrawingId) {
+  const id = "drawing-" + state.nextDrawingId;
+  state.nextDrawingId += 1;
+  return {
+    id,
+    name,
+    expanded: false,
+    visible: true,
+    layersSectionCollapsed: false,
+  };
+}
+
+function createLayerRecord(drawingId, options = {}) {
+  const id = "layer-" + state.nextLayerId;
+  const name = options.name || "Layer " + state.nextLayerId;
+  const fillColor = options.fillColor || getNextLayerColor();
+  state.nextLayerId += 1;
+  return {
+    id,
+    drawingId,
+    name,
+    visible: options.visible ?? true,
+    locked: options.locked ?? false,
+    fillColor,
+    opacity: Number.isFinite(options.opacity) ? options.opacity : 1,
+  };
+}
+
+function createDrawingWithDefaultLayer(name = "Drawing " + state.nextDrawingId) {
+  const drawing = createDrawingUiRecord(name);
+  const layer = createLayerRecord(drawing.id);
+  return { drawing, layer };
+}
+
 function getPrimaryDrawingUi() {
   if (!state.drawingsUi.length) {
-    state.drawingsUi.push({ id: "drawing-1", name: "Drawing 1", expanded: true, visible: true, layersSectionCollapsed: false });
+    const fallback = createDrawingWithDefaultLayer("Drawing 1");
+    fallback.drawing.expanded = true;
+    state.drawingsUi.push(fallback.drawing);
+    state.layers.push(fallback.layer);
+    state.activeDrawingId = fallback.drawing.id;
+    state.activeLayerId = fallback.layer.id;
   }
 
-  return state.drawingsUi[0];
+  const activeDrawing = getDrawingUiById(state.activeDrawingId);
+  if (activeDrawing) return activeDrawing;
+
+  const fallbackDrawing = state.drawingsUi[0] || null;
+  if (fallbackDrawing) setActiveDrawingById(fallbackDrawing.id);
+  return fallbackDrawing;
 }
 
 function getDrawingUiById(id) {
   return state.drawingsUi.find((drawing) => drawing.id === id) || null;
 }
 
+function getActiveDrawingUi() {
+  const activeDrawing = getDrawingUiById(state.activeDrawingId);
+  if (activeDrawing) return activeDrawing;
+
+  const activeLayer = getActiveLayer();
+  const activeLayerDrawing = activeLayer ? getDrawingUiById(getLayerDrawingId(activeLayer)) : null;
+  return activeLayerDrawing || getPrimaryDrawingUi();
+}
+
 function getLayerDrawingId(layer) {
   return layer?.drawingId || getPrimaryDrawingUi().id;
 }
 
+function getLayersForDrawingInStorageOrder(drawingId) {
+  return state.layers.filter((layer) => getLayerDrawingId(layer) === drawingId);
+}
+
 function getLayersForDrawing(drawingId) {
-  return state.layers.filter((layer) => getLayerDrawingId(layer) === drawingId).slice().reverse();
+  return getLayersForDrawingInStorageOrder(drawingId).slice().reverse();
+}
+
+function getDrawingLayerFallback(drawingId) {
+  return getLayersForDrawing(drawingId)[0] || null;
+}
+
+function setActiveDrawingById(drawingId, options = {}) {
+  const drawing = getDrawingUiById(drawingId);
+  if (!drawing) return false;
+
+  if (state.editingDrawingId && state.editingDrawingId !== drawing.id) {
+    state.editingDrawingId = null;
+    state.editingDrawingNameDraft = "";
+    state.editingDrawingInitialName = "";
+  }
+
+  if (state.editingLayerId) {
+    const editingLayer = getLayerById(state.editingLayerId);
+    if (!editingLayer || getLayerDrawingId(editingLayer) !== drawing.id) {
+      state.editingLayerId = null;
+      state.editingLayerNameDraft = "";
+      state.editingLayerInitialName = "";
+    }
+  }
+
+  state.activeDrawingId = drawing.id;
+  state.drawingsUi.forEach((entry) => {
+    entry.expanded = entry.id === drawing.id;
+  });
+
+  const nextLayerId = options.layerId || (() => {
+    const activeLayer = getActiveLayer();
+    if (activeLayer && getLayerDrawingId(activeLayer) === drawing.id) return activeLayer.id;
+    return getDrawingLayerFallback(drawing.id)?.id || null;
+  })();
+
+  state.activeLayerId = nextLayerId;
+  return true;
+}
+
+function isDrawingVisible(drawingId) {
+  const drawing = getDrawingUiById(drawingId);
+  return drawing ? drawing.visible !== false : true;
+}
+
+function isLayerActuallyVisible(layer) {
+  return !!layer && layer.visible !== false && isDrawingVisible(getLayerDrawingId(layer));
+}
+
+function isLayerAvailableForEditing(layer) {
+  return isLayerActuallyVisible(layer) && !layer.locked;
+}
+
+function getRenderableLayersInPaintOrder() {
+  const orderedLayers = [];
+  for (const drawing of state.drawingsUi.slice().reverse()) {
+    if (drawing.visible === false) continue;
+    orderedLayers.push(...getLayersForDrawingInStorageOrder(drawing.id));
+  }
+  return orderedLayers;
 }
 
 function getLayerShapeCount(layerId) {
@@ -656,7 +775,11 @@ function getLayerListElementForDrawing(drawingId) {
   return layersList.querySelector(`.drawing-subsection-list[data-drawing-id="${drawingId}"]`);
 }
 
-function clearLayerDropIndicatorClasses(listEl = null) {
+function getDrawingCardElements() {
+  return Array.from(layersList.querySelectorAll(".drawing-card"));
+}
+
+function clearLeftPanelDropIndicatorClasses(listEl = null) {
   const root = listEl || layersList;
   root.querySelectorAll(".drag-insert-before, .drag-insert-after").forEach((element) => {
     element.classList.remove("drag-insert-before");
@@ -664,8 +787,14 @@ function clearLayerDropIndicatorClasses(listEl = null) {
   });
 }
 
+function reorderDrawingsFromVisualOrder(visualDrawingIds) {
+  const reordered = visualDrawingIds.map((drawingId) => getDrawingUiById(drawingId)).filter(Boolean);
+  if (reordered.length !== state.drawingsUi.length) return;
+  state.drawingsUi = reordered;
+}
+
 function reorderLayersForDrawingFromVisualOrder(drawingId, visualLayerIds) {
-  const drawingLayers = state.layers.filter((layer) => getLayerDrawingId(layer) === drawingId);
+  const drawingLayers = getLayersForDrawingInStorageOrder(drawingId);
   if (!drawingLayers.length) return;
 
   const reorderedTopToBottom = visualLayerIds
@@ -679,6 +808,35 @@ function reorderLayersForDrawingFromVisualOrder(drawingId, visualLayerIds) {
   state.layers = state.layers.map((layer) =>
     getLayerDrawingId(layer) === drawingId ? reorderedBottomToTop[reorderedIndex++] : layer
   );
+}
+
+function drawingDropPositionFromClientY(clientY, sourceDrawingId) {
+  const items = state.drawingsUi;
+  if (!items.length) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const fromIndex = items.findIndex((drawing) => drawing.id === sourceDrawingId);
+  if (fromIndex === -1) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const cards = getDrawingCardElements();
+  if (!cards.length) return { rawIndex: fromIndex, toIndex: fromIndex, fromIndex };
+
+  let rawIndex = cards.length;
+  for (let index = 0; index < cards.length; index += 1) {
+    const rect = cards[index].getBoundingClientRect();
+    if (clientY < rect.top + rect.height * 0.5) {
+      rawIndex = index;
+      break;
+    }
+  }
+
+  let toIndex = rawIndex;
+  if (toIndex > fromIndex) toIndex -= 1;
+
+  return {
+    rawIndex,
+    toIndex: Math.max(0, Math.min(items.length - 1, toIndex)),
+    fromIndex,
+  };
 }
 
 function layerDropPositionFromClientY(drawingId, clientY, sourceLayerId) {
@@ -711,9 +869,25 @@ function layerDropPositionFromClientY(drawingId, clientY, sourceLayerId) {
   };
 }
 
+function updateDrawingDropIndicator(rawIndex, toIndex, fromIndex) {
+  clearLeftPanelDropIndicatorClasses(layersList);
+
+  if (!state.leftPanelPointerDrag || toIndex === -1 || fromIndex === -1 || toIndex === fromIndex) return;
+
+  const cards = getDrawingCardElements();
+  if (!cards.length) return;
+
+  if (rawIndex >= cards.length) {
+    cards[cards.length - 1].classList.add("drag-insert-after");
+    return;
+  }
+
+  cards[Math.max(0, rawIndex)].classList.add("drag-insert-before");
+}
+
 function updateLayerDropIndicator(drawingId, rawIndex, toIndex, fromIndex) {
   const list = getLayerListElementForDrawing(drawingId);
-  clearLayerDropIndicatorClasses(list);
+  clearLeftPanelDropIndicatorClasses(list);
 
   if (!state.leftPanelPointerDrag || !list || toIndex === -1 || fromIndex === -1 || toIndex === fromIndex) return;
 
@@ -728,20 +902,30 @@ function updateLayerDropIndicator(drawingId, rawIndex, toIndex, fromIndex) {
   cards[Math.max(0, rawIndex)].classList.add("drag-insert-before");
 }
 
-function clearLayerPointerDrag(commit = true) {
+function clearLeftPanelPointerDrag(commit = true) {
   const drag = state.leftPanelPointerDrag;
   if (!drag) return;
 
   if (drag.sourceCard) drag.sourceCard.classList.remove("dragging");
-  clearLayerDropIndicatorClasses(getLayerListElementForDrawing(drag.drawingId));
+  if (drag.type === "drawing") {
+    clearLeftPanelDropIndicatorClasses(layersList);
+  } else {
+    clearLeftPanelDropIndicatorClasses(getLayerListElementForDrawing(drag.drawingId));
+  }
   if (layersPanel) layersPanel.classList.remove("drag-reordering");
 
   state.leftPanelPointerDrag = null;
 
   if (commit && drag.fromIndex !== -1 && drag.dropIndex !== -1 && drag.dropIndex !== drag.fromIndex) {
-    const currentVisualLayers = getLayersForDrawing(drag.drawingId).map((layer) => layer.id);
-    const nextVisualLayers = moveArrayItem(currentVisualLayers, drag.fromIndex, drag.dropIndex);
-    reorderLayersForDrawingFromVisualOrder(drag.drawingId, nextVisualLayers);
+    if (drag.type === "drawing") {
+      const currentVisualDrawings = state.drawingsUi.map((drawing) => drawing.id);
+      const nextVisualDrawings = moveArrayItem(currentVisualDrawings, drag.fromIndex, drag.dropIndex);
+      reorderDrawingsFromVisualOrder(nextVisualDrawings);
+    } else {
+      const currentVisualLayers = getLayersForDrawing(drag.drawingId).map((layer) => layer.id);
+      const nextVisualLayers = moveArrayItem(currentVisualLayers, drag.fromIndex, drag.dropIndex);
+      reorderLayersForDrawingFromVisualOrder(drag.drawingId, nextVisualLayers);
+    }
     renderLayersPanel();
     render();
     return;
@@ -750,19 +934,45 @@ function clearLayerPointerDrag(commit = true) {
   renderLayersPanel();
 }
 
+function beginDrawingPointerDrag(event, card, drawingId) {
+  if (!card || !drawingId) return;
+  if (event.button !== 0) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  clearLeftPanelPointerDrag(false);
+
+  card.classList.add("dragging");
+  if (layersPanel) layersPanel.classList.add("drag-reordering");
+
+  const drop = drawingDropPositionFromClientY(event.clientY, drawingId);
+  state.leftPanelPointerDrag = {
+    type: "drawing",
+    pointerId: event.pointerId,
+    drawingId,
+    sourceCard: card,
+    dropIndex: drop.toIndex,
+    rawIndex: drop.rawIndex,
+    fromIndex: drop.fromIndex,
+  };
+
+  updateDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
+}
+
 function beginLayerPointerDrag(event, card, drawingId, layerId) {
   if (!card || !drawingId || !layerId) return;
   if (event.button !== 0) return;
 
   event.preventDefault();
   event.stopPropagation();
-  clearLayerPointerDrag(false);
+  clearLeftPanelPointerDrag(false);
 
   card.classList.add("dragging");
   if (layersPanel) layersPanel.classList.add("drag-reordering");
 
   const drop = layerDropPositionFromClientY(drawingId, event.clientY, layerId);
   state.leftPanelPointerDrag = {
+    type: "layer",
     pointerId: event.pointerId,
     drawingId,
     layerId,
@@ -1790,7 +2000,7 @@ function getDraftTransformSnapTarget(worldPoint, maxDistance = draftTransformSna
   for (let shapeIndex = state.shapes.length - 1; shapeIndex >= 0; shapeIndex -= 1) {
     const shape = state.shapes[shapeIndex];
     const layer = getLayerById(shape.layerId);
-    if (!layer || !layer.visible) continue;
+    if (!isLayerActuallyVisible(layer)) continue;
     if (!boundsTouch(shape.bounds, { x: worldPoint.x, y: worldPoint.y, w: 0, h: 0 }, maxDistance)) continue;
 
     forEachRing(shape.geometry, (ring) => {
@@ -2010,7 +2220,7 @@ function getShapeIdsInDraftSelectionBox(startDraft, currentDraft) {
 
   for (const shape of state.shapes) {
     const layer = getLayerById(shape.layerId);
-    if (!layer || !layer.visible || layer.locked) continue;
+    if (!isLayerAvailableForEditing(layer)) continue;
 
     const draftGeometry = worldGeometryToDraft(shape.geometry);
     const draftBounds = getGeometryBounds(draftGeometry);
@@ -2114,7 +2324,10 @@ function subtractGeometryFromLayer(layerId, subtractionGeometry) {
 
 function renderLayersPanel() {
   layersList.innerHTML = "";
-  getPrimaryDrawingUi();
+  const primaryDrawing = getPrimaryDrawingUi();
+  if (primaryDrawing && !state.activeDrawingId) {
+    setActiveDrawingById(primaryDrawing.id);
+  }
 
   if (layerSection && layerSectionToggle) {
     layerSection.classList.toggle("collapsed", state.layerSectionCollapsed);
@@ -2122,7 +2335,7 @@ function renderLayersPanel() {
   }
 
   for (const drawing of state.drawingsUi) {
-    const isExpanded = !!drawing.expanded;
+    const isExpanded = state.activeDrawingId === drawing.id;
     const drawingCard = document.createElement("div");
     drawingCard.className = "drawing-card" + (isExpanded ? " active-drawing" : " inactive-drawing");
 
@@ -2130,13 +2343,18 @@ function renderLayersPanel() {
     drawingGrip.className = "drag-handle";
     drawingGrip.textContent = "⋮⋮";
     drawingGrip.title = "Drawing handle";
+    drawingGrip.addEventListener("click", (event) => event.stopPropagation());
+    drawingGrip.addEventListener("pointerdown", (event) => {
+      beginDrawingPointerDrag(event, drawingCard, drawing.id);
+    });
     drawingCard.appendChild(drawingGrip);
 
     const drawingMain = document.createElement("div");
     drawingMain.className = "drawing-main";
     drawingMain.addEventListener("click", () => {
-      drawing.expanded = !drawing.expanded;
+      setActiveDrawingById(drawing.id);
       renderLayersPanel();
+      render();
     });
 
     const drawingHeader = document.createElement("div");
@@ -2197,7 +2415,10 @@ function renderLayersPanel() {
     drawingDuplicate.type = "button";
     drawingDuplicate.title = "Duplicate drawing";
     drawingDuplicate.appendChild(createInlineIcon("duplicate"));
-    drawingDuplicate.addEventListener("click", (event) => event.stopPropagation());
+    drawingDuplicate.addEventListener("click", (event) => {
+      event.stopPropagation();
+      duplicateDrawing(drawing.id);
+    });
     drawingControls.appendChild(drawingDuplicate);
 
     const drawingVisibility = document.createElement("button");
@@ -2205,7 +2426,10 @@ function renderLayersPanel() {
     drawingVisibility.type = "button";
     drawingVisibility.title = drawing.visible === false ? "Show drawing" : "Hide drawing";
     drawingVisibility.appendChild(createInlineIcon("visibility", { filled: drawing.visible !== false }));
-    drawingVisibility.addEventListener("click", (event) => event.stopPropagation());
+    drawingVisibility.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleDrawingVisibility(drawing.id);
+    });
     drawingControls.appendChild(drawingVisibility);
 
     const drawingDelete = document.createElement("button");
@@ -2213,7 +2437,10 @@ function renderLayersPanel() {
     drawingDelete.type = "button";
     drawingDelete.title = "Delete drawing";
     drawingDelete.appendChild(createInlineIcon("delete"));
-    drawingDelete.addEventListener("click", (event) => event.stopPropagation());
+    drawingDelete.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteDrawingById(drawing.id);
+    });
     drawingControls.appendChild(drawingDelete);
 
     drawingHeader.appendChild(drawingTitleWrap);
@@ -2285,8 +2512,7 @@ function renderLayersPanel() {
       const main = document.createElement("div");
       main.className = "layer-main";
       main.addEventListener("click", () => {
-        state.activeLayerId = layer.id;
-        drawing.expanded = true;
+        setActiveDrawingById(drawing.id, { layerId: layer.id });
         renderLayersPanel();
         render();
       });
@@ -2508,6 +2734,110 @@ function createSelectionShapeSnapshotMap(shapeIds = state.selection.shapeIds) {
   return snapshots;
 }
 
+function addDrawing() {
+  state.layerSectionCollapsed = false;
+  const bundle = createDrawingWithDefaultLayer();
+  bundle.drawing.layersSectionCollapsed = false;
+  state.drawingsUi.unshift(bundle.drawing);
+  state.layers.push(bundle.layer);
+  setActiveDrawingById(bundle.drawing.id, { layerId: bundle.layer.id });
+  clearSelection();
+  renderLayersPanel();
+  render();
+}
+
+function duplicateDrawing(drawingId) {
+  const drawing = getDrawingUiById(drawingId);
+  if (!drawing) return;
+
+  const clone = createDrawingUiRecord(drawing.name + " copy");
+  clone.visible = drawing.visible !== false;
+  clone.layersSectionCollapsed = drawing.layersSectionCollapsed;
+
+  const sourceLayers = getLayersForDrawingInStorageOrder(drawing.id);
+  const layerIdMap = new Map();
+  const duplicatedLayers = sourceLayers.map((sourceLayer) => {
+    const duplicate = createLayerRecord(clone.id, {
+      name: sourceLayer.name,
+      visible: sourceLayer.visible,
+      locked: sourceLayer.locked,
+      fillColor: sourceLayer.fillColor,
+      opacity: Number.isFinite(sourceLayer.opacity) ? sourceLayer.opacity : 1,
+    });
+    layerIdMap.set(sourceLayer.id, duplicate.id);
+    return duplicate;
+  });
+
+  const duplicatedShapes = state.shapes
+    .filter((shape) => layerIdMap.has(shape.layerId))
+    .map((shape) => ({
+      id: "shape-" + state.nextShapeId++,
+      layerId: layerIdMap.get(shape.layerId),
+      geometry: cloneGeometry(shape.geometry),
+      bounds: cloneBounds(shape.bounds),
+    }));
+
+  const drawingIndex = state.drawingsUi.findIndex((entry) => entry.id === drawing.id);
+  state.drawingsUi.splice(Math.max(0, drawingIndex), 0, clone);
+  state.layers.push(...duplicatedLayers);
+  state.shapes.push(...duplicatedShapes);
+
+  const fallbackLayer = getLayersForDrawing(clone.id)[0] || duplicatedLayers[duplicatedLayers.length - 1] || null;
+  setActiveDrawingById(clone.id, { layerId: fallbackLayer ? fallbackLayer.id : null });
+  clearSelection();
+  renderLayersPanel();
+  render();
+}
+
+function toggleDrawingVisibility(drawingId) {
+  const drawing = getDrawingUiById(drawingId);
+  if (!drawing) return;
+  drawing.visible = drawing.visible === false;
+  renderLayersPanel();
+  render();
+}
+
+function deleteDrawingById(drawingId) {
+  const index = state.drawingsUi.findIndex((drawing) => drawing.id === drawingId);
+  if (index < 0) return;
+
+  const deletedDrawing = state.drawingsUi[index];
+  const deletedLayerIds = new Set(getLayersForDrawingInStorageOrder(drawingId).map((layer) => layer.id));
+
+  state.drawingsUi.splice(index, 1);
+  state.layers = state.layers.filter((layer) => !deletedLayerIds.has(layer.id));
+  state.shapes = state.shapes.filter((shape) => !deletedLayerIds.has(shape.layerId));
+
+  if (!state.drawingsUi.length) {
+    const bundle = createDrawingWithDefaultLayer("Drawing 1");
+    bundle.drawing.layersSectionCollapsed = false;
+    state.drawingsUi.push(bundle.drawing);
+    state.layers.push(bundle.layer);
+    setActiveDrawingById(bundle.drawing.id, { layerId: bundle.layer.id });
+  } else if (state.activeDrawingId === deletedDrawing.id || deletedLayerIds.has(state.activeLayerId)) {
+    const fallbackDrawing = state.drawingsUi[Math.max(0, index - 1)] || state.drawingsUi[0];
+    const fallbackLayer = fallbackDrawing ? getDrawingLayerFallback(fallbackDrawing.id) : null;
+    setActiveDrawingById(fallbackDrawing.id, { layerId: fallbackLayer ? fallbackLayer.id : null });
+  } else {
+    setActiveDrawingById(getActiveDrawingUi().id, { layerId: state.activeLayerId });
+  }
+
+  if (state.editingDrawingId === drawingId) {
+    state.editingDrawingId = null;
+    state.editingDrawingNameDraft = "";
+    state.editingDrawingInitialName = "";
+  }
+  if (state.editingLayerId && deletedLayerIds.has(state.editingLayerId)) {
+    state.editingLayerId = null;
+    state.editingLayerNameDraft = "";
+    state.editingLayerInitialName = "";
+  }
+
+  clearSelection();
+  renderLayersPanel();
+  render();
+}
+
 function duplicateLayer(layerId) {
   const index = state.layers.findIndex((layer) => layer.id === layerId);
   if (index < 0) return;
@@ -2535,48 +2865,45 @@ function duplicateLayer(layerId) {
     }));
 
   state.shapes.push(...duplicatedShapes);
-  state.activeLayerId = duplicatedLayerId;
+  setActiveDrawingById(getLayerDrawingId(duplicatedLayer), { layerId: duplicatedLayerId });
   clearSelection();
   renderLayersPanel();
   render();
 }
 
 function addLayer(drawingId = getPrimaryDrawingUi().id) {
-  const id = "layer-" + state.nextLayerId;
-  const name = "Layer " + state.nextLayerId;
-  const fillColor = getNextLayerColor();
   const drawing = getDrawingUiById(drawingId) || getPrimaryDrawingUi();
-  state.nextLayerId += 1;
-  state.layers.push({
-    id,
-    drawingId: drawing.id,
-    name,
-    visible: true,
-    locked: false,
-    fillColor,
-    opacity: 1,
-  });
-  drawing.expanded = true;
+  const layer = createLayerRecord(drawing.id);
+  state.layers.push(layer);
   drawing.layersSectionCollapsed = false;
-  state.activeLayerId = id;
+  setActiveDrawingById(drawing.id, { layerId: layer.id });
   clearSelection();
   renderLayersPanel();
   render();
 }
 
 function deleteLayerById(layerId) {
-  if (state.layers.length <= 1) return;
-
   const index = state.layers.findIndex((layer) => layer.id === layerId);
   if (index < 0) return;
 
-  const deletedId = state.layers[index].id;
+  const deletedLayer = state.layers[index];
+  const drawingId = getLayerDrawingId(deletedLayer);
+  const drawingLayers = getLayersForDrawingInStorageOrder(drawingId);
+  if (drawingLayers.length <= 1) return;
+
+  const deletedId = deletedLayer.id;
   state.layers.splice(index, 1);
   state.shapes = state.shapes.filter((shape) => shape.layerId !== deletedId);
 
+  if (state.editingLayerId === deletedId) {
+    state.editingLayerId = null;
+    state.editingLayerNameDraft = "";
+    state.editingLayerInitialName = "";
+  }
+
   if (state.activeLayerId === deletedId) {
-    const fallback = state.layers[Math.max(0, index - 1)] || state.layers[0];
-    state.activeLayerId = fallback ? fallback.id : null;
+    const fallback = getDrawingLayerFallback(drawingId);
+    setActiveDrawingById(drawingId, { layerId: fallback ? fallback.id : null });
   }
 
   clearSelection();
@@ -2768,10 +3095,11 @@ function rotateDraftAngle(stepDelta) {
 
 function pickSelectableAt(worldPoint) {
   const threshold = 8 / state.camera.zoom;
+  const renderableLayers = getRenderableLayersInPaintOrder();
 
-  for (let layerIndex = state.layers.length - 1; layerIndex >= 0; layerIndex -= 1) {
-    const layer = state.layers[layerIndex];
-    if (!layer.visible || layer.locked) continue;
+  for (let layerIndex = renderableLayers.length - 1; layerIndex >= 0; layerIndex -= 1) {
+    const layer = renderableLayers[layerIndex];
+    if (!isLayerAvailableForEditing(layer)) continue;
 
     for (let i = state.shapes.length - 1; i >= 0; i -= 1) {
       const shape = state.shapes[i];
@@ -2814,7 +3142,7 @@ function startSelectionMove(worldPoint) {
   const movableShapeIds = getSelectedShapes()
     .filter((shape) => {
       const layer = getLayerById(shape.layerId);
-      return layer && layer.visible && !layer.locked;
+      return isLayerAvailableForEditing(layer);
     })
     .map((shape) => shape.id);
 
@@ -2889,7 +3217,7 @@ function renderSelectOverlay() {
     if (!selectedIds.has(shape.id)) continue;
 
     const selectedLayer = getLayerById(shape.layerId);
-    if (!selectedLayer || !selectedLayer.visible) continue;
+    if (!isLayerActuallyVisible(selectedLayer)) continue;
 
     traceGeometryPath(ctx, shape.geometry);
     hasVisibleSelection = true;
@@ -3144,7 +3472,7 @@ function drawSnapPreview() {
   if (state.tool !== "draw") return;
 
   const activeLayer = getActiveLayer();
-  if (!activeLayer || !activeLayer.visible || activeLayer.locked) return;
+  if (!isLayerAvailableForEditing(activeLayer)) return;
 
   let snapPoint = null;
   if (isBoxSnapShapeType()) {
@@ -3207,13 +3535,13 @@ function render() {
   ctx.clearRect(0, 0, width, height);
   drawGrid();
 
-  for (const layer of state.layers) {
-    if (!layer.visible) continue;
+  for (const layer of getRenderableLayersInPaintOrder()) {
+    if (!isLayerActuallyVisible(layer)) continue;
     drawLayerMerged(layer);
   }
 
   const activeLayer = getActiveLayer();
-  if (state.dragging && state.tool === "draw" && activeLayer.visible && !activeLayer.locked) {
+  if (state.dragging && state.tool === "draw" && isLayerAvailableForEditing(activeLayer)) {
     const draft = state.draftShape;
     if (draft && !draft.small) drawLayerPreview(draft, activeLayer, state.drawOperation);
   }
@@ -3314,7 +3642,7 @@ canvas.addEventListener("pointerdown", (e) => {
   }
 
   const activeLayer = getActiveLayer();
-  if (state.tool === "draw" && (!activeLayer.visible || activeLayer.locked)) return;
+  if (state.tool === "draw" && !isLayerAvailableForEditing(activeLayer)) return;
 
   state.dragging = true;
   state.start = world;
@@ -3624,7 +3952,7 @@ if (layerAddBtn) {
 if (addDrawingBtn) {
   addDrawingBtn.addEventListener("click", () => {
     state.layerSectionCollapsed = false;
-    renderLayersPanel();
+    addDrawing();
   });
 }
 
@@ -3632,32 +3960,39 @@ window.addEventListener("pointermove", (event) => {
   const drag = state.leftPanelPointerDrag;
   if (!drag || event.pointerId !== drag.pointerId) return;
 
-  const drop = layerDropPositionFromClientY(drag.drawingId, event.clientY, drag.layerId);
+  const drop =
+    drag.type === "drawing"
+      ? drawingDropPositionFromClientY(event.clientY, drag.drawingId)
+      : layerDropPositionFromClientY(drag.drawingId, event.clientY, drag.layerId);
   drag.dropIndex = drop.toIndex;
   drag.rawIndex = drop.rawIndex;
   drag.fromIndex = drop.fromIndex;
-  updateLayerDropIndicator(drag.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
+  if (drag.type === "drawing") {
+    updateDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
+  } else {
+    updateLayerDropIndicator(drag.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
+  }
 });
 
 window.addEventListener("pointerup", (event) => {
   const drag = state.leftPanelPointerDrag;
   if (!drag || event.pointerId !== drag.pointerId) return;
-  clearLayerPointerDrag(true);
+  clearLeftPanelPointerDrag(true);
 });
 
 window.addEventListener("pointercancel", (event) => {
   const drag = state.leftPanelPointerDrag;
   if (!drag || event.pointerId !== drag.pointerId) return;
-  clearLayerPointerDrag(false);
+  clearLeftPanelPointerDrag(false);
 });
 
 window.addEventListener("blur", () => {
-  if (state.leftPanelPointerDrag) clearLayerPointerDrag(false);
+  if (state.leftPanelPointerDrag) clearLeftPanelPointerDrag(false);
 });
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && state.leftPanelPointerDrag) {
-    clearLayerPointerDrag(false);
+    clearLeftPanelPointerDrag(false);
     return;
   }
 

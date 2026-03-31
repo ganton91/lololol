@@ -294,6 +294,30 @@
         display: none;
       }
 
+      .drawing-card.dragging {
+        opacity: 0.55;
+      }
+
+      .drawing-card.drag-insert-before::before,
+      .drawing-card.drag-insert-after::after {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        height: 2px;
+        background: color-mix(in srgb, var(--ref-text) 24%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ref-text) 8%, transparent);
+        pointer-events: none;
+      }
+
+      .drawing-card.drag-insert-before::before {
+        top: -6px;
+      }
+
+      .drawing-card.drag-insert-after::after {
+        bottom: -3px;
+      }
+
       .drawing-main {
         display: flex;
         flex-direction: column;

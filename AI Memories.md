@@ -216,7 +216,11 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The old floating layers widget has been replaced by a left-side reference-style panel shell with a `Drawings` section.
 - The left panel now renders a reference-style `Drawing 1` container with nested `Layers` cards, matching the reference visual hierarchy more closely than the previous flat list.
 - Layer cards now show reference-style inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
-- The nested `Layers` add button creates real app layers in the current drawing container, while the drawing-level controls are still mostly UI scaffolding for now rather than a fully implemented multi-drawing system.
+- The panel now follows an active-drawing model: only one drawing is active/expanded at a time, and the app keeps a single active layer inside that active drawing.
+- The main `Drawings` add button now creates a real new drawing with a default layer inside it and makes that drawing/layer active.
+- Drawing header controls now work for duplicate, hide/show, and delete; duplicating a drawing clones its layers and stored shapes, hiding a drawing suppresses its layers from render/select/snap, and deleting a drawing removes its layers/shapes while preserving a valid fallback active drawing/layer.
+- The nested `Layers` add button creates real app layers in the current drawing container, and layer deletion now preserves at least one layer per drawing.
+- Drawing drag-reordering now works with the same custom left-panel pointer drag model used by layers, using insertion markers and updating actual canvas paint order across drawings.
 - Layer drag-reordering inside the nested `Layers` list now uses a reference-style custom pointer drag interaction with insertion markers and commit-on-drop behavior, without a separate floating preview card.
 - The drag reorder logic translates the visible top-to-bottom layer order in the left panel back into the app's underlying drawing/render order so the panel stack and canvas paint order stay aligned.
 - Clicking the expanded drawing name now swaps the label into the same inline rename input pattern used by layers; blur or `Enter` commits, while `Escape` cancels and restores the previous name.

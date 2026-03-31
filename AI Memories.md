@@ -231,5 +231,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Clicking the active layer name now swaps the label into an inline rename input that auto-focuses; `Enter` or blur commits the new name, while `Escape` cancels and restores the previous name.
 - Current duplicate behavior clones layers/drawings into the same world position with new ids and cloned geometry; there is no confirmed cross-layer or cross-drawing boolean merge bug from that flow, but exact overlap can visually resemble a shared result until one copy is moved or edited.
 - Layer cards no longer show the `Vector-authored layer` subtitle on normal unlocked layers; the secondary subtitle row now appears only for genuinely locked layers.
+- The layer-card object count now refreshes immediately after committed draw/subtract operations and after committed geometry rebuilds caused by moving selected shapes.
 - The old bottom-left instructional hint panel inside the canvas shell has been removed completely, including its markup and styling.
 - The canvas background now uses a warmer off-white canvas tone, while the grid keeps the app's own line widths and transparency-style hierarchy using darker light-theme strokes derived from the same palette rather than a single opaque color.

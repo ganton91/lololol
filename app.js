@@ -4004,6 +4004,7 @@ function finishDrag(e) {
       }
 
       setSelectedShapeIds(getShapeIdsIntersectingLayerGeometries(movedGeometriesByLayer));
+      renderLayersPanel();
     }
 
     render();
@@ -4019,6 +4020,7 @@ function finishDrag(e) {
         const shape = createShapeRecord(state.activeLayerId, state.draftShape.geometry);
         if (shape) insertShapeToLayer(state.activeLayerId, shape);
       }
+      renderLayersPanel();
     }
   }
 

@@ -2635,10 +2635,12 @@ function renderLayersPanel() {
       meta.textContent = getLayerShapeCount(layer.id) + " objects";
       main.appendChild(meta);
 
-      const secondaryMeta = document.createElement("div");
-      secondaryMeta.className = "layer-meta-secondary";
-      secondaryMeta.textContent = layer.locked ? "Locked layer" : "Vector-authored layer";
-      main.appendChild(secondaryMeta);
+      if (layer.locked) {
+        const secondaryMeta = document.createElement("div");
+        secondaryMeta.className = "layer-meta-secondary";
+        secondaryMeta.textContent = "Locked layer";
+        main.appendChild(secondaryMeta);
+      }
 
       const opacityField = document.createElement("div");
       opacityField.className = "field";

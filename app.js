@@ -1838,9 +1838,14 @@ function createFreeDraftTransformTarget(worldPoint) {
   };
 }
 
-function getDraftTransformSnapTarget(worldPoint, maxDistance = draftTransformSnapRadiusPx / state.camera.zoom) {
+function getDraftTransformSnapTarget(
+  worldPoint,
+  maxDistance = draftTransformSnapRadiusPx / state.camera.zoom,
+  options = {}
+) {
   if (!worldPoint) return null;
 
+  const { allowEdge = true } = options;
   const cornerMaxDistance = draftTransformCornerSnapRadiusPx / state.camera.zoom;
   const cornerPriorityDistance = draftTransformCornerPriorityRadiusPx / state.camera.zoom;
   let bestCorner = null;
@@ -1865,15 +1870,17 @@ function getDraftTransformSnapTarget(worldPoint, maxDistance = draftTransformSna
         }
 
         const next = ring[(i + 1) % ring.length];
-        const projection = projectPointToSegment(worldPoint, corner, next);
-        const edgeDistance = Math.hypot(worldPoint.x - projection.x, worldPoint.y - projection.y);
+        if (allowEdge) {
+          const projection = projectPointToSegment(worldPoint, corner, next);
+          const edgeDistance = Math.hypot(worldPoint.x - projection.x, worldPoint.y - projection.y);
 
-        if (edgeDistance <= maxDistance && (!bestEdge || edgeDistance < bestEdge.distance)) {
-          bestEdge = {
-            kind: "edge",
-            world: projection,
-            distance: edgeDistance,
-          };
+          if (edgeDistance <= maxDistance && (!bestEdge || edgeDistance < bestEdge.distance)) {
+            bestEdge = {
+              kind: "edge",
+              world: projection,
+              distance: edgeDistance,
+            };
+          }
         }
       }
     });
@@ -3444,7 +3451,9 @@ function drawDraftAlignStartMarker(point) {
 function drawDraftTransformPreview() {
   if (!state.spacePressed || !state.pointerInCanvas || state.panning || state.draggingDraftOrigin) return;
 
-  const hoverSnap = state.draggingDraftAlign ? state.draftAlignCurrentSnap : getDraftTransformSnapTarget(state.current);
+  const hoverSnap = state.draggingDraftAlign
+    ? state.draftAlignCurrentSnap
+    : getDraftTransformSnapTarget(state.current, undefined, { allowEdge: false });
   const startSnap = state.draggingDraftAlign ? state.draftAlignStartSnap : null;
 
   if (!hoverSnap && !startSnap) return;
@@ -3573,7 +3582,7 @@ canvas.addEventListener("pointerdown", (e) => {
 
   if (state.spacePressed) {
     if (e.button === 0) {
-      const startSnap = getDraftTransformSnapTarget(world);
+      const startSnap = getDraftTransformSnapTarget(world, undefined, { allowEdge: false });
       if (!startSnap) {
         render();
         return;

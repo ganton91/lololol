@@ -138,6 +138,8 @@ Layer order controls draw order. The active layer receives new geometry when the
 - While `Space` is held, the normal draw/select interaction is temporarily suspended and the pointer is used for drafting transformations instead.
 - `Space + Left Drag` workplane alignment can start and end anywhere in space, but nearby geometry acts like a magnetic snap target.
 - During `Space + Left Drag`, corners can capture from slightly farther away than edges, and corner snaps use a different preview marker from edge snaps.
+- During `Space + Left Drag`, the initial `mousedown` start/origin snap now allows only `corner` or `free` placement; `edge` snapping is intentionally disabled for the start point to avoid the known edge-origin instability.
+- During an active `Space + Left Drag`, the dragged end point still allows full `corner`, `edge`, or `free` snapping, so edge direction pickup remains available at release.
 - During `Space + Left Drag`, if there is no nearby geometry, the preview and resulting alignment still use the free pointer position instead of forcing a snap.
 - During `Space + Left Drag`, snapping affects only the chosen start/end points; the resulting alignment direction is always derived from the raw point-to-point `end - start` vector of those resolved endpoints.
 - If an aligned direction matches a known family signature, the workplane re-enters that family; otherwise it activates or reuses a temporary unresolved candidate family for that direction regime.
@@ -326,3 +328,4 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `materializeActiveDraftAngleCandidateOnCommit()`
 - Debug exposure now points to the store itself through `window.draftAngleStore` and `window.getDraftAngleSnapshot()`.
 - This pass is intended to preserve the current draft-angle behavior while cleaning the ownership boundary; it does not yet claim to resolve the `edge start` align/origin bug.
+- As a stabilizing UI rule for the align bug, the start/origin click now ignores edge snaps and only accepts `corner` or `free` placement; edge snapping remains available only for the dragged end point.

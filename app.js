@@ -21,6 +21,10 @@ const zoomOutBtn = document.getElementById("zoom-out");
 const zoomInBtn = document.getElementById("zoom-in");
 const zoomLevel = document.getElementById("zoom-level");
 const workplaneStatus = document.getElementById("workplane-status");
+const draftRulerTop = document.getElementById("draft-ruler-top");
+const draftRulerLeft = document.getElementById("draft-ruler-left");
+const draftRulerBottom = document.getElementById("draft-ruler-bottom");
+const draftRulerRight = document.getElementById("draft-ruler-right");
 const layersPanel = document.getElementById("layersPanel");
 const layerSection = document.getElementById("layerSection");
 const layerSectionToggle = document.getElementById("layerSectionToggle");
@@ -136,6 +140,20 @@ const clipperSimplifyCollinearEpsilon = 0;
 const draftAngleCandidateFamilyId = "draft-angle-candidate";
 const draftAngleFamilyRuntimes = new Map();
 let draftAngleCandidateRuntime = null;
+const draftRulerTopCtx = draftRulerTop.getContext("2d");
+const draftRulerLeftCtx = draftRulerLeft.getContext("2d");
+const draftRulerBottomCtx = draftRulerBottom.getContext("2d");
+const draftRulerRightCtx = draftRulerRight.getContext("2d");
+const draftRulerSurfaces = [
+  { surface: draftRulerTop, context: draftRulerTopCtx },
+  { surface: draftRulerLeft, context: draftRulerLeftCtx },
+  { surface: draftRulerBottom, context: draftRulerBottomCtx },
+  { surface: draftRulerRight, context: draftRulerRightCtx },
+];
+
+function getCssTokenValue(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
 
 function normalizeDirectionVector(dx, dy) {
   const length = Math.hypot(dx, dy);
@@ -2943,22 +2961,34 @@ function setTool(tool) {
   render();
 }
 
-function getCanvasViewportSize() {
-  const rect = canvas.getBoundingClientRect();
+function getSurfaceDisplaySize(surface) {
+  const rect = surface.getBoundingClientRect();
   return {
-    width: Math.max(1, Math.round(rect.width || canvas.clientWidth || window.innerWidth)),
-    height: Math.max(1, Math.round(rect.height || canvas.clientHeight || window.innerHeight)),
+    width: Math.max(1, Math.round(rect.width || surface.clientWidth || window.innerWidth)),
+    height: Math.max(1, Math.round(rect.height || surface.clientHeight || window.innerHeight)),
   };
+}
+
+function resizeSurfaceToDisplaySize(surface, context, dpr) {
+  const { width, height } = getSurfaceDisplaySize(surface);
+  surface.width = Math.floor(width * dpr);
+  surface.height = Math.floor(height * dpr);
+  surface.style.width = width + "px";
+  surface.style.height = height + "px";
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { width, height };
+}
+
+function getCanvasViewportSize() {
+  return getSurfaceDisplaySize(canvas);
 }
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
-  const { width, height } = getCanvasViewportSize();
-  canvas.width = Math.floor(width * dpr);
-  canvas.height = Math.floor(height * dpr);
-  canvas.style.width = width + "px";
-  canvas.style.height = height + "px";
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const { width, height } = resizeSurfaceToDisplaySize(canvas, ctx, dpr);
+  for (const { surface, context } of draftRulerSurfaces) {
+    resizeSurfaceToDisplaySize(surface, context, dpr);
+  }
 
   if (!state.camera.x && !state.camera.y) {
     state.camera.x = width / 2;
@@ -3377,6 +3407,153 @@ function drawGrid() {
   ctx.restore();
 }
 
+function formatDraftRulerLabel(cellIndex) {
+  return String(cellIndex);
+}
+
+function formatDraftRulerVerticalLabel(cellIndex) {
+  return String(-cellIndex);
+}
+
+function drawHorizontalDraftRulerMark(context, x, cellIndex, major, mid, invert, showCellLabels, showMidLabels, thickness, colors) {
+  const tick = major ? 7 : mid ? 11 : 16;
+  context.beginPath();
+  context.moveTo(x + 0.5, invert ? 0 : thickness);
+  context.lineTo(x + 0.5, invert ? thickness - tick : tick);
+  context.strokeStyle = major ? colors.major : mid ? colors.mid : colors.minor;
+  context.lineWidth = major ? 0.56 : mid ? 0.4 : 0.26;
+  context.stroke();
+
+  const shouldLabel = major || (showMidLabels && mid) || showCellLabels;
+  if (!shouldLabel) return;
+
+  context.fillStyle = colors.text;
+  context.font = major
+    ? "600 10px IBM Plex Sans, Segoe UI, sans-serif"
+    : showMidLabels && mid
+    ? "10px IBM Plex Sans, Segoe UI, sans-serif"
+    : "9px IBM Plex Sans, Segoe UI, sans-serif";
+  context.fillText(formatDraftRulerLabel(cellIndex), x + 4, invert ? thickness - 8 : 9);
+}
+
+function drawVerticalDraftRulerMark(context, y, cellIndex, major, mid, invert, showCellLabels, showMidLabels, thickness, colors) {
+  const tick = major ? 8 : mid ? 11 : 16;
+  context.beginPath();
+  context.moveTo(invert ? 0 : thickness, y + 0.5);
+  context.lineTo(invert ? thickness - tick : tick, y + 0.5);
+  context.strokeStyle = major ? colors.major : mid ? colors.mid : colors.minor;
+  context.lineWidth = major ? 0.56 : mid ? 0.4 : 0.26;
+  context.stroke();
+
+  const shouldLabel = major || (showMidLabels && mid) || showCellLabels;
+  if (!shouldLabel) return;
+
+  context.save();
+  context.translate(invert ? thickness - 8 : 9, y);
+  context.rotate(-Math.PI / 2);
+  context.fillStyle = colors.text;
+  context.font = major
+    ? "600 10px IBM Plex Sans, Segoe UI, sans-serif"
+    : showMidLabels && mid
+    ? "10px IBM Plex Sans, Segoe UI, sans-serif"
+    : "9px IBM Plex Sans, Segoe UI, sans-serif";
+  context.fillText(formatDraftRulerVerticalLabel(cellIndex), 4, 0);
+  context.restore();
+}
+
+function drawDraftRulers() {
+  const topWidth = Math.round(draftRulerTop.clientWidth);
+  const leftHeight = Math.round(draftRulerLeft.clientHeight);
+  const topThickness = Math.round(draftRulerTop.clientHeight);
+  const leftThickness = Math.round(draftRulerLeft.clientWidth);
+  const bottomThickness = Math.round(draftRulerBottom.clientHeight);
+  const rightThickness = Math.round(draftRulerRight.clientWidth);
+  const colors = {
+    background: getCssTokenValue("--ruler-bg"),
+    text: getCssTokenValue("--muted"),
+    minor: "rgb(8, 12, 16)",
+    mid: "rgb(8, 12, 16)",
+    major: "rgb(8, 12, 16)",
+  };
+
+  for (const { surface, context } of draftRulerSurfaces) {
+    const { width, height } = getSurfaceDisplaySize(surface);
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = colors.background;
+    context.fillRect(0, 0, width, height);
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+  }
+
+  const step = gridCellSize * state.camera.zoom;
+  if (step <= 1) return;
+
+  const showCellLabels = step >= 28;
+  const showMidLabels = step * gridMidCellInterval >= 72;
+  const horizontalStart = state.camera.x % step;
+  const verticalStart = state.camera.y % step;
+
+  for (let x = horizontalStart; x <= topWidth; x += step) {
+    const cellIndex = Math.round((x - state.camera.x) / step);
+    const major = cellIndex % gridMajorCellInterval === 0;
+    const mid = cellIndex % gridMidCellInterval === 0;
+    drawHorizontalDraftRulerMark(
+      draftRulerTopCtx,
+      x,
+      cellIndex,
+      major,
+      mid,
+      false,
+      showCellLabels,
+      showMidLabels,
+      topThickness,
+      colors
+    );
+    drawHorizontalDraftRulerMark(
+      draftRulerBottomCtx,
+      x,
+      cellIndex,
+      major,
+      mid,
+      true,
+      showCellLabels,
+      showMidLabels,
+      bottomThickness,
+      colors
+    );
+  }
+
+  for (let y = verticalStart; y <= leftHeight; y += step) {
+    const cellIndex = Math.round((y - state.camera.y) / step);
+    const major = cellIndex % gridMajorCellInterval === 0;
+    const mid = cellIndex % gridMidCellInterval === 0;
+    drawVerticalDraftRulerMark(
+      draftRulerLeftCtx,
+      y,
+      cellIndex,
+      major,
+      mid,
+      false,
+      showCellLabels,
+      showMidLabels,
+      leftThickness,
+      colors
+    );
+    drawVerticalDraftRulerMark(
+      draftRulerRightCtx,
+      y,
+      cellIndex,
+      major,
+      mid,
+      true,
+      showCellLabels,
+      showMidLabels,
+      rightThickness,
+      colors
+    );
+  }
+}
+
 function drawDraftTransformSnapMarker(target, size = snapPreviewSize + 2) {
   if (!target) return;
 
@@ -3553,6 +3730,7 @@ function render() {
   renderSelectionBoxOverlay();
   drawDraftTransformPreview();
   drawSnapPreview();
+  drawDraftRulers();
 }
 
 canvas.addEventListener("pointerdown", (e) => {

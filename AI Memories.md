@@ -214,6 +214,8 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The current app shell now includes the `millimétré` top bar with the current button order, brand styling, separator, translucent surface treatment, and hover behavior.
 - The top bar buttons are currently visual-only placeholders and are not wired to real actions yet.
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
+- The canvas shell now includes four-sided drafting rulers around the live canvas viewport plus all four corner blocks, with the inner drawing viewport inset inside that frame.
+- Ruler ticks and labels are now drawn from the app's live camera pan, zoom, and grid intervals instead of static DOM marks, and the ruler canvases resize together with the main drawing canvas.
 - The old floating layers widget has been replaced by a left-side panel shell with a `Drawings` section.
 - The left panel now renders a `Drawing 1` container with nested `Layers` cards and the new card-based visual hierarchy.
 - Layer cards now show inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.

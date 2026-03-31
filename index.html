@@ -19,6 +19,8 @@
         --ui-line: rgba(20, 24, 28, 0.1);
         --ui-line-strong: rgba(20, 24, 28, 0.18);
         --ui-text: #161b21;
+        --ruler-bg: rgba(248, 248, 246, 0.95);
+        --canvas-ruler-size: 28px;
       }
 
       * {
@@ -653,6 +655,104 @@
         overflow: hidden;
       }
 
+      .canvas-stage {
+        position: absolute;
+        inset: 0;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .draft-ruler-corner,
+      .draft-ruler-top,
+      .draft-ruler-left,
+      .draft-ruler-bottom,
+      .draft-ruler-right {
+        position: absolute;
+        background: var(--ruler-bg);
+        border-color: var(--line);
+        z-index: 2;
+        pointer-events: none;
+      }
+
+      .draft-ruler-corner {
+        width: var(--canvas-ruler-size);
+        height: var(--canvas-ruler-size);
+      }
+
+      .draft-ruler-corner.is-top-left {
+        top: 0;
+        left: 0;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        z-index: 3;
+      }
+
+      .draft-ruler-corner.is-top-right {
+        top: 0;
+        right: 0;
+        border-left: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        z-index: 3;
+      }
+
+      .draft-ruler-corner.is-bottom-left {
+        left: 0;
+        bottom: 0;
+        border-right: 1px solid var(--line);
+        border-top: 1px solid var(--line);
+        z-index: 3;
+      }
+
+      .draft-ruler-corner.is-bottom-right {
+        right: 0;
+        bottom: 0;
+        border-left: 1px solid var(--line);
+        border-top: 1px solid var(--line);
+        z-index: 3;
+      }
+
+      .draft-ruler-top {
+        top: 0;
+        left: var(--canvas-ruler-size);
+        width: calc(100% - (var(--canvas-ruler-size) * 2));
+        height: var(--canvas-ruler-size);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .draft-ruler-left {
+        top: var(--canvas-ruler-size);
+        left: 0;
+        width: var(--canvas-ruler-size);
+        height: calc(100% - (var(--canvas-ruler-size) * 2));
+        border-right: 1px solid var(--line);
+      }
+
+      .draft-ruler-bottom {
+        left: var(--canvas-ruler-size);
+        bottom: 0;
+        width: calc(100% - (var(--canvas-ruler-size) * 2));
+        height: var(--canvas-ruler-size);
+        border-top: 1px solid var(--line);
+      }
+
+      .draft-ruler-right {
+        top: var(--canvas-ruler-size);
+        right: 0;
+        width: var(--canvas-ruler-size);
+        height: calc(100% - (var(--canvas-ruler-size) * 2));
+        border-left: 1px solid var(--line);
+      }
+
+      .canvas-viewport {
+        position: absolute;
+        top: var(--canvas-ruler-size);
+        right: var(--canvas-ruler-size);
+        bottom: var(--canvas-ruler-size);
+        left: var(--canvas-ruler-size);
+        overflow: hidden;
+        background: var(--canvas-bg);
+      }
+
       #cad-canvas {
         position: absolute;
         inset: 0;
@@ -665,14 +765,14 @@
 
       .toolbar {
         position: absolute;
-        top: 16px;
-        left: 16px;
+        top: calc(var(--canvas-ruler-size) + 16px);
+        left: calc(var(--canvas-ruler-size) + 16px);
         z-index: 10;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         gap: 8px;
-        max-width: calc(100% - 32px);
+        max-width: calc(100% - (var(--canvas-ruler-size) * 2) - 32px);
         padding: 10px;
         border: 1px solid var(--line);
         border-radius: 12px;
@@ -771,7 +871,19 @@
         </aside>
 
         <div class="canvas-shell">
-          <canvas id="cad-canvas"></canvas>
+          <div class="canvas-stage">
+            <div class="draft-ruler-corner is-top-left" aria-hidden="true"></div>
+            <div class="draft-ruler-corner is-top-right" aria-hidden="true"></div>
+            <div class="draft-ruler-corner is-bottom-left" aria-hidden="true"></div>
+            <canvas id="draft-ruler-top" class="draft-ruler-top" aria-hidden="true"></canvas>
+            <canvas id="draft-ruler-left" class="draft-ruler-left" aria-hidden="true"></canvas>
+            <canvas id="draft-ruler-bottom" class="draft-ruler-bottom" aria-hidden="true"></canvas>
+            <canvas id="draft-ruler-right" class="draft-ruler-right" aria-hidden="true"></canvas>
+            <div class="draft-ruler-corner is-bottom-right" aria-hidden="true"></div>
+            <div class="canvas-viewport">
+              <canvas id="cad-canvas"></canvas>
+            </div>
+          </div>
 
           <div class="toolbar">
             <button id="select-tool" class="tool-btn" type="button">Select</button>

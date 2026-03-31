@@ -186,17 +186,12 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Known Bugs
 
-### 1. Rotated Draft Plane Boolean Merge / Topology Bug
+### 1. Non-Orthogonal Draft-Plane Re-Align / Diagonal Canonicalization Bug
 
-- Status: fixed and kept here only as historical record.
-- Symptom: at non-zero draft-plane rotation, shapes that should merge can remain separate even when the draw itself succeeds and no runtime boolean error is thrown.
-- Root cause: rotated draft-plane geometry was entering the world-space boolean pipeline with trig-based floating-point noise, so edges that should have matched exactly could arrive as near-matching coordinates instead of a single canonical edge.
-- Fix that resolved it:
-  - The app now uses `clipper2-ts` as the boolean engine through the Clipper adapter in `app.js`.
-  - The Clipper boundary uses fixed precision scaling with a shared `8`-decimal coordinate policy.
-  - `rotatePoint(...)` now rounds `Math.sin(...)` / `Math.cos(...)` to that same `8`-decimal precision and quantizes the rotated coordinates it returns.
-  - Ellipse point generation uses that same `8`-decimal trig precision before geometry enters boolean operations.
-- Result: the rotated draft-plane merge/topology failure is considered resolved.
+- Status: open.
+- Symptom: when the user draws geometry under a non-orthogonal draft-plane direction and later re-aligns the workplane back onto that same diagonal direction, extra vertices can still appear instead of the shape behaving as a fully canonicalized regime.
+- Current understanding: the remaining issue no longer appears to be the old edge-start align-origin instability that was mitigated through the UI rule. The current failure is more specific to diagonal geometry that was created relative to the draft plane and later aligned back onto that same non-orthogonal regime.
+- Current hypothesis: the diagonal shape or its stored world-space representation is not being canonicalized strongly enough relative to the draft-plane family that created it, so a later align back onto that direction can still produce slight mismatch artifacts and visible extra vertices.
 
 ## Current Tasks
 
@@ -298,35 +293,3 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Existing stored geometry is not rescaled when the user applies new display or grid settings.
 - Rulers and the workplane origin readout now format values using the active display unit.
 - Ruler behavior may still need a follow-up pass after practical testing, especially around when minor-cell labels should appear versus only mid/major labels.
-
-### Current Task 3: Draft-Angle Structural Refactor
-
-- Task: rebuild the relationship between `app.js` and `draft-angle.js` so draft-angle families, candidate lifecycle, and active rotation ownership live in one authoritative subsystem before we revisit the edge/corner align bug.
-- Status: Pass 1 is implemented structurally, but the browser behavior still needs validation and the align-origin bug itself is not considered solved yet.
-
-#### Direction Locked In
-
-- `draft-angle.js` should own family records, candidate state, active draft-angle state, runtime lookup tables, family matching, step rotation, and candidate materialization.
-- `app.js` should own workplane origin, snap targets, pointer gestures, and the moment when an align direction is submitted to the draft-angle subsystem.
-- The draft-angle subsystem should never own edge/corner snap interpretation or workplane origin placement.
-- The align bug should be debugged only after this structural ownership is cleaned up, so we do not keep mixing origin bugs with family-runtime bugs.
-
-#### Progress
-
-- The old duplicated draft-angle ownership has now been removed from `app.js`; it no longer stores `draftAngleFamilies`, `draftAngleCandidate`, `nextDraftAngleFamilyId`, or the draft-angle runtime maps directly.
-- `draft-angle.js` now exposes `createDraftAngleStore(...)` and owns:
-  - persistent family records
-  - candidate runtime state
-  - active state
-  - runtime lookup tables
-  - exact signature-based family/candidate matching
-  - wheel-step rotation
-  - candidate materialization into persistent dynamic families
-- `app.js` now consumes that store through thin wrappers such as:
-  - `getActiveDraftAngleRotation()`
-  - `setDraftAngleFromAlignedDirection(...)`
-  - `rotateDraftAngle(...)`
-  - `materializeActiveDraftAngleCandidateOnCommit()`
-- Debug exposure now points to the store itself through `window.draftAngleStore` and `window.getDraftAngleSnapshot()`.
-- This pass is intended to preserve the current draft-angle behavior while cleaning the ownership boundary; it does not yet claim to resolve the `edge start` align/origin bug.
-- As a stabilizing UI rule for the align bug, the start/origin click now ignores edge snaps and only accepts `corner` or `free` placement; edge snapping remains available only for the dragged end point.

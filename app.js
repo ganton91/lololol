@@ -37,6 +37,9 @@ const state = {
   layerSectionCollapsed: false,
   layers: [{ id: "layer-1", drawingId: "drawing-1", name: "Layer 1", visible: true, locked: false, fillColor: "#93c5fd", opacity: 1 }],
   activeLayerId: "layer-1",
+  editingDrawingId: null,
+  editingDrawingNameDraft: "",
+  editingDrawingInitialName: "",
   editingLayerId: null,
   editingLayerNameDraft: "",
   editingLayerInitialName: "",
@@ -776,6 +779,28 @@ function syncActiveLayerControls() {
   const activeLayer = getActiveLayer();
   if (!activeLayer || !layerFillInput) return;
   layerFillInput.value = activeLayer.fillColor;
+}
+
+function beginRenameDrawing(drawingId) {
+  const drawing = getDrawingUiById(drawingId);
+  if (!drawing) return;
+  state.editingDrawingId = drawingId;
+  state.editingDrawingInitialName = drawing.name;
+  state.editingDrawingNameDraft = drawing.name;
+  renderLayersPanel();
+}
+
+function endRenameDrawing(commit = true) {
+  const drawing = getDrawingUiById(state.editingDrawingId);
+  if (commit && drawing) {
+    const nextName = String(state.editingDrawingNameDraft || "").trim();
+    drawing.name = nextName || state.editingDrawingInitialName || drawing.name;
+  }
+
+  state.editingDrawingId = null;
+  state.editingDrawingNameDraft = "";
+  state.editingDrawingInitialName = "";
+  renderLayersPanel();
 }
 
 function beginRenameLayer(layerId) {
@@ -2120,10 +2145,49 @@ function renderLayersPanel() {
     const drawingTitleWrap = document.createElement("div");
     drawingTitleWrap.className = "card-header-title";
 
-    const drawingName = document.createElement("div");
-    drawingName.className = "layer-name-label";
-    drawingName.textContent = drawing.name;
-    drawingTitleWrap.appendChild(drawingName);
+    let drawingNameField;
+    if (state.editingDrawingId === drawing.id) {
+      const input = document.createElement("input");
+      input.className = "layer-name";
+      input.value = state.editingDrawingNameDraft || drawing.name;
+      input.size = Math.max(1, input.value.length);
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("pointerdown", (event) => event.stopPropagation());
+      input.addEventListener("input", () => {
+        state.editingDrawingNameDraft = input.value;
+        input.size = Math.max(1, input.value.length);
+      });
+      input.addEventListener("blur", endRenameDrawing);
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          input.blur();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          endRenameDrawing(false);
+        }
+      });
+      queueMicrotask(() => {
+        input.focus();
+        input.select();
+      });
+      drawingNameField = input;
+    } else {
+      const drawingName = document.createElement("div");
+      drawingName.className = "layer-name-label";
+      drawingName.textContent = drawing.name;
+      drawingName.addEventListener("click", (event) => {
+        if (!isExpanded) return;
+        event.stopPropagation();
+        beginRenameDrawing(drawing.id);
+      });
+      drawingNameField = drawingName;
+    }
+    drawingTitleWrap.appendChild(drawingNameField);
 
     const drawingControls = document.createElement("div");
     drawingControls.className = "inline-controls";

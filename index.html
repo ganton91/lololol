@@ -13,12 +13,12 @@
         --line: #e2e8f0;
         --accent: #0ea5e9;
         --canvas-bg: #fcfcfb;
-        --ref-bg-elevated: rgba(255, 255, 255, 0.82);
-        --ref-surface: rgba(255, 255, 255, 0.7);
-        --ref-surface-strong: rgba(255, 255, 255, 0.95);
-        --ref-line: rgba(20, 24, 28, 0.1);
-        --ref-line-strong: rgba(20, 24, 28, 0.18);
-        --ref-text: #161b21;
+        --ui-bg-elevated: rgba(255, 255, 255, 0.82);
+        --ui-surface: rgba(255, 255, 255, 0.7);
+        --ui-surface-strong: rgba(255, 255, 255, 0.95);
+        --ui-line: rgba(20, 24, 28, 0.1);
+        --ui-line-strong: rgba(20, 24, 28, 0.18);
+        --ui-text: #161b21;
       }
 
       * {
@@ -64,10 +64,10 @@
         align-items: center;
         gap: 12px;
         padding: 8px 12px;
-        border-bottom: 1px solid var(--ref-line);
-        background: var(--ref-bg-elevated);
+        border-bottom: 1px solid var(--ui-line);
+        background: var(--ui-bg-elevated);
         backdrop-filter: blur(18px);
-        color: var(--ref-text);
+        color: var(--ui-text);
         z-index: 20;
       }
 
@@ -86,7 +86,7 @@
       .separator {
         width: 1px;
         height: 16px;
-        background: var(--ref-line-strong);
+        background: var(--ui-line-strong);
       }
 
       .toolbar-actions {
@@ -95,8 +95,8 @@
       }
 
       .ghost-button {
-        border: 1px solid var(--ref-line);
-        background: var(--ref-surface);
+        border: 1px solid var(--ui-line);
+        background: var(--ui-surface);
         color: inherit;
         border-radius: 12px;
         cursor: pointer;
@@ -106,8 +106,8 @@
       }
 
       .ghost-button:hover {
-        background: var(--ref-surface-strong);
-        border-color: var(--ref-line-strong);
+        background: var(--ui-surface-strong);
+        border-color: var(--ui-line-strong);
       }
 
       .ghost-button.stub {
@@ -130,8 +130,8 @@
         flex-direction: column;
         min-height: 0;
         overflow: hidden;
-        border-right: 1px solid var(--ref-line);
-        background: var(--ref-bg-elevated);
+        border-right: 1px solid var(--ui-line);
+        background: var(--ui-bg-elevated);
         backdrop-filter: blur(18px);
         z-index: 10;
       }
@@ -225,21 +225,21 @@
         position: relative;
         padding: 0;
         border-radius: 8px;
-        border: 1px solid var(--ref-line);
-        background: var(--ref-surface);
+        border: 1px solid var(--ui-line);
+        background: var(--ui-surface);
         cursor: pointer;
         color: inherit;
         transition: 140ms ease;
       }
 
       .section-header-action:hover {
-        background: var(--ref-surface-strong);
-        border-color: var(--ref-line-strong);
+        background: var(--ui-surface-strong);
+        border-color: var(--ui-line-strong);
       }
 
       .section-header-action:active {
         background: rgba(17, 24, 39, 0.08);
-        border-color: var(--ref-line-strong);
+        border-color: var(--ui-line-strong);
         transform: translateY(0.5px);
       }
 
@@ -275,8 +275,8 @@
         gap: 8px;
         padding: 10px;
         border-radius: 14px;
-        border: 1px solid var(--ref-line);
-        background: var(--ref-surface);
+        border: 1px solid var(--ui-line);
+        background: var(--ui-surface);
         position: relative;
       }
 
@@ -288,7 +288,7 @@
 
       .drawing-card.active-drawing {
         background: rgba(17, 24, 39, 0.08);
-        border-color: var(--ref-line-strong);
+        border-color: var(--ui-line-strong);
       }
 
       .drawing-card.inactive-drawing .drawing-children {
@@ -306,8 +306,8 @@
         left: 8px;
         right: 8px;
         height: 2px;
-        background: color-mix(in srgb, var(--ref-text) 24%, transparent);
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ref-text) 8%, transparent);
+        background: color-mix(in srgb, var(--ui-text) 24%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-text) 8%, transparent);
         pointer-events: none;
       }
 
@@ -363,7 +363,7 @@
       }
 
       .drawing-subsection-toggle:hover {
-        color: var(--ref-text);
+        color: var(--ui-text);
       }
 
       .drawing-subsection-toggle-arrow {
@@ -392,8 +392,8 @@
       }
 
       .drawing-subsection-add:hover {
-        color: var(--ref-text);
-        background: var(--ref-line);
+        color: var(--ui-text);
+        background: var(--ui-line);
       }
 
       .drawing-subsection-list {
@@ -423,14 +423,14 @@
         gap: 8px;
         padding: 10px;
         border-radius: 14px;
-        border: 1px solid var(--ref-line);
-        background: var(--ref-surface);
+        border: 1px solid var(--ui-line);
+        background: var(--ui-surface);
         position: relative;
       }
 
       .layer-card.active {
         background: rgba(17, 24, 39, 0.08);
-        border-color: var(--ref-line-strong);
+        border-color: var(--ui-line-strong);
       }
 
       .layer-card.inactive-collapsed {
@@ -458,8 +458,8 @@
         left: 8px;
         right: 8px;
         height: 2px;
-        background: color-mix(in srgb, var(--ref-text) 24%, transparent);
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ref-text) 8%, transparent);
+        background: color-mix(in srgb, var(--ui-text) 24%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-text) 8%, transparent);
         pointer-events: none;
       }
 
@@ -573,7 +573,7 @@
       }
 
       .inline-icon:hover {
-        color: var(--ref-text);
+        color: var(--ui-text);
       }
 
       .inline-icon svg {
@@ -597,8 +597,8 @@
         width: 100%;
         padding: 8px 10px;
         border-radius: 10px;
-        border: 1px solid var(--ref-line);
-        background: var(--ref-surface-strong);
+        border: 1px solid var(--ui-line);
+        background: var(--ui-surface-strong);
         color: inherit;
       }
 
@@ -615,7 +615,7 @@
       .field input[type="range"]::-webkit-slider-runnable-track {
         height: 4px;
         border-radius: 999px;
-        background: var(--ref-line-strong);
+        background: var(--ui-line-strong);
       }
 
       .field input[type="range"]::-webkit-slider-thumb {
@@ -624,7 +624,7 @@
         margin-top: -4px;
         border: 0;
         border-radius: 50%;
-        background: var(--ref-text);
+        background: var(--ui-text);
         appearance: none;
         -webkit-appearance: none;
         box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
@@ -634,7 +634,7 @@
         height: 4px;
         border: 0;
         border-radius: 999px;
-        background: var(--ref-line-strong);
+        background: var(--ui-line-strong);
       }
 
       .field input[type="range"]::-moz-range-thumb {
@@ -642,7 +642,7 @@
         height: 12px;
         border: 0;
         border-radius: 50%;
-        background: var(--ref-text);
+        background: var(--ui-text);
         box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
       }
 

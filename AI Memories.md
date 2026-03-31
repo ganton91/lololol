@@ -108,7 +108,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Square Brush` size is expressed in whole grid cells and its preview is centered on the snapped pointer position.
 - `Square Brush` snapping is parity-aware: odd cell widths snap the brush center to cell centers, while even cell widths snap the brush center to grid intersections.
 - `Square Brush` records and rebuilds its path from snapped center point to snapped center point, using square-sweep geometry instead of dab-by-dab stamping.
-- `Square Brush` supports reference-style `Shift` axis lock behavior: pressing `Shift` during an active stroke resets the lock anchor to the current pointer position, the lock direction is chosen from client-space movement, and the chosen axis stays sticky until `Shift` is released.
+- `Square Brush` supports sticky `Shift` axis lock behavior during an active stroke: pressing `Shift` resets the lock anchor to the current pointer position, the lock direction is chosen from client-space movement, and the chosen axis stays sticky until `Shift` is released.
 - `Square Brush` remembers the previous brush point between strokes, so starting a new square-brush stroke with `Shift` can continue immediately from that remembered point.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
 - Zoom is currently clamped between a minimum of `0.09` and a maximum of `2`.
@@ -160,7 +160,9 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Before user confirmation, update only the "Progress" inside "Current Task" rather than moving unfinished work into the permanent sections.
 - Once the user confirms the task is complete, move the lasting result into the permanent sections above and clear the task section.
 - When bugs are identified, record them in a `Known Bugs` section placed above `Current Task`, and include both the current status and any progress or chosen next method for fixing them.
-- The `Reference Only` folder is not part of the default startup reading context for new chats. Only inspect files in `Reference Only` when the user explicitly asks to look at a specific reference example or behavior from that folder.
+- External example or inspiration folders are not part of the default startup reading context for new chats. Inspect them only when the user explicitly asks for a comparison or migration from one of those files.
+- When external examples are used during design or implementation, treat them only as temporary comparison material. Do not carry over labels like `reference`, `ref`, or other example-specific naming into `AI Memories.md`, source files, comments, variables, CSS tokens, or UI labels.
+- Naming written anywhere in the project should come from what the feature actually is in this app. Prefer stable app-native names that describe the real role, behavior, or visual meaning of the thing being built, rather than names borrowed from another file or temporary migration context.
 
 ## Known Bugs
 
@@ -178,17 +180,17 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ## Current Task
 
-- Task: build the application's interface according to the reference file at `Reference Only/index.html`, using that file as the current UI source of truth for structure, naming, layout, and visual direction.
+- Task: continue building and polishing the application's interface around the current `millimétré` shell, drawings panel, canvas shell, and interaction patterns already implemented in the app.
 - Status: the active priority is now interface implementation first. The previous `Renders`-workspace task is no longer the current tracked task here.
 
 ### Source Of Truth
 
-- Use `Reference Only/index.html` as the reference for the immediate interface build.
-- The `Reference Only` folder should still be inspected only when explicitly needed for matching reference behavior, and the current reference target is that single HTML file.
+- Use the current app files, especially `index.html` and `app.js`, as the source of truth for ongoing interface work.
+- If an external example file is needed for comparison, treat it as temporary research input rather than as a permanent naming source.
 
 ### Interface Scope
 
-- Rework the app shell to match the reference-style interface structure as closely as practical in the current project.
+- Rework and polish the app shell around the current interface direction already established in the project.
 - The target interface now includes:
   - top bar
   - left-side panel structure
@@ -201,31 +203,30 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ### Interface Direction Locked In
 
-- Match the reference visual hierarchy and spatial organization rather than inventing a new UI direction.
+- Keep the current visual hierarchy and spatial organization coherent while we continue refining the interface.
 - Keep the project compatible with plain browser deployment from `index.html` and native browser JavaScript without introducing a build step.
 - Preserve the current app's real geometry and drafting behavior unless a UI change explicitly requires a behavioral integration.
-- When reference naming conflicts with current app naming, the implementation should follow the active interface direction chosen for the current build pass and document that decision as it stabilizes.
+- When temporary migration names are still present, rename them toward permanent app-native naming as the interface stabilizes.
 
 ### Current Progress On This Task
 
 - The active task has been reset from the old `Renders` planning track to interface implementation.
-- The current reference file has been identified as `Reference Only/index.html`.
-- The top application bar from the reference has now been implemented in the current app with matching brand text, separator, button order, button labels, translucent styling, and hover behavior.
+- The current app shell now includes the `millimétré` top bar with the current button order, brand styling, separator, translucent surface treatment, and hover behavior.
 - The top bar buttons are currently visual-only placeholders and are not wired to real actions yet.
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
-- The old floating layers widget has been replaced by a left-side reference-style panel shell with a `Drawings` section.
-- The left panel now renders a reference-style `Drawing 1` container with nested `Layers` cards, matching the reference visual hierarchy more closely than the previous flat list.
-- Layer cards now show reference-style inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
+- The old floating layers widget has been replaced by a left-side panel shell with a `Drawings` section.
+- The left panel now renders a `Drawing 1` container with nested `Layers` cards and the new card-based visual hierarchy.
+- Layer cards now show inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
 - The panel now follows an active-drawing model: only one drawing is active/expanded at a time, and the app keeps a single active layer inside that active drawing.
 - The main `Drawings` add button now creates a real new drawing with a default layer inside it and makes that drawing/layer active.
 - Drawing header controls now work for duplicate, hide/show, and delete; duplicating a drawing clones its layers and stored shapes, hiding a drawing suppresses its layers from render/select/snap, and deleting a drawing removes its layers/shapes while preserving a valid fallback active drawing/layer.
 - The nested `Layers` add button creates real app layers in the current drawing container, and layer deletion now preserves at least one layer per drawing.
 - Drawing drag-reordering now works with the same custom left-panel pointer drag model used by layers, using insertion markers and updating actual canvas paint order across drawings.
 - The last-card insertion marker spacing for drawing drag has been tuned separately so the drop line below the final drawing matches the layer-list behavior more closely.
-- Layer drag-reordering inside the nested `Layers` list now uses a reference-style custom pointer drag interaction with insertion markers and commit-on-drop behavior, without a separate floating preview card.
+- Layer drag-reordering inside the nested `Layers` list now uses a custom pointer drag interaction with insertion markers and commit-on-drop behavior, without a separate floating preview card.
 - The drag reorder logic translates the visible top-to-bottom layer order in the left panel back into the app's underlying drawing/render order so the panel stack and canvas paint order stay aligned.
 - Clicking the expanded drawing name now swaps the label into the same inline rename input pattern used by layers; blur or `Enter` commits, while `Escape` cancels and restores the previous name.
-- Clicking the active layer name now swaps the label into a reference-style inline rename input that auto-focuses; `Enter` or blur commits the new name, while `Escape` cancels and restores the previous name.
+- Clicking the active layer name now swaps the label into an inline rename input that auto-focuses; `Enter` or blur commits the new name, while `Escape` cancels and restores the previous name.
 - Current duplicate behavior clones layers/drawings into the same world position with new ids and cloned geometry; there is no confirmed cross-layer or cross-drawing boolean merge bug from that flow, but exact overlap can visually resemble a shared result until one copy is moved or edited.
 - The old bottom-left instructional hint panel inside the canvas shell has been removed completely, including its markup and styling.
-- The canvas background now uses the reference light-theme canvas color, while the grid keeps the app's own line widths and transparency-style hierarchy using darker light-theme strokes derived from the same palette rather than a single opaque color.
+- The canvas background now uses a warmer off-white canvas tone, while the grid keeps the app's own line widths and transparency-style hierarchy using darker light-theme strokes derived from the same palette rather than a single opaque color.

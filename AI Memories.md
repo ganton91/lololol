@@ -178,17 +178,19 @@ Layer order controls draw order. The active layer receives new geometry when the
   - Ellipse point generation uses that same `8`-decimal trig precision before geometry enters boolean operations.
 - Result: the rotated draft-plane merge/topology failure is considered resolved.
 
-## Current Task
+## Current Tasks
+
+### Current Task 1: Interface Implementation
 
 - Task: continue building and polishing the application's interface around the current `millimétré` shell, drawings panel, canvas shell, and interaction patterns already implemented in the app.
-- Status: the active priority is now interface implementation first. The previous `Renders`-workspace task is no longer the current tracked task here.
+- Status: interface implementation remains active. The previous `Renders`-workspace task is no longer the current tracked task here.
 
-### Source Of Truth
+#### Source Of Truth
 
 - Use the current app files, especially `index.html` and `app.js`, as the source of truth for ongoing interface work.
 - If an external example file is needed for comparison, treat it as temporary research input rather than as a permanent naming source.
 
-### Interface Scope
+#### Interface Scope
 
 - Rework and polish the app shell around the current interface direction already established in the project.
 - The target interface now includes:
@@ -201,14 +203,14 @@ Layer order controls draw order. The active layer receives new geometry when the
   - modal and properties panel shells
 - The immediate focus is interface layout, component structure, naming, and interaction scaffolding before deeper feature-complete behavior.
 
-### Interface Direction Locked In
+#### Interface Direction Locked In
 
 - Keep the current visual hierarchy and spatial organization coherent while we continue refining the interface.
 - Keep the project compatible with plain browser deployment from `index.html` and native browser JavaScript without introducing a build step.
 - Preserve the current app's real geometry and drafting behavior unless a UI change explicitly requires a behavioral integration.
 - When temporary migration names are still present, rename them toward permanent app-native naming as the interface stabilizes.
 
-### Current Progress On This Task
+#### Progress
 
 - The active task has been reset from the old `Renders` planning track to interface implementation.
 - The current app shell now includes the `millimétré` top bar with the current button order, brand styling, separator, translucent surface treatment, and hover behavior.
@@ -234,3 +236,38 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The layer-card object count now refreshes immediately after committed draw/subtract operations and after committed geometry rebuilds caused by moving selected shapes.
 - The old bottom-left instructional hint panel inside the canvas shell has been removed completely, including its markup and styling.
 - The canvas background now uses a warmer off-white canvas tone, while the grid keeps the app's own line widths and transparency-style hierarchy using darker light-theme strokes derived from the same palette rather than a single opaque color.
+
+### Current Task 2: Real Dimensions And Units Model
+
+- Task: give the editor real dimensions so drawing happens in physical units, and prepare the app for unit-aware measurements, object readouts, and configurable grid spacing.
+- Status: design/discussion phase before implementation. The current leading proposal is to treat `1 world unit = 1 mm` and keep display units separate from stored geometry.
+
+#### Scope
+
+- Make the drawing space represent real physical size rather than arbitrary abstract units.
+- Preserve a single canonical storage unit internally even when the user later changes display units.
+- Allow future UI readouts to display values in `mm`, `cm`, or `m` without changing stored geometry.
+- Allow the grid system to expose both:
+  - display unit family for the grid
+  - numeric spacing value inside that unit family
+
+#### Direction Under Discussion
+
+- The internal geometry model should most likely store everything in millimeters, with `1 world unit = 1 mm`.
+- Display units should be a formatting layer only, not a geometry/storage layer.
+- Grid spacing should also resolve into millimeters internally, even if the user configures it in `cm` or `m`.
+- This task should eventually affect:
+  - measurement formatting
+  - object/property readouts
+  - ruler labels
+  - grid spacing controls
+  - future dimensioning tools
+- Existing world geometry, booleans, and draft-plane math should stay in the same coordinate system; the main change should be semantic meaning plus unit-aware formatting and controls.
+
+#### Progress
+
+- A second active task has now been opened specifically for real dimensions and units.
+- The current proposal being tracked is that the app should use millimeters as the canonical internal world unit.
+- The desired future behavior is for users to choose display units such as `mm`, `cm`, or `m` independently from the stored geometry model.
+- The desired future behavior is also for users to choose the grid unit family and later the numeric spacing amount within that family, while the app still resolves that spacing into the same canonical internal unit.
+- No implementation has been committed for this task yet; the current step is to lock the data model and interaction approach before code changes begin.

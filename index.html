@@ -386,6 +386,20 @@
         user-select: none;
       }
 
+      .left-panel-drag-preview {
+        position: fixed;
+        pointer-events: none;
+        z-index: 80;
+        opacity: 0.96;
+        transform: none;
+        box-shadow: 0 18px 48px rgba(17, 24, 39, 0.08);
+      }
+
+      .layers-panel.drag-reordering,
+      .layers-panel.drag-reordering * {
+        cursor: grabbing !important;
+      }
+
       .layer-card {
         display: grid;
         grid-template-columns: 16px minmax(0, 1fr);
@@ -415,6 +429,38 @@
 
       .layer-card.inactive-collapsed .layer-main > :not(:first-child) {
         display: none;
+      }
+
+      .layer-card.dragging {
+        opacity: 0.55;
+      }
+
+      .layer-card.drag-insert-before::before,
+      .layer-card.drag-insert-after::after {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        height: 2px;
+        background: color-mix(in srgb, var(--ref-text) 24%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ref-text) 8%, transparent);
+        pointer-events: none;
+      }
+
+      .layer-card.drag-insert-before::before {
+        top: -6px;
+      }
+
+      .layer-card.drag-insert-after::after {
+        bottom: -3px;
+      }
+
+      .drawing-subsection-list .layer-card.drag-insert-before::before {
+        top: -4px;
+      }
+
+      .drawing-subsection-list .layer-card.drag-insert-after::after {
+        bottom: 0;
       }
 
       .layer-main {

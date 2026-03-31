@@ -21,6 +21,7 @@ const zoomOutBtn = document.getElementById("zoom-out");
 const zoomInBtn = document.getElementById("zoom-in");
 const zoomLevel = document.getElementById("zoom-level");
 const workplaneStatus = document.getElementById("workplane-status");
+const layersPanel = document.getElementById("layersPanel");
 const layerSection = document.getElementById("layerSection");
 const layerSectionToggle = document.getElementById("layerSectionToggle");
 const layersList = document.getElementById("layers-list");
@@ -53,6 +54,7 @@ const state = {
   draftCurrent: { x: 0, y: 0 },
   panStart: { x: 0, y: 0 },
   panOrigin: { x: 0, y: 0 },
+  leftPanelPointerDrag: null,
   draftOriginDragStartScreen: { x: 0, y: 0 },
   draftOriginDragStartOrigin: { x: 0, y: 0 },
   draftOriginDragRotation: null,
@@ -631,6 +633,157 @@ function createInlineIcon(kind, options = {}) {
   }
 
   return svg;
+}
+
+function moveArrayItem(items, fromIndex, toIndex) {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) {
+    return items.slice();
+  }
+
+  const next = items.slice();
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
+function getLayerListElementForDrawing(drawingId) {
+  return layersList.querySelector(`.drawing-subsection-list[data-drawing-id="${drawingId}"]`);
+}
+
+function clearLayerDropIndicatorClasses(listEl = null) {
+  const root = listEl || layersList;
+  root.querySelectorAll(".drag-insert-before, .drag-insert-after").forEach((element) => {
+    element.classList.remove("drag-insert-before");
+    element.classList.remove("drag-insert-after");
+  });
+}
+
+function reorderLayersForDrawingFromVisualOrder(drawingId, visualLayerIds) {
+  const drawingLayers = state.layers.filter((layer) => getLayerDrawingId(layer) === drawingId);
+  if (!drawingLayers.length) return;
+
+  const reorderedTopToBottom = visualLayerIds
+    .map((layerId) => drawingLayers.find((layer) => layer.id === layerId))
+    .filter(Boolean);
+
+  if (reorderedTopToBottom.length !== drawingLayers.length) return;
+
+  const reorderedBottomToTop = reorderedTopToBottom.slice().reverse();
+  let reorderedIndex = 0;
+  state.layers = state.layers.map((layer) =>
+    getLayerDrawingId(layer) === drawingId ? reorderedBottomToTop[reorderedIndex++] : layer
+  );
+}
+
+function layerDropPositionFromClientY(drawingId, clientY, sourceLayerId) {
+  const items = getLayersForDrawing(drawingId);
+  const list = getLayerListElementForDrawing(drawingId);
+  if (!items.length || !list) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const fromIndex = items.findIndex((layer) => layer.id === sourceLayerId);
+  if (fromIndex === -1) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const cards = Array.from(list.querySelectorAll(".layer-card"));
+  if (!cards.length) return { rawIndex: fromIndex, toIndex: fromIndex, fromIndex };
+
+  let rawIndex = cards.length;
+  for (let index = 0; index < cards.length; index += 1) {
+    const rect = cards[index].getBoundingClientRect();
+    if (clientY < rect.top + rect.height * 0.5) {
+      rawIndex = index;
+      break;
+    }
+  }
+
+  let toIndex = rawIndex;
+  if (toIndex > fromIndex) toIndex -= 1;
+
+  return {
+    rawIndex,
+    toIndex: Math.max(0, Math.min(items.length - 1, toIndex)),
+    fromIndex,
+  };
+}
+
+function updateLayerDropIndicator(drawingId, rawIndex, toIndex, fromIndex) {
+  const list = getLayerListElementForDrawing(drawingId);
+  clearLayerDropIndicatorClasses(list);
+
+  if (!state.leftPanelPointerDrag || !list || toIndex === -1 || fromIndex === -1 || toIndex === fromIndex) return;
+
+  const cards = Array.from(list.querySelectorAll(".layer-card"));
+  if (!cards.length) return;
+
+  if (rawIndex >= cards.length) {
+    cards[cards.length - 1].classList.add("drag-insert-after");
+    return;
+  }
+
+  cards[Math.max(0, rawIndex)].classList.add("drag-insert-before");
+}
+
+function clearLayerPointerDrag(commit = true) {
+  const drag = state.leftPanelPointerDrag;
+  if (!drag) return;
+
+  if (drag.preview && drag.preview.parentNode) drag.preview.remove();
+  if (drag.sourceCard) drag.sourceCard.classList.remove("dragging");
+  clearLayerDropIndicatorClasses(getLayerListElementForDrawing(drag.drawingId));
+  if (layersPanel) layersPanel.classList.remove("drag-reordering");
+
+  state.leftPanelPointerDrag = null;
+
+  if (commit && drag.fromIndex !== -1 && drag.dropIndex !== -1 && drag.dropIndex !== drag.fromIndex) {
+    const currentVisualLayers = getLayersForDrawing(drag.drawingId).map((layer) => layer.id);
+    const nextVisualLayers = moveArrayItem(currentVisualLayers, drag.fromIndex, drag.dropIndex);
+    reorderLayersForDrawingFromVisualOrder(drag.drawingId, nextVisualLayers);
+    renderLayersPanel();
+    render();
+    return;
+  }
+
+  renderLayersPanel();
+}
+
+function beginLayerPointerDrag(event, card, drawingId, layerId) {
+  if (!card || !drawingId || !layerId) return;
+  if (event.button !== 0) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  clearLayerPointerDrag(false);
+
+  const rect = card.getBoundingClientRect();
+  const preview = card.cloneNode(true);
+  preview.classList.add("left-panel-drag-preview");
+  preview.style.top = "-9999px";
+  preview.style.left = "-9999px";
+  preview.style.width = rect.width + "px";
+  document.body.appendChild(preview);
+
+  const offsetX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+  const offsetY = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+  preview.style.left = event.clientX - offsetX + "px";
+  preview.style.top = event.clientY - offsetY + "px";
+
+  card.classList.add("dragging");
+  if (layersPanel) layersPanel.classList.add("drag-reordering");
+
+  const drop = layerDropPositionFromClientY(drawingId, event.clientY, layerId);
+  state.leftPanelPointerDrag = {
+    pointerId: event.pointerId,
+    drawingId,
+    layerId,
+    sourceCard: card,
+    preview,
+    offsetX,
+    offsetY,
+    dropIndex: drop.toIndex,
+    rawIndex: drop.rawIndex,
+    fromIndex: drop.fromIndex,
+  };
+
+  updateLayerDropIndicator(drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
 }
 
 function syncActiveLayerControls() {
@@ -2040,6 +2193,7 @@ function renderLayersPanel() {
 
     const drawingLayersList = document.createElement("div");
     drawingLayersList.className = "drawing-subsection-list";
+    drawingLayersList.dataset.drawingId = drawing.id;
 
     for (const layer of getLayersForDrawing(drawing.id)) {
       const isActive = layer.id === state.activeLayerId;
@@ -2051,6 +2205,10 @@ function renderLayersPanel() {
       grip.className = "drag-handle";
       grip.textContent = "⋮⋮";
       grip.title = "Layer handle";
+      grip.addEventListener("click", (event) => event.stopPropagation());
+      grip.addEventListener("pointerdown", (event) => {
+        beginLayerPointerDrag(event, card, drawing.id, layer.id);
+      });
 
       const main = document.createElement("div");
       main.className = "layer-main";
@@ -3359,7 +3517,44 @@ if (addDrawingBtn) {
   });
 }
 
+window.addEventListener("pointermove", (event) => {
+  const drag = state.leftPanelPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+
+  if (drag.preview) {
+    drag.preview.style.left = event.clientX - drag.offsetX + "px";
+    drag.preview.style.top = event.clientY - drag.offsetY + "px";
+  }
+
+  const drop = layerDropPositionFromClientY(drag.drawingId, event.clientY, drag.layerId);
+  drag.dropIndex = drop.toIndex;
+  drag.rawIndex = drop.rawIndex;
+  drag.fromIndex = drop.fromIndex;
+  updateLayerDropIndicator(drag.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
+});
+
+window.addEventListener("pointerup", (event) => {
+  const drag = state.leftPanelPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  clearLayerPointerDrag(true);
+});
+
+window.addEventListener("pointercancel", (event) => {
+  const drag = state.leftPanelPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  clearLayerPointerDrag(false);
+});
+
+window.addEventListener("blur", () => {
+  if (state.leftPanelPointerDrag) clearLayerPointerDrag(false);
+});
+
 window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.leftPanelPointerDrag) {
+    clearLayerPointerDrag(false);
+    return;
+  }
+
   if (e.key === "Escape" && state.tool === "draw") {
     setTool("select");
     return;

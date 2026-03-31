@@ -217,3 +217,5 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The left panel now renders a reference-style `Drawing 1` container with nested `Layers` cards, matching the reference visual hierarchy more closely than the previous flat list.
 - Layer cards now show reference-style inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
 - The nested `Layers` add button creates real app layers in the current drawing container, while the drawing-level controls are still mostly UI scaffolding for now rather than a fully implemented multi-drawing system.
+- Layer drag-reordering inside the nested `Layers` list now uses a reference-style custom pointer drag interaction with a floating preview card, insertion markers, and commit-on-drop behavior.
+- The drag reorder logic translates the visible top-to-bottom layer order in the left panel back into the app's underlying drawing/render order so the panel stack and canvas paint order stay aligned.

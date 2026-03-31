@@ -3448,6 +3448,36 @@ function drawDraftAlignStartMarker(point) {
   ctx.restore();
 }
 
+function drawInfiniteDraftAlignCross(originWorld, targetWorld) {
+  if (!originWorld || !targetWorld) return;
+
+  const originScreen = worldToScreen(originWorld);
+  const targetScreen = worldToScreen(targetWorld);
+  const dx = targetScreen.x - originScreen.x;
+  const dy = targetScreen.y - originScreen.y;
+  const length = Math.hypot(dx, dy);
+  if (length <= 1e-6) return;
+
+  const ux = dx / length;
+  const uy = dy / length;
+  const vx = -uy;
+  const vy = ux;
+  const lineExtent = Math.hypot(canvas.width, canvas.height);
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(245, 158, 11, 0.55)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([8, 6]);
+
+  ctx.beginPath();
+  ctx.moveTo(originScreen.x - ux * lineExtent, originScreen.y - uy * lineExtent);
+  ctx.lineTo(originScreen.x + ux * lineExtent, originScreen.y + uy * lineExtent);
+  ctx.moveTo(originScreen.x - vx * lineExtent, originScreen.y - vy * lineExtent);
+  ctx.lineTo(originScreen.x + vx * lineExtent, originScreen.y + vy * lineExtent);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawDraftTransformPreview() {
   if (!state.spacePressed || !state.pointerInCanvas || state.panning || state.draggingDraftOrigin) return;
 
@@ -3464,16 +3494,7 @@ function drawDraftTransformPreview() {
     drawDraftAlignStartMarker(startSnap.world);
 
     if (hoverSnap && distanceBetweenPoints(startSnap.world, hoverSnap.world) > 1e-6) {
-      const startScreen = worldToScreen(startSnap.world);
-      const endScreen = worldToScreen(hoverSnap.world);
-      ctx.strokeStyle = "rgba(2, 132, 199, 0.9)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([8, 6]);
-      ctx.beginPath();
-      ctx.moveTo(startScreen.x, startScreen.y);
-      ctx.lineTo(endScreen.x, endScreen.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      drawInfiniteDraftAlignCross(startSnap.world, hoverSnap.world);
     }
   }
 

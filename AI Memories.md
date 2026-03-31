@@ -141,6 +141,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - During `Space + Left Drag`, the initial `mousedown` start/origin snap now allows only `corner` or `free` placement; `edge` snapping is intentionally disabled for the start point to avoid the known edge-origin instability.
 - During an active `Space + Left Drag`, the dragged end point still allows full `corner`, `edge`, or `free` snapping, so edge direction pickup remains available at release.
 - During `Space + Left Drag`, if there is no nearby geometry, the preview and resulting alignment still use the free pointer position instead of forcing a snap.
+- During an active `Space + Left Drag`, the align preview now draws a faint infinite dashed cross through the chosen start/origin point, with one axis parallel to the current align direction and the other perpendicular to it.
 - During `Space + Left Drag`, snapping affects only the chosen start/end points; the resulting alignment direction is always derived from the raw point-to-point `end - start` vector of those resolved endpoints.
 - If an aligned direction matches a known family signature, the workplane re-enters that family; otherwise it activates or reuses a temporary unresolved candidate family for that direction regime.
 - The first committed draw or subtract operation while a candidate family is active materializes it into a persistent dynamic family; resetting the plane or leaving that regime without a commit discards the temporary candidate.

@@ -76,6 +76,16 @@ function normalizeRotationVector(dx, dy) {
   };
 }
 
+function canonicalizeDirectionVector(dx, dy, precisionDecimals = 8) {
+  const normalized = normalizeRotationVector(dx, dy);
+  if (!normalized) return null;
+
+  return {
+    dx: quantizeAngleValue(normalized.dx, precisionDecimals),
+    dy: quantizeAngleValue(normalized.dy, precisionDecimals),
+  };
+}
+
 function getDirectionAngleDegrees(dx, dy) {
   return normalizeDegrees360((Math.atan2(dy, dx) * 180) / Math.PI);
 }
@@ -117,25 +127,25 @@ function createDraftAngleFamilyRecord(id, baseAngleDeg, kind = "dynamic", name =
   };
 }
 
-function createDraftAngleFamilyRecordFromVector(id, dx, dy, kind = "dynamic", name = null) {
-  const normalized = normalizeRotationVector(dx, dy);
-  if (!normalized) return createDraftAngleFamilyRecord(id, 0, kind, name);
+function createDraftAngleFamilyRecordFromVector(id, dx, dy, kind = "dynamic", name = null, precisionDecimals = 8) {
+  const canonicalDirection = canonicalizeDirectionVector(dx, dy, precisionDecimals);
+  if (!canonicalDirection) return createDraftAngleFamilyRecord(id, 0, kind, name);
 
-  const baseAngleDeg = getDirectionAngleDegrees(normalized.dx, normalized.dy);
+  const baseAngleDeg = getDirectionAngleDegrees(canonicalDirection.dx, canonicalDirection.dy);
   return {
     ...createDraftAngleFamilyRecord(id, baseAngleDeg, kind, name),
-    baseVectorDx: normalized.dx,
-    baseVectorDy: normalized.dy,
+    baseVectorDx: canonicalDirection.dx,
+    baseVectorDy: canonicalDirection.dy,
   };
 }
 
-function normalizeDraftAngleRecord(record) {
-  const normalizedBaseVector =
+function normalizeDraftAngleRecord(record, precisionDecimals = 8) {
+  const canonicalBaseVector =
     Number.isFinite(record?.baseVectorDx) && Number.isFinite(record?.baseVectorDy)
-      ? normalizeRotationVector(record.baseVectorDx, record.baseVectorDy)
+      ? canonicalizeDirectionVector(record.baseVectorDx, record.baseVectorDy, precisionDecimals)
       : null;
-  const normalizedBaseAngleDeg = normalizedBaseVector
-    ? normalizeDegrees360((Math.atan2(normalizedBaseVector.dy, normalizedBaseVector.dx) * 180) / Math.PI)
+  const normalizedBaseAngleDeg = canonicalBaseVector
+    ? normalizeDegrees360((Math.atan2(canonicalBaseVector.dy, canonicalBaseVector.dx) * 180) / Math.PI)
     : normalizeDegrees360(record?.baseAngleDeg ?? 0);
 
   return {
@@ -145,25 +155,28 @@ function normalizeDraftAngleRecord(record) {
       record?.name ||
       ((record?.kind || "dynamic") === "candidate" ? "Candidate" : `Dynamic ${normalizedBaseAngleDeg}deg`),
     baseAngleDeg: normalizedBaseAngleDeg,
-    baseVectorDx: normalizedBaseVector ? normalizedBaseVector.dx : undefined,
-    baseVectorDy: normalizedBaseVector ? normalizedBaseVector.dy : undefined,
+    baseVectorDx: canonicalBaseVector ? canonicalBaseVector.dx : undefined,
+    baseVectorDy: canonicalBaseVector ? canonicalBaseVector.dy : undefined,
     stepDegrees: sanitizeStepDegrees(record?.stepDegrees),
     stepCount: sanitizeStepCount(record?.stepCount),
   };
 }
 
-function getDraftAngleRecordBaseDirection(record) {
+function getDraftAngleRecordBaseDirection(record, precisionDecimals = 8) {
   if (!record) return null;
 
   if (Number.isFinite(record.baseVectorDx) && Number.isFinite(record.baseVectorDy)) {
-    return normalizeRotationVector(record.baseVectorDx, record.baseVectorDy);
+    return {
+      dx: record.baseVectorDx,
+      dy: record.baseVectorDy,
+    };
   }
 
   if (Number.isFinite(record.baseAngleDeg)) {
     const angleRad = (record.baseAngleDeg * Math.PI) / 180;
     return {
-      dx: Math.cos(angleRad),
-      dy: Math.sin(angleRad),
+      dx: quantizeAngleValue(Math.cos(angleRad), precisionDecimals),
+      dy: quantizeAngleValue(Math.sin(angleRad), precisionDecimals),
     };
   }
 
@@ -179,7 +192,7 @@ function buildDraftAngleEntry(record, stepIndex, trigPrecisionDecimals) {
   let angleRad;
 
   if (Number.isFinite(record.baseVectorDx) && Number.isFinite(record.baseVectorDy)) {
-    const baseVector = normalizeRotationVector(record.baseVectorDx, record.baseVectorDy) || { dx: 1, dy: 0 };
+    const baseVector = getDraftAngleRecordBaseDirection(record, trigPrecisionDecimals) || { dx: 1, dy: 0 };
     const stepAngleRad = ((canonicalStepIndex * record.stepDegrees) * Math.PI) / 180;
     const stepCos = quantizeAngleValue(Math.cos(stepAngleRad), trigPrecisionDecimals);
     const stepSin = quantizeAngleValue(Math.sin(stepAngleRad), trigPrecisionDecimals);
@@ -217,7 +230,7 @@ function buildDraftAngleEntry(record, stepIndex, trigPrecisionDecimals) {
 }
 
 export function buildDraftAngleFamilyRuntime(record, trigPrecisionDecimals = 8) {
-  const normalizedRecord = normalizeDraftAngleRecord(record);
+  const normalizedRecord = normalizeDraftAngleRecord(record, trigPrecisionDecimals);
   const entries = Array.from({ length: normalizedRecord.stepCount }, (_, stepIndex) =>
     buildDraftAngleEntry(normalizedRecord, stepIndex, trigPrecisionDecimals)
   );
@@ -429,7 +442,7 @@ export function createDraftAngleStore(options = {}) {
   function setCandidateFromVector(dx, dy, stepIndex = 0, existingRecord = null) {
     const candidateRecord =
       existingRecord ||
-      createDraftAngleFamilyRecordFromVector(candidateFamilyId, dx, dy, "candidate", "Candidate");
+      createDraftAngleFamilyRecordFromVector(candidateFamilyId, dx, dy, "candidate", "Candidate", precisionDecimals);
     return setCandidateRuntime(
       buildDraftAngleFamilyRuntime(
         {
@@ -552,12 +565,12 @@ export function createDraftAngleStore(options = {}) {
 
     const candidateBaseDirection = getDraftAngleRecordBaseDirection(candidateRecord);
     const familyRecord = candidateBaseDirection
-      ? createDraftAngleFamilyRecordFromVector(
-          `draft-angle-family-${nextFamilyId++}`,
-          candidateBaseDirection.dx,
-          candidateBaseDirection.dy,
-          "dynamic"
-        )
+      ? {
+          ...cloneRecord(candidateRecord),
+          id: `draft-angle-family-${nextFamilyId++}`,
+          kind: "dynamic",
+          name: `Dynamic ${candidateRecord.baseAngleDeg}deg`,
+        }
       : createDraftAngleFamilyRecord(
           `draft-angle-family-${nextFamilyId++}`,
           candidateRecord.baseAngleDeg,

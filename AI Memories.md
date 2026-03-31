@@ -213,3 +213,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The top application bar from the reference has now been implemented in the current app with matching brand text, separator, button order, button labels, translucent styling, and hover behavior.
 - The top bar buttons are currently visual-only placeholders and are not wired to real actions yet.
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
+- The old floating layers widget has been replaced by a left-side reference-style panel shell with a `Drawings` section.
+- The left panel now renders a reference-style `Drawing 1` container with nested `Layers` cards, matching the reference visual hierarchy more closely than the previous flat list.
+- Layer cards now show reference-style inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
+- The nested `Layers` add button creates real app layers in the current drawing container, while the drawing-level controls are still mostly UI scaffolding for now rather than a fully implemented multi-drawing system.

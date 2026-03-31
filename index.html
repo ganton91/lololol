@@ -115,6 +115,462 @@
 
       .workspace-shell {
         position: relative;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .layers-panel {
+        position: relative;
+        width: 280px;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+        border-right: 1px solid var(--ref-line);
+        background: var(--ref-bg-elevated);
+        backdrop-filter: blur(18px);
+        z-index: 10;
+      }
+
+      .layers-panel.collapsed {
+        width: 54px;
+      }
+
+      .layers-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        scrollbar-width: none;
+      }
+
+      .layers-body::-webkit-scrollbar {
+        display: none;
+      }
+
+      .layers-panel.collapsed .layers-body {
+        display: none;
+      }
+
+      .panel-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .panel-section.collapsed .layer-list {
+        display: none;
+      }
+
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 32px;
+        padding: 6px 9px;
+      }
+
+      .section-header-left {
+        min-width: 0;
+      }
+
+      .section-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .section-toggle-arrow {
+        width: 8px;
+        height: 8px;
+        display: inline-block;
+        border-right: 1.5px solid currentColor;
+        border-bottom: 1.5px solid currentColor;
+        transform: translateY(-1px) rotate(45deg);
+        transition: transform 140ms ease;
+        color: var(--muted);
+      }
+
+      .panel-section.collapsed .section-toggle-arrow {
+        transform: translateY(-1px) rotate(-45deg);
+      }
+
+      .section-header-title {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .section-header-action {
+        width: 26px;
+        height: 26px;
+        display: grid;
+        place-items: center;
+        position: relative;
+        padding: 0;
+        border-radius: 8px;
+        border: 1px solid var(--ref-line);
+        background: var(--ref-surface);
+        cursor: pointer;
+        color: inherit;
+        transition: 140ms ease;
+      }
+
+      .section-header-action:hover {
+        background: var(--ref-surface-strong);
+        border-color: var(--ref-line-strong);
+      }
+
+      .section-header-action:active {
+        background: rgba(17, 24, 39, 0.08);
+        border-color: var(--ref-line-strong);
+        transform: translateY(0.5px);
+      }
+
+      .section-header-action::before,
+      .section-header-action::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 10px;
+        height: 1px;
+        border-radius: 999px;
+        background: currentColor;
+        transform: translate(-50%, -50%);
+      }
+
+      .section-header-action::after {
+        width: 1px;
+        height: 10px;
+      }
+
+      .layer-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-right: 2px;
+      }
+
+      .drawing-card {
+        display: grid;
+        grid-template-columns: 16px minmax(0, 1fr);
+        align-items: start;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 14px;
+        border: 1px solid var(--ref-line);
+        background: var(--ref-surface);
+        position: relative;
+      }
+
+      .drawing-card.inactive-drawing {
+        align-items: center;
+        padding-top: 8px;
+        padding-bottom: 8px;
+      }
+
+      .drawing-card.active-drawing {
+        background: rgba(17, 24, 39, 0.08);
+        border-color: var(--ref-line-strong);
+      }
+
+      .drawing-card.inactive-drawing .drawing-children {
+        display: none;
+      }
+
+      .drawing-main {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .drawing-children {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .drawing-subsection {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .drawing-subsection-header {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 2px;
+      }
+
+      .drawing-subsection-toggle {
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background: none;
+        border: none;
+        padding: 2px 0;
+        cursor: pointer;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--muted);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        text-align: left;
+      }
+
+      .drawing-subsection-toggle:hover {
+        color: var(--ref-text);
+      }
+
+      .drawing-subsection-toggle-arrow {
+        font-size: 8px;
+        transition: transform 0.15s;
+        display: inline-block;
+      }
+
+      .drawing-subsection.collapsed .drawing-subsection-toggle-arrow {
+        transform: rotate(-90deg);
+      }
+
+      .drawing-subsection.collapsed .drawing-subsection-list {
+        display: none;
+      }
+
+      .drawing-subsection-add {
+        background: none;
+        border: none;
+        padding: 2px 4px;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        color: var(--muted);
+        border-radius: 4px;
+      }
+
+      .drawing-subsection-add:hover {
+        color: var(--ref-text);
+        background: var(--ref-line);
+      }
+
+      .drawing-subsection-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding-left: 16px;
+      }
+
+      .drag-handle {
+        cursor: grab;
+        font-size: 14px;
+        color: var(--muted);
+        text-align: center;
+        user-select: none;
+      }
+
+      .layer-card {
+        display: grid;
+        grid-template-columns: 16px minmax(0, 1fr);
+        align-items: start;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 14px;
+        border: 1px solid var(--ref-line);
+        background: var(--ref-surface);
+        position: relative;
+      }
+
+      .layer-card.active {
+        background: rgba(17, 24, 39, 0.08);
+        border-color: var(--ref-line-strong);
+      }
+
+      .layer-card.inactive-collapsed {
+        align-items: center;
+        padding-top: 8px;
+        padding-bottom: 8px;
+      }
+
+      .layer-card.inactive-collapsed .layer-main {
+        gap: 0;
+      }
+
+      .layer-card.inactive-collapsed .layer-main > :not(:first-child) {
+        display: none;
+      }
+
+      .layer-main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .card-header {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .card-header-title {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .layer-name {
+        width: auto;
+        max-width: 100%;
+        display: inline-block;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .layer-name-label {
+        width: auto;
+        max-width: 100%;
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 600;
+        color: inherit;
+        line-height: 1.35;
+        cursor: default;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transform: translateY(1.5px);
+      }
+
+      .layer-meta,
+      .layer-meta-secondary {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .inline-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+      }
+
+      .inline-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        line-height: 1;
+        transition: color 140ms ease, opacity 140ms ease;
+      }
+
+      .inline-icon:hover {
+        color: var(--ref-text);
+      }
+
+      .inline-icon svg {
+        width: 14px;
+        height: 14px;
+        display: block;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .field label {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .field input {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--ref-line);
+        background: var(--ref-surface-strong);
+        color: inherit;
+      }
+
+      .field input[type="range"] {
+        max-width: 132px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        appearance: none;
+        -webkit-appearance: none;
+      }
+
+      .field input[type="range"]::-webkit-slider-runnable-track {
+        height: 4px;
+        border-radius: 999px;
+        background: var(--ref-line-strong);
+      }
+
+      .field input[type="range"]::-webkit-slider-thumb {
+        width: 12px;
+        height: 12px;
+        margin-top: -4px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--ref-text);
+        appearance: none;
+        -webkit-appearance: none;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+      }
+
+      .field input[type="range"]::-moz-range-track {
+        height: 4px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--ref-line-strong);
+      }
+
+      .field input[type="range"]::-moz-range-thumb {
+        width: 12px;
+        height: 12px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--ref-text);
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+      }
+
+      .canvas-shell {
+        position: relative;
+        min-width: 0;
         min-height: 0;
         overflow: hidden;
       }
@@ -137,7 +593,7 @@
         flex-wrap: wrap;
         align-items: center;
         gap: 8px;
-        max-width: calc(100vw - 32px);
+        max-width: calc(100% - 32px);
         padding: 10px;
         border: 1px solid var(--line);
         border-radius: 12px;
@@ -203,136 +659,13 @@
         bottom: 14px;
         left: 16px;
         z-index: 9;
-        max-width: calc(100vw - 32px);
+        max-width: calc(100% - 32px);
         font-size: 12px;
         color: var(--muted);
         background: rgba(255, 255, 255, 0.8);
         border: 1px solid var(--line);
         border-radius: 8px;
         padding: 6px 10px;
-      }
-
-      .layers-panel {
-        position: absolute;
-        top: 16px;
-        right: 16px;
-        z-index: 10;
-        width: 248px;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        background: color-mix(in srgb, var(--panel) 92%, transparent);
-        backdrop-filter: blur(6px);
-        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-        overflow: hidden;
-      }
-
-      .layers-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--line);
-        font-size: 13px;
-        font-weight: 600;
-      }
-
-      .layer-fill-wrap {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-weight: 500;
-        font-size: 11px;
-        color: #475569;
-      }
-
-      .layer-fill {
-        width: 28px;
-        height: 20px;
-        padding: 0;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        background: #fff;
-      }
-
-      .layers-list {
-        max-height: 260px;
-        overflow: auto;
-        padding: 8px;
-      }
-
-      .layer-row {
-        display: grid;
-        grid-template-columns: 1fr auto auto;
-        gap: 6px;
-        align-items: center;
-        width: 100%;
-        border: 1px solid #dde3ec;
-        border-radius: 8px;
-        padding: 6px 8px;
-        background: #fff;
-        margin-bottom: 6px;
-        cursor: pointer;
-      }
-
-      .layer-row.active {
-        border-color: var(--accent);
-        background: #e0f2fe;
-      }
-
-      .layer-name {
-        font-size: 13px;
-        color: #0f172a;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .layer-swatch {
-        width: 10px;
-        height: 10px;
-        border-radius: 999px;
-        border: 1px solid rgba(15, 23, 42, 0.25);
-        display: inline-block;
-        margin-right: 6px;
-        vertical-align: -1px;
-      }
-
-      .layer-mini {
-        border: 1px solid #cbd5e1;
-        border-radius: 7px;
-        background: #fff;
-        font-size: 11px;
-        min-width: 30px;
-        height: 24px;
-        cursor: pointer;
-      }
-
-      .layer-mini.is-on {
-        border-color: #0284c7;
-        background: #e0f2fe;
-        color: #075985;
-      }
-
-      .layers-actions {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 6px;
-        padding: 8px;
-        border-top: 1px solid var(--line);
-        background: #f8fafc;
-      }
-
-      .layer-action {
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        background: #fff;
-        font-size: 12px;
-        padding: 6px 8px;
-        cursor: pointer;
-      }
-
-      .layer-action:hover {
-        border-color: #94a3b8;
       }
     </style>
   </head>
@@ -353,55 +686,58 @@
       </header>
 
       <div class="workspace-shell">
-        <canvas id="cad-canvas"></canvas>
-
-        <div class="toolbar">
-          <button id="select-tool" class="tool-btn" type="button">Select</button>
-          <button id="draw-tool" class="tool-btn active" type="button">Draw</button>
-
-          <select id="shape-select" class="shape-select" aria-label="Shape">
-            <option value="rect">Rectangle</option>
-            <option value="ellipse">Ellipse</option>
-            <option value="strip">Stroke Rect</option>
-            <option value="square-brush">Square Brush</option>
-          </select>
-          <input
-            id="draw-size"
-            class="tool-size"
-            type="number"
-            min="1"
-            max="50"
-            step="1"
-            value="1"
-            title="Tool size"
-            aria-label="Tool size"
-          />
-          <button id="zoom-out" class="tool-btn" type="button" aria-label="Zoom out">-</button>
-          <button id="zoom-in" class="tool-btn" type="button" aria-label="Zoom in">+</button>
-          <span id="zoom-level" style="font-size: 12px; color: #334155; min-width: 52px">100%</span>
-          <span id="workplane-status" class="workplane-status">Plane: world | Rot: 0deg | Origin: 0, 0</span>
-        </div>
-
-        <div class="hint">
-          Drag to draw. Right click in Draw subtracts with the current shape. Select moves merged shapes. Middle mouse pans. Stroke Rect width is set in whole grid cells, snaps differently for odd and even widths, and uses <b>Shift</b> for sticky draft-axis lock while drawing. Square Brush size is set in whole grid cells, shows a centered brush preview, snaps by center parity, and uses <b>Shift</b> for sticky draft-axis lock from the current pointer anchor while brushing. <b>Wheel</b> zoom. Hold <b>Space</b> for drafting transforms: <b>Left Drag</b> aligns the workplane anywhere in space, with magnetic snap to nearby geometry, <b>Wheel</b> rotates the drafting angle, <b>Middle Drag</b> moves the draft origin, and <b>R</b> resets the workplane to world.
-        </div>
-
-        <aside class="layers-panel">
-          <div class="layers-head">
-            <span>Layers</span>
-            <label class="layer-fill-wrap">
-              Fill
-              <input id="layer-fill" class="layer-fill" type="color" value="#93c5fd" />
-            </label>
+        <aside class="layers-panel" id="layersPanel">
+          <div class="layers-body">
+            <div class="panel-section" id="layerSection">
+              <div class="section-header">
+                <div class="section-header-left">
+                  <button class="section-toggle" id="layerSectionToggle" type="button" aria-expanded="true">
+                    <span class="section-toggle-arrow" aria-hidden="true"></span>
+                    <span class="section-header-title">Drawings</span>
+                  </button>
+                </div>
+                <button class="section-header-action" id="addDrawingButton" type="button" aria-label="Add drawing"></button>
+              </div>
+              <div id="layers-list" class="layer-list"></div>
+            </div>
           </div>
-          <div id="layers-list" class="layers-list"></div>
-          <div class="layers-actions">
-            <button id="layer-add" class="layer-action" type="button">+ Layer</button>
-            <button id="layer-delete" class="layer-action" type="button">Delete</button>
-            <button id="layer-up" class="layer-action" type="button">Move Up</button>
-            <button id="layer-down" class="layer-action" type="button">Move Down</button>
-          </div>
+          <input id="layer-fill" type="color" value="#93c5fd" hidden />
         </aside>
+
+        <div class="canvas-shell">
+          <canvas id="cad-canvas"></canvas>
+
+          <div class="toolbar">
+            <button id="select-tool" class="tool-btn" type="button">Select</button>
+            <button id="draw-tool" class="tool-btn active" type="button">Draw</button>
+
+            <select id="shape-select" class="shape-select" aria-label="Shape">
+              <option value="rect">Rectangle</option>
+              <option value="ellipse">Ellipse</option>
+              <option value="strip">Stroke Rect</option>
+              <option value="square-brush">Square Brush</option>
+            </select>
+            <input
+              id="draw-size"
+              class="tool-size"
+              type="number"
+              min="1"
+              max="50"
+              step="1"
+              value="1"
+              title="Tool size"
+              aria-label="Tool size"
+            />
+            <button id="zoom-out" class="tool-btn" type="button" aria-label="Zoom out">-</button>
+            <button id="zoom-in" class="tool-btn" type="button" aria-label="Zoom in">+</button>
+            <span id="zoom-level" style="font-size: 12px; color: #334155; min-width: 52px">100%</span>
+            <span id="workplane-status" class="workplane-status">Plane: world | Rot: 0deg | Origin: 0, 0</span>
+          </div>
+
+          <div class="hint">
+            Drag to draw. Right click in Draw subtracts with the current shape. Select moves merged shapes. Middle mouse pans. Stroke Rect width is set in whole grid cells, snaps differently for odd and even widths, and uses <b>Shift</b> for sticky draft-axis lock while drawing. Square Brush size is set in whole grid cells, shows a centered brush preview, snaps by center parity, and uses <b>Shift</b> for sticky draft-axis lock from the current pointer anchor while brushing. <b>Wheel</b> zoom. Hold <b>Space</b> for drafting transforms: <b>Left Drag</b> aligns the workplane anywhere in space, with magnetic snap to nearby geometry, <b>Wheel</b> rotates the drafting angle, <b>Middle Drag</b> moves the draft origin, and <b>R</b> resets the workplane to world.
+          </div>
+        </div>
       </div>
     </div>
 

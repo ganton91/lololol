@@ -21,18 +21,20 @@ const zoomOutBtn = document.getElementById("zoom-out");
 const zoomInBtn = document.getElementById("zoom-in");
 const zoomLevel = document.getElementById("zoom-level");
 const workplaneStatus = document.getElementById("workplane-status");
+const layerSection = document.getElementById("layerSection");
+const layerSectionToggle = document.getElementById("layerSectionToggle");
 const layersList = document.getElementById("layers-list");
-const layerAddBtn = document.getElementById("layer-add");
-const layerDeleteBtn = document.getElementById("layer-delete");
-const layerUpBtn = document.getElementById("layer-up");
-const layerDownBtn = document.getElementById("layer-down");
+const layerAddBtn = document.getElementById("addLayerButton");
+const addDrawingBtn = document.getElementById("addDrawingButton");
 const layerFillInput = document.getElementById("layer-fill");
 
 const state = {
   tool: "draw",
   shapeType: "rect",
   shapes: [],
-  layers: [{ id: "layer-1", name: "Layer 1", visible: true, locked: false, fillColor: "#93c5fd" }],
+  drawingsUi: [{ id: "drawing-1", name: "Drawing 1", expanded: true, visible: true, layersSectionCollapsed: false }],
+  layerSectionCollapsed: false,
+  layers: [{ id: "layer-1", drawingId: "drawing-1", name: "Layer 1", visible: true, locked: false, fillColor: "#93c5fd", opacity: 1 }],
   activeLayerId: "layer-1",
   nextLayerId: 2,
   nextShapeId: 1,
@@ -521,9 +523,119 @@ function getNextLayerColor() {
   return layerPalette[(state.nextLayerId - 1) % layerPalette.length];
 }
 
+function getPrimaryDrawingUi() {
+  if (!state.drawingsUi.length) {
+    state.drawingsUi.push({ id: "drawing-1", name: "Drawing 1", expanded: true, visible: true, layersSectionCollapsed: false });
+  }
+
+  return state.drawingsUi[0];
+}
+
+function getDrawingUiById(id) {
+  return state.drawingsUi.find((drawing) => drawing.id === id) || null;
+}
+
+function getLayerDrawingId(layer) {
+  return layer?.drawingId || getPrimaryDrawingUi().id;
+}
+
+function getLayersForDrawing(drawingId) {
+  return state.layers.filter((layer) => getLayerDrawingId(layer) === drawingId).slice().reverse();
+}
+
+function getLayerShapeCount(layerId) {
+  return state.shapes.filter((shape) => shape.layerId === layerId).length;
+}
+
+function cloneGeometry(geometry) {
+  return geometry.map((polygon) => polygon.map((ring) => ring.map((point) => [point[0], point[1]])));
+}
+
+function cloneBounds(bounds) {
+  return bounds
+    ? {
+        x: bounds.x,
+        y: bounds.y,
+        w: bounds.w,
+        h: bounds.h,
+      }
+    : null;
+}
+
+function createInlineIcon(kind, options = {}) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+
+  if (kind === "duplicate") {
+    const horizontal = document.createElementNS(ns, "line");
+    horizontal.setAttribute("x1", "3");
+    horizontal.setAttribute("y1", "8");
+    horizontal.setAttribute("x2", "13");
+    horizontal.setAttribute("y2", "8");
+    horizontal.setAttribute("stroke", "currentColor");
+    horizontal.setAttribute("stroke-width", "1.6");
+    horizontal.setAttribute("stroke-linecap", "round");
+    svg.appendChild(horizontal);
+
+    const vertical = document.createElementNS(ns, "line");
+    vertical.setAttribute("x1", "8");
+    vertical.setAttribute("y1", "3");
+    vertical.setAttribute("x2", "8");
+    vertical.setAttribute("y2", "13");
+    vertical.setAttribute("stroke", "currentColor");
+    vertical.setAttribute("stroke-width", "1.6");
+    vertical.setAttribute("stroke-linecap", "round");
+    svg.appendChild(vertical);
+    return svg;
+  }
+
+  if (kind === "visibility") {
+    const circle = document.createElementNS(ns, "circle");
+    circle.setAttribute("cx", "8");
+    circle.setAttribute("cy", "8");
+    circle.setAttribute("r", "4");
+    if (options.filled) {
+      circle.setAttribute("fill", "currentColor");
+    } else {
+      circle.setAttribute("fill", "none");
+      circle.setAttribute("stroke", "currentColor");
+      circle.setAttribute("stroke-width", "1.6");
+    }
+    svg.appendChild(circle);
+    return svg;
+  }
+
+  if (kind === "delete") {
+    const lineA = document.createElementNS(ns, "line");
+    lineA.setAttribute("x1", "4");
+    lineA.setAttribute("y1", "4");
+    lineA.setAttribute("x2", "12");
+    lineA.setAttribute("y2", "12");
+    lineA.setAttribute("stroke", "currentColor");
+    lineA.setAttribute("stroke-width", "1.6");
+    lineA.setAttribute("stroke-linecap", "round");
+    svg.appendChild(lineA);
+
+    const lineB = document.createElementNS(ns, "line");
+    lineB.setAttribute("x1", "12");
+    lineB.setAttribute("y1", "4");
+    lineB.setAttribute("x2", "4");
+    lineB.setAttribute("y2", "12");
+    lineB.setAttribute("stroke", "currentColor");
+    lineB.setAttribute("stroke-width", "1.6");
+    lineB.setAttribute("stroke-linecap", "round");
+    svg.appendChild(lineB);
+    return svg;
+  }
+
+  return svg;
+}
+
 function syncActiveLayerControls() {
   const activeLayer = getActiveLayer();
-  if (!activeLayer) return;
+  if (!activeLayer || !layerFillInput) return;
   layerFillInput.value = activeLayer.fillColor;
 }
 
@@ -1816,18 +1928,238 @@ function subtractGeometryFromLayer(layerId, subtractionGeometry) {
 
 function renderLayersPanel() {
   layersList.innerHTML = "";
+  getPrimaryDrawingUi();
 
-  for (let i = state.layers.length - 1; i >= 0; i -= 1) {
-    const layer = state.layers[i];
-    const row = document.createElement("div");
-    row.className = "layer-row" + (layer.id === state.activeLayerId ? " active" : "");
-    row.dataset.layerId = layer.id;
-    row.innerHTML = `
-      <span class="layer-name"><span class="layer-swatch" style="background:${layer.fillColor}"></span>${layer.name}</span>
-      <button class="layer-mini ${layer.visible ? "is-on" : ""}" data-layer-action="toggle-visible" data-layer-id="${layer.id}" type="button">${layer.visible ? "ON" : "OFF"}</button>
-      <button class="layer-mini ${layer.locked ? "is-on" : ""}" data-layer-action="toggle-lock" data-layer-id="${layer.id}" type="button">${layer.locked ? "LOCK" : "FREE"}</button>
-    `;
-    layersList.appendChild(row);
+  if (layerSection && layerSectionToggle) {
+    layerSection.classList.toggle("collapsed", state.layerSectionCollapsed);
+    layerSectionToggle.setAttribute("aria-expanded", String(!state.layerSectionCollapsed));
+  }
+
+  for (const drawing of state.drawingsUi) {
+    const isExpanded = !!drawing.expanded;
+    const drawingCard = document.createElement("div");
+    drawingCard.className = "drawing-card" + (isExpanded ? " active-drawing" : " inactive-drawing");
+
+    const drawingGrip = document.createElement("div");
+    drawingGrip.className = "drag-handle";
+    drawingGrip.textContent = "⋮⋮";
+    drawingGrip.title = "Drawing handle";
+    drawingCard.appendChild(drawingGrip);
+
+    const drawingMain = document.createElement("div");
+    drawingMain.className = "drawing-main";
+    drawingMain.addEventListener("click", () => {
+      drawing.expanded = !drawing.expanded;
+      renderLayersPanel();
+    });
+
+    const drawingHeader = document.createElement("div");
+    drawingHeader.className = "card-header";
+
+    const drawingTitleWrap = document.createElement("div");
+    drawingTitleWrap.className = "card-header-title";
+
+    const drawingName = document.createElement("div");
+    drawingName.className = "layer-name-label";
+    drawingName.textContent = drawing.name;
+    drawingTitleWrap.appendChild(drawingName);
+
+    const drawingControls = document.createElement("div");
+    drawingControls.className = "inline-controls";
+
+    const drawingDuplicate = document.createElement("button");
+    drawingDuplicate.className = "inline-icon";
+    drawingDuplicate.type = "button";
+    drawingDuplicate.title = "Duplicate drawing";
+    drawingDuplicate.appendChild(createInlineIcon("duplicate"));
+    drawingDuplicate.addEventListener("click", (event) => event.stopPropagation());
+    drawingControls.appendChild(drawingDuplicate);
+
+    const drawingVisibility = document.createElement("button");
+    drawingVisibility.className = "inline-icon visibility-dot";
+    drawingVisibility.type = "button";
+    drawingVisibility.title = drawing.visible === false ? "Show drawing" : "Hide drawing";
+    drawingVisibility.appendChild(createInlineIcon("visibility", { filled: drawing.visible !== false }));
+    drawingVisibility.addEventListener("click", (event) => event.stopPropagation());
+    drawingControls.appendChild(drawingVisibility);
+
+    const drawingDelete = document.createElement("button");
+    drawingDelete.className = "inline-icon delete-mark";
+    drawingDelete.type = "button";
+    drawingDelete.title = "Delete drawing";
+    drawingDelete.appendChild(createInlineIcon("delete"));
+    drawingDelete.addEventListener("click", (event) => event.stopPropagation());
+    drawingControls.appendChild(drawingDelete);
+
+    drawingHeader.appendChild(drawingTitleWrap);
+    drawingHeader.appendChild(drawingControls);
+    drawingMain.appendChild(drawingHeader);
+
+    const children = document.createElement("div");
+    children.className = "drawing-children";
+    children.addEventListener("click", (event) => event.stopPropagation());
+
+    const layersSectionEl = document.createElement("div");
+    layersSectionEl.className = "drawing-subsection" + (drawing.layersSectionCollapsed ? " collapsed" : "");
+
+    const layersSubHeader = document.createElement("div");
+    layersSubHeader.className = "drawing-subsection-header";
+
+    const layersToggle = document.createElement("button");
+    layersToggle.className = "drawing-subsection-toggle";
+    layersToggle.type = "button";
+    layersToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      drawing.layersSectionCollapsed = !drawing.layersSectionCollapsed;
+      renderLayersPanel();
+    });
+
+    const layersArrow = document.createElement("span");
+    layersArrow.className = "drawing-subsection-toggle-arrow";
+    layersArrow.textContent = "▾";
+
+    const layersTitle = document.createElement("span");
+    layersTitle.textContent = "Layers";
+
+    layersToggle.appendChild(layersArrow);
+    layersToggle.appendChild(layersTitle);
+
+    const layersAddBtn = document.createElement("button");
+    layersAddBtn.className = "drawing-subsection-add";
+    layersAddBtn.type = "button";
+    layersAddBtn.textContent = "+";
+    layersAddBtn.title = "Add layer";
+    layersAddBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      addLayer(drawing.id);
+    });
+
+    layersSubHeader.appendChild(layersToggle);
+    layersSubHeader.appendChild(layersAddBtn);
+    layersSectionEl.appendChild(layersSubHeader);
+
+    const drawingLayersList = document.createElement("div");
+    drawingLayersList.className = "drawing-subsection-list";
+
+    for (const layer of getLayersForDrawing(drawing.id)) {
+      const isActive = layer.id === state.activeLayerId;
+      const card = document.createElement("div");
+      card.className = "layer-card layer-stack-card" + (isActive ? " active" : "");
+      if (!isActive) card.classList.add("inactive-collapsed");
+
+      const grip = document.createElement("div");
+      grip.className = "drag-handle";
+      grip.textContent = "⋮⋮";
+      grip.title = "Layer handle";
+
+      const main = document.createElement("div");
+      main.className = "layer-main";
+      main.addEventListener("click", () => {
+        state.activeLayerId = layer.id;
+        drawing.expanded = true;
+        renderLayersPanel();
+        render();
+      });
+
+      const header = document.createElement("div");
+      header.className = "card-header";
+
+      const titleWrap = document.createElement("div");
+      titleWrap.className = "card-header-title";
+
+      const label = document.createElement("div");
+      label.className = "layer-name-label";
+      label.textContent = layer.name;
+      titleWrap.appendChild(label);
+
+      const inlineControls = document.createElement("div");
+      inlineControls.className = "inline-controls";
+
+      const duplicateInline = document.createElement("button");
+      duplicateInline.className = "inline-icon";
+      duplicateInline.type = "button";
+      duplicateInline.title = "Duplicate layer";
+      duplicateInline.appendChild(createInlineIcon("duplicate"));
+      duplicateInline.addEventListener("click", (event) => {
+        event.stopPropagation();
+        duplicateLayer(layer.id);
+      });
+      inlineControls.appendChild(duplicateInline);
+
+      const visibilityInline = document.createElement("button");
+      visibilityInline.className = "inline-icon visibility-dot";
+      visibilityInline.type = "button";
+      visibilityInline.title = layer.visible ? "Hide layer" : "Show layer";
+      visibilityInline.appendChild(createInlineIcon("visibility", { filled: layer.visible }));
+      visibilityInline.addEventListener("click", (event) => {
+        event.stopPropagation();
+        layer.visible = !layer.visible;
+        renderLayersPanel();
+        render();
+      });
+      inlineControls.appendChild(visibilityInline);
+
+      const removeInline = document.createElement("button");
+      removeInline.className = "inline-icon delete-mark";
+      removeInline.type = "button";
+      removeInline.title = "Delete layer";
+      removeInline.appendChild(createInlineIcon("delete"));
+      removeInline.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteLayerById(layer.id);
+      });
+      inlineControls.appendChild(removeInline);
+
+      header.appendChild(titleWrap);
+      header.appendChild(inlineControls);
+      main.appendChild(header);
+
+      const meta = document.createElement("div");
+      meta.className = "layer-meta";
+      meta.textContent = getLayerShapeCount(layer.id) + " objects";
+      main.appendChild(meta);
+
+      const secondaryMeta = document.createElement("div");
+      secondaryMeta.className = "layer-meta-secondary";
+      secondaryMeta.textContent = layer.locked ? "Locked layer" : "Vector-authored layer";
+      main.appendChild(secondaryMeta);
+
+      const opacityField = document.createElement("div");
+      opacityField.className = "field";
+      opacityField.addEventListener("pointerdown", (event) => event.stopPropagation());
+      opacityField.addEventListener("mousedown", (event) => event.stopPropagation());
+
+      const opacityLabel = document.createElement("label");
+      opacityLabel.textContent = "Opacity";
+
+      const opacitySlider = document.createElement("input");
+      opacitySlider.type = "range";
+      opacitySlider.min = "0";
+      opacitySlider.max = "100";
+      opacitySlider.step = "1";
+      opacitySlider.value = String(Math.round((Number.isFinite(layer.opacity) ? layer.opacity : 1) * 100));
+      opacitySlider.addEventListener("pointerdown", (event) => event.stopPropagation());
+      opacitySlider.addEventListener("mousedown", (event) => event.stopPropagation());
+      opacitySlider.addEventListener("click", (event) => event.stopPropagation());
+      opacitySlider.addEventListener("input", (event) => {
+        layer.opacity = Math.max(0, Math.min(1, Number(event.target.value) / 100));
+        render();
+      });
+
+      opacityField.appendChild(opacityLabel);
+      opacityField.appendChild(opacitySlider);
+      main.appendChild(opacityField);
+
+      card.appendChild(grip);
+      card.appendChild(main);
+      drawingLayersList.appendChild(card);
+    }
+
+    layersSectionEl.appendChild(drawingLayersList);
+    children.appendChild(layersSectionEl);
+    drawingMain.appendChild(children);
+    drawingCard.appendChild(drawingMain);
+    layersList.appendChild(drawingCard);
   }
 
   syncActiveLayerControls();
@@ -1907,32 +2239,84 @@ function createSelectionShapeSnapshotMap(shapeIds = state.selection.shapeIds) {
   return snapshots;
 }
 
-function addLayer() {
+function duplicateLayer(layerId) {
+  const index = state.layers.findIndex((layer) => layer.id === layerId);
+  if (index < 0) return;
+
+  const sourceLayer = state.layers[index];
+  const duplicatedLayerId = "layer-" + state.nextLayerId;
+  state.nextLayerId += 1;
+
+  const duplicatedLayer = {
+    ...sourceLayer,
+    id: duplicatedLayerId,
+    name: sourceLayer.name + " copy",
+    opacity: Number.isFinite(sourceLayer.opacity) ? sourceLayer.opacity : 1,
+  };
+
+  state.layers.splice(index + 1, 0, duplicatedLayer);
+
+  const duplicatedShapes = state.shapes
+    .filter((shape) => shape.layerId === layerId)
+    .map((shape) => ({
+      id: "shape-" + state.nextShapeId++,
+      layerId: duplicatedLayerId,
+      geometry: cloneGeometry(shape.geometry),
+      bounds: cloneBounds(shape.bounds),
+    }));
+
+  state.shapes.push(...duplicatedShapes);
+  state.activeLayerId = duplicatedLayerId;
+  clearSelection();
+  renderLayersPanel();
+  render();
+}
+
+function addLayer(drawingId = getPrimaryDrawingUi().id) {
   const id = "layer-" + state.nextLayerId;
   const name = "Layer " + state.nextLayerId;
   const fillColor = getNextLayerColor();
+  const drawing = getDrawingUiById(drawingId) || getPrimaryDrawingUi();
   state.nextLayerId += 1;
-  state.layers.push({ id, name, visible: true, locked: false, fillColor });
+  state.layers.push({
+    id,
+    drawingId: drawing.id,
+    name,
+    visible: true,
+    locked: false,
+    fillColor,
+    opacity: 1,
+  });
+  drawing.expanded = true;
+  drawing.layersSectionCollapsed = false;
   state.activeLayerId = id;
   clearSelection();
   renderLayersPanel();
   render();
 }
 
-function deleteActiveLayer() {
+function deleteLayerById(layerId) {
   if (state.layers.length <= 1) return;
 
-  const index = state.layers.findIndex((layer) => layer.id === state.activeLayerId);
+  const index = state.layers.findIndex((layer) => layer.id === layerId);
   if (index < 0) return;
 
   const deletedId = state.layers[index].id;
   state.layers.splice(index, 1);
   state.shapes = state.shapes.filter((shape) => shape.layerId !== deletedId);
-  const fallback = state.layers[Math.max(0, index - 1)] || state.layers[0];
-  state.activeLayerId = fallback.id;
+
+  if (state.activeLayerId === deletedId) {
+    const fallback = state.layers[Math.max(0, index - 1)] || state.layers[0];
+    state.activeLayerId = fallback ? fallback.id : null;
+  }
+
   clearSelection();
   renderLayersPanel();
   render();
+}
+
+function deleteActiveLayer() {
+  deleteLayerById(state.activeLayerId);
 }
 
 function moveActiveLayer(direction) {
@@ -2300,6 +2684,7 @@ function drawLayerMerged(layer) {
 
   ctx.save();
   applyWorldCameraTransform(ctx);
+  ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(layer.opacity) ? layer.opacity : 1));
 
   for (const shape of layerShapes) {
     ctx.beginPath();
@@ -2942,38 +3327,37 @@ drawSizeInput.addEventListener("input", (e) => {
 });
 
 layersList.addEventListener("click", (e) => {
-  const actionEl = e.target.closest("[data-layer-action]");
-  if (actionEl) {
-    const layerId = actionEl.dataset.layerId;
-    const action = actionEl.dataset.layerAction;
-    const layer = getLayerById(layerId);
-    if (!layer) return;
-    if (action === "toggle-visible") layer.visible = !layer.visible;
-    if (action === "toggle-lock") layer.locked = !layer.locked;
+  const iconButton = e.target.closest(".inline-icon, .drawing-subsection-toggle, .drawing-subsection-add");
+  if (iconButton) return;
+});
+
+if (layerFillInput) {
+  layerFillInput.addEventListener("input", (e) => {
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    activeLayer.fillColor = e.target.value;
     renderLayersPanel();
     render();
-    return;
-  }
+  });
+}
 
-  const row = e.target.closest(".layer-row");
-  if (!row) return;
-  state.activeLayerId = row.dataset.layerId;
-  renderLayersPanel();
-  render();
-});
+if (layerSectionToggle) {
+  layerSectionToggle.addEventListener("click", () => {
+    state.layerSectionCollapsed = !state.layerSectionCollapsed;
+    renderLayersPanel();
+  });
+}
 
-layerFillInput.addEventListener("input", (e) => {
-  const activeLayer = getActiveLayer();
-  if (!activeLayer) return;
-  activeLayer.fillColor = e.target.value;
-  renderLayersPanel();
-  render();
-});
+if (layerAddBtn) {
+  layerAddBtn.addEventListener("click", () => addLayer(getPrimaryDrawingUi().id));
+}
 
-layerAddBtn.addEventListener("click", addLayer);
-layerDeleteBtn.addEventListener("click", deleteActiveLayer);
-layerUpBtn.addEventListener("click", () => moveActiveLayer(1));
-layerDownBtn.addEventListener("click", () => moveActiveLayer(-1));
+if (addDrawingBtn) {
+  addDrawingBtn.addEventListener("click", () => {
+    state.layerSectionCollapsed = false;
+    renderLayersPanel();
+  });
+}
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && state.tool === "draw") {

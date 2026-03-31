@@ -118,6 +118,9 @@ const squareBrushAxisDecisionBiasPx = 8;
 const gridCellSize = 24;
 const gridMidCellInterval = 10;
 const gridMajorCellInterval = 20;
+const gridMinorStrokeColor = "rgba(8, 12, 16, 0.12)";
+const gridMidStrokeColor = "rgba(8, 12, 16, 0.2)";
+const gridMajorStrokeColor = "rgba(8, 12, 16, 0.3)";
 const snapPreviewSize = 8;
 const draftTransformSnapRadiusPx = 14;
 const draftTransformCornerSnapRadiusPx = 20;
@@ -3355,12 +3358,12 @@ function drawGrid() {
 
   ctx.save();
   ctx.lineWidth = 1;
-  drawVerticalLines(minorStep, "#e9edf3", (x) => isAxisCoordinate(x) || isMidOrMajorCoordinate(x));
-  drawHorizontalLines(minorStep, "#e9edf3", (y) => isAxisCoordinate(y) || isMidOrMajorCoordinate(y));
-  drawVerticalLines(midStep, "#cfd7e4", (x) => isAxisCoordinate(x) || isMajorCoordinate(x));
-  drawHorizontalLines(midStep, "#cfd7e4", (y) => isAxisCoordinate(y) || isMajorCoordinate(y));
-  drawVerticalLines(majorStep, "#b2bfd2", isAxisCoordinate);
-  drawHorizontalLines(majorStep, "#b2bfd2", isAxisCoordinate);
+  drawVerticalLines(minorStep, gridMinorStrokeColor, (x) => isAxisCoordinate(x) || isMidOrMajorCoordinate(x));
+  drawHorizontalLines(minorStep, gridMinorStrokeColor, (y) => isAxisCoordinate(y) || isMidOrMajorCoordinate(y));
+  drawVerticalLines(midStep, gridMidStrokeColor, (x) => isAxisCoordinate(x) || isMajorCoordinate(x));
+  drawHorizontalLines(midStep, gridMidStrokeColor, (y) => isAxisCoordinate(y) || isMajorCoordinate(y));
+  drawVerticalLines(majorStep, gridMajorStrokeColor, isAxisCoordinate);
+  drawHorizontalLines(majorStep, gridMajorStrokeColor, isAxisCoordinate);
 
   ctx.beginPath();
   ctx.strokeStyle = "#475569";

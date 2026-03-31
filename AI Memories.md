@@ -75,14 +75,14 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 
 ### Draft Angle Model
 
-- Draft-angle logic is split between `draft-angle.js` for family/lookup-table construction and `app.js` for workplane runtime state.
+- Draft-angle logic is now split more cleanly: `draft-angle.js` owns the draft-angle store, family records, candidate state, active rotation state, lookup-table runtimes, and family/candidate matching, while `app.js` owns only the workplane origin and the pointer/snap interaction that feeds directions into that store.
 - Family records are designed as serializable project data with `id`, `kind`, `baseAngleDeg`, optional normalized `baseVectorDx/baseVectorDy`, `stepDegrees`, and `stepCount`.
 - The default canonical family covers `0..359` degree steps at `1deg` increments, and each lookup entry stores canonical `cos` and `sin` coefficients rounded to the shared `8`-decimal precision.
 - The active workplane rotation is represented as `mode` (`family`, `candidate`, or fallback `free`) plus a family/base descriptor and integer `stepIndex`.
 - Family-driven `draft -> world`, `world -> draft`, and world-content canvas rendering all read the active lookup entry's canonical coefficients instead of recomputing trig from a floating angle.
 - `Align` can resolve into an existing known family or into a temporary unresolved candidate family derived from a normalized direction vector; candidate records and persistent dynamic families share the same 360-step lookup-table structure.
 - A temporary candidate becomes a persistent dynamic family only when the user commits a real draw or subtract operation under that regime; otherwise it is discarded when the plane is reset or switched back into a known or already-persistent family.
-- The browser console exposes a live registry view for persistent draft-angle families and logs detailed per-align debug vectors for comparing align input against stored family directions.
+- The browser console exposes the draft-angle store and a live registry view for persistent draft-angle families for debugging.
 
 ### Layer Model
 
@@ -295,3 +295,34 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Existing stored geometry is not rescaled when the user applies new display or grid settings.
 - Rulers and the workplane origin readout now format values using the active display unit.
 - Ruler behavior may still need a follow-up pass after practical testing, especially around when minor-cell labels should appear versus only mid/major labels.
+
+### Current Task 3: Draft-Angle Structural Refactor
+
+- Task: rebuild the relationship between `app.js` and `draft-angle.js` so draft-angle families, candidate lifecycle, and active rotation ownership live in one authoritative subsystem before we revisit the edge/corner align bug.
+- Status: Pass 1 is implemented structurally, but the browser behavior still needs validation and the align-origin bug itself is not considered solved yet.
+
+#### Direction Locked In
+
+- `draft-angle.js` should own family records, candidate state, active draft-angle state, runtime lookup tables, family matching, step rotation, and candidate materialization.
+- `app.js` should own workplane origin, snap targets, pointer gestures, and the moment when an align direction is submitted to the draft-angle subsystem.
+- The draft-angle subsystem should never own edge/corner snap interpretation or workplane origin placement.
+- The align bug should be debugged only after this structural ownership is cleaned up, so we do not keep mixing origin bugs with family-runtime bugs.
+
+#### Progress
+
+- The old duplicated draft-angle ownership has now been removed from `app.js`; it no longer stores `draftAngleFamilies`, `draftAngleCandidate`, `nextDraftAngleFamilyId`, or the draft-angle runtime maps directly.
+- `draft-angle.js` now exposes `createDraftAngleStore(...)` and owns:
+  - persistent family records
+  - candidate runtime state
+  - active state
+  - runtime lookup tables
+  - exact signature-based family/candidate matching
+  - wheel-step rotation
+  - candidate materialization into persistent dynamic families
+- `app.js` now consumes that store through thin wrappers such as:
+  - `getActiveDraftAngleRotation()`
+  - `setDraftAngleFromAlignedDirection(...)`
+  - `rotateDraftAngle(...)`
+  - `materializeActiveDraftAngleCandidateOnCommit()`
+- Debug exposure now points to the store itself through `window.draftAngleStore` and `window.getDraftAngleSnapshot()`.
+- This pass is intended to preserve the current draft-angle behavior while cleaning the ownership boundary; it does not yet claim to resolve the `edge start` align/origin bug.

@@ -252,6 +252,23 @@ function renderLiveRegistry() {
   console.table(draftAngleStore.getRegistryRows());
 }
 
+function logActiveDraftAngleTable(reason = "Draft Angle Active Table") {
+  const snapshot = draftAngleStore.getSnapshot();
+  const activeRotation = snapshot?.activeRotation || getActiveDraftAngleRotation();
+  const activeState = snapshot?.activeState || null;
+
+  console.table([
+    {
+      reason,
+      mode: activeState?.mode || activeRotation?.mode || null,
+      activeTableId: activeRotation?.familyId || activeState?.familyId || null,
+      stepIndex: activeRotation?.stepIndex ?? activeState?.stepIndex ?? null,
+      angleDeg: activeRotation?.angleDeg ?? null,
+      signature: activeRotation?.signature || null,
+    },
+  ]);
+}
+
 function updateZoomLabel() {
   zoomLevel.textContent = Math.round(state.camera.zoom * 100) + "%";
 }
@@ -2918,6 +2935,7 @@ function applyDraftAlignFromDrag() {
 
   state.draftOrigin = cloneDraftPoint(startSnap.world);
   setDraftAngleFromAlignedDirection(dx, dy);
+  logActiveDraftAngleTable("Align Active Draft Angle Table");
   updateWorkplaneStatus();
   return true;
 }

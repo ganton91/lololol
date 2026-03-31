@@ -1960,10 +1960,17 @@ function setTool(tool) {
   render();
 }
 
+function getCanvasViewportSize() {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    width: Math.max(1, Math.round(rect.width || canvas.clientWidth || window.innerWidth)),
+    height: Math.max(1, Math.round(rect.height || canvas.clientHeight || window.innerHeight)),
+  };
+}
+
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const { width, height } = getCanvasViewportSize();
   canvas.width = Math.floor(width * dpr);
   canvas.height = Math.floor(height * dpr);
   canvas.style.width = width + "px";
@@ -2314,8 +2321,7 @@ function drawLayerMerged(layer) {
 
 function drawGrid() {
   const zoom = state.camera.zoom;
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const { width, height } = getCanvasViewportSize();
   const draftLeft = (0 - state.camera.x) / zoom;
   const draftRight = (width - state.camera.x) / zoom;
   const draftTop = (0 - state.camera.y) / zoom;
@@ -2543,7 +2549,8 @@ function drawSnapPreview() {
 }
 
 function render() {
-  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  const { width, height } = getCanvasViewportSize();
+  ctx.clearRect(0, 0, width, height);
   drawGrid();
 
   for (const layer of state.layers) {
@@ -2884,15 +2891,17 @@ canvas.addEventListener(
 selectBtn.addEventListener("click", () => setTool("select"));
 drawBtn.addEventListener("click", () => setTool("draw"));
 zoomInBtn.addEventListener("click", () => {
+  const { width, height } = getCanvasViewportSize();
   zoomAtScreenPoint(state.camera.zoom * 1.15, {
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
+    x: width / 2,
+    y: height / 2,
   });
 });
 zoomOutBtn.addEventListener("click", () => {
+  const { width, height } = getCanvasViewportSize();
   zoomAtScreenPoint(state.camera.zoom * 0.85, {
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
+    x: width / 2,
+    y: height / 2,
   });
 });
 shapeSelect.addEventListener("change", (e) => {

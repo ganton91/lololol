@@ -210,4 +210,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 - The active task has been reset from the old `Renders` planning track to interface implementation.
 - The current reference file has been identified as `Reference Only/index.html`.
-- No new interface implementation has been completed yet under this updated task definition.
+- The top application bar from the reference has now been implemented in the current app with matching brand text, separator, button order, button labels, translucent styling, and hover behavior.
+- The top bar buttons are currently visual-only placeholders and are not wired to real actions yet.
+- The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.

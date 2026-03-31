@@ -21,6 +21,13 @@ const zoomOutBtn = document.getElementById("zoom-out");
 const zoomInBtn = document.getElementById("zoom-in");
 const zoomLevel = document.getElementById("zoom-level");
 const workplaneStatus = document.getElementById("workplane-status");
+const settingsButton = document.getElementById("settingsButton");
+const settingsMenu = document.getElementById("settingsMenu");
+const settingsCloseButton = document.getElementById("settingsCloseButton");
+const settingsApplyButton = document.getElementById("settingsApplyButton");
+const settingsCellSizeInput = document.getElementById("settingsCellSizeInput");
+const settingsCellUnitTag = document.getElementById("settingsCellUnitTag");
+const modalBackdrop = document.getElementById("modalBackdrop");
 const draftRulerTop = document.getElementById("draft-ruler-top");
 const draftRulerLeft = document.getElementById("draft-ruler-left");
 const draftRulerBottom = document.getElementById("draft-ruler-bottom");
@@ -32,6 +39,14 @@ const layersList = document.getElementById("layers-list");
 const layerAddBtn = document.getElementById("addLayerButton");
 const addDrawingBtn = document.getElementById("addDrawingButton");
 const layerFillInput = document.getElementById("layer-fill");
+const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
+const settingsGridUnitButtons = Array.from(document.querySelectorAll("[data-settings-grid-unit]"));
+
+const DEFAULT_SETTINGS = Object.freeze({
+  displayUnit: "m",
+  gridUnit: "cm",
+  cellSize: 5,
+});
 
 const state = {
   tool: "draw",
@@ -93,6 +108,8 @@ const state = {
     stepIndex: 0,
     baseAngleDeg: 0,
   },
+  settings: { ...DEFAULT_SETTINGS },
+  settingsDraft: null,
   camera: { x: 0, y: 0, zoom: 1 },
   selection: {
     shapeIds: [],
@@ -114,12 +131,11 @@ const selectionStrokeColor = "#0ea5e9";
 const previewStrokeColor = "#0284c7";
 const previewStrokeWidth = 1.5;
 const vertexMarkerRadiusPx = 2.5;
-const minZoom = 0.09;
-const maxZoom = 2;
+const minZoom = 0.02;
+const maxZoom = 50;
 const ellipseSegments = 96;
 const squareBrushAxisDecisionDistancePx = 18;
 const squareBrushAxisDecisionBiasPx = 8;
-const gridCellSize = 24;
 const gridMidCellInterval = 10;
 const gridMajorCellInterval = 20;
 const gridMinorStrokeColor = "rgba(8, 12, 16, 0.12)";
@@ -140,6 +156,11 @@ const clipperSimplifyCollinearEpsilon = 0;
 const draftAngleCandidateFamilyId = "draft-angle-candidate";
 const draftAngleFamilyRuntimes = new Map();
 let draftAngleCandidateRuntime = null;
+const MEASUREMENT_UNITS = Object.freeze({
+  mm: { id: "mm", label: "Millimeters", shortLabel: "mm", toMm: 1, fractionDigits: 1 },
+  cm: { id: "cm", label: "Centimeters", shortLabel: "cm", toMm: 10, fractionDigits: 2 },
+  m: { id: "m", label: "Meters", shortLabel: "m", toMm: 1000, fractionDigits: 3 },
+});
 const draftRulerTopCtx = draftRulerTop.getContext("2d");
 const draftRulerLeftCtx = draftRulerLeft.getContext("2d");
 const draftRulerBottomCtx = draftRulerBottom.getContext("2d");
@@ -153,6 +174,52 @@ const draftRulerSurfaces = [
 
 function getCssTokenValue(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function getMeasurementUnit(unitId) {
+  return MEASUREMENT_UNITS[unitId] || MEASUREMENT_UNITS.mm;
+}
+
+function sanitizeMeasurementUnit(unitId, fallback = DEFAULT_SETTINGS.displayUnit) {
+  return MEASUREMENT_UNITS[unitId] ? unitId : fallback;
+}
+
+function sanitizeCellSize(value, fallback = DEFAULT_SETTINGS.cellSize) {
+  const rounded = Math.round(Number(value));
+  if (!Number.isFinite(rounded)) return fallback;
+  return Math.max(1, Math.min(100000, rounded));
+}
+
+function cloneSettings(settings = state.settings) {
+  return {
+    displayUnit: sanitizeMeasurementUnit(settings?.displayUnit, DEFAULT_SETTINGS.displayUnit),
+    gridUnit: sanitizeMeasurementUnit(settings?.gridUnit, DEFAULT_SETTINGS.gridUnit),
+    cellSize: sanitizeCellSize(settings?.cellSize, DEFAULT_SETTINGS.cellSize),
+  };
+}
+
+function convertLengthToMm(value, unitId) {
+  return Number(value) * getMeasurementUnit(unitId).toMm;
+}
+
+function getGridCellSize() {
+  return convertLengthToMm(state.settings.cellSize, state.settings.gridUnit);
+}
+
+function formatLengthValue(valueMm, unitId = state.settings.displayUnit, maxFractionDigits = null) {
+  const unit = getMeasurementUnit(unitId);
+  const displayValue = Number(valueMm) / unit.toMm;
+  const resolvedFractionDigits = maxFractionDigits ?? unit.fractionDigits;
+  const rounded = Math.abs(displayValue) <= 10 ** -(resolvedFractionDigits + 1) ? 0 : displayValue;
+  return rounded.toFixed(resolvedFractionDigits).replace(/\.?0+$/, "");
+}
+
+function formatLengthWithUnit(valueMm, unitId = state.settings.displayUnit, maxFractionDigits = null) {
+  return `${formatLengthValue(valueMm, unitId, maxFractionDigits)} ${getMeasurementUnit(unitId).shortLabel}`;
+}
+
+function isSettingsMenuOpen() {
+  return !!settingsMenu && !settingsMenu.classList.contains("hidden");
 }
 
 function normalizeDirectionVector(dx, dy) {
@@ -495,8 +562,7 @@ function updateZoomLabel() {
 }
 
 function formatWorkplaneValue(value) {
-  const rounded = Math.round(value * 10) / 10;
-  return Math.abs(rounded) <= 1e-9 ? "0" : String(rounded);
+  return formatLengthWithUnit(value, state.settings.displayUnit);
 }
 
 function formatWorkplaneAngleValue(value) {
@@ -511,6 +577,62 @@ function updateWorkplaneStatus() {
   const planeLabel = atWorldOrigin && atWorldAngle ? "world" : "custom";
   const angleDeg = draftRotation.signedAngleDeg;
   workplaneStatus.textContent = `Plane: ${planeLabel} | Rot: ${formatWorkplaneAngleValue(angleDeg)}deg | Origin: ${formatWorkplaneValue(state.draftOrigin.x)}, ${formatWorkplaneValue(state.draftOrigin.y)}`;
+}
+
+function syncSettingsMenu() {
+  if (!state.settingsDraft || !settingsMenu) return;
+
+  for (const button of settingsDisplayUnitButtons) {
+    const active = button.dataset.settingsDisplayUnit === state.settingsDraft.displayUnit;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+
+  for (const button of settingsGridUnitButtons) {
+    const active = button.dataset.settingsGridUnit === state.settingsDraft.gridUnit;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+
+  if (settingsCellSizeInput) {
+    settingsCellSizeInput.value = String(state.settingsDraft.cellSize);
+  }
+
+  if (settingsCellUnitTag) {
+    settingsCellUnitTag.textContent = getMeasurementUnit(state.settingsDraft.gridUnit).shortLabel;
+  }
+}
+
+function openSettingsMenu() {
+  if (!settingsMenu || !modalBackdrop) return;
+
+  state.settingsDraft = cloneSettings(state.settings);
+  syncSettingsMenu();
+  settingsMenu.classList.remove("hidden");
+  modalBackdrop.classList.remove("hidden");
+}
+
+function closeSettingsMenu() {
+  if (!settingsMenu || !modalBackdrop) return;
+
+  settingsMenu.classList.add("hidden");
+  modalBackdrop.classList.add("hidden");
+  state.settingsDraft = null;
+}
+
+function applySettingsDraft() {
+  if (!state.settingsDraft) return;
+
+  if (settingsCellSizeInput) {
+    state.settingsDraft.cellSize = sanitizeCellSize(settingsCellSizeInput.value, state.settingsDraft.cellSize);
+  }
+
+  state.settings = cloneSettings(state.settingsDraft);
+  state.settingsDraft = cloneSettings(state.settings);
+  syncSettingsMenu();
+  refreshPointerDerivedState();
+  updateWorkplaneStatus();
+  render();
 }
 
 function updateCursor() {
@@ -1100,11 +1222,11 @@ function isStripShapeType(shapeType = state.shapeType) {
   return shapeType === "strip";
 }
 
-function snapValueToGrid(value, step = gridCellSize) {
+function snapValueToGrid(value, step = getGridCellSize()) {
   return Math.round(value / step) * step;
 }
 
-function snapValueToGridWithOffset(value, offset = 0, step = gridCellSize) {
+function snapValueToGridWithOffset(value, offset = 0, step = getGridCellSize()) {
   return snapValueToGrid(value - offset, step) + offset;
 }
 
@@ -1124,11 +1246,11 @@ function getStripCellWidth(cellWidth = state.stripCellWidth) {
 }
 
 function getStripWidthInDraftUnits(cellWidth = state.stripCellWidth) {
-  return getStripCellWidth(cellWidth) * gridCellSize;
+  return getStripCellWidth(cellWidth) * getGridCellSize();
 }
 
 function getStripSnapOffset(cellWidth = state.stripCellWidth) {
-  return getStripCellWidth(cellWidth) % 2 === 0 ? 0 : gridCellSize / 2;
+  return getStripCellWidth(cellWidth) % 2 === 0 ? 0 : getGridCellSize() / 2;
 }
 
 function clearStripAxisLock() {
@@ -1186,11 +1308,11 @@ function getSquareBrushCellWidth(cellWidth = state.drawSize) {
 }
 
 function getSquareBrushSizeInDraftUnits(cellWidth = state.drawSize) {
-  return getSquareBrushCellWidth(cellWidth) * gridCellSize;
+  return getSquareBrushCellWidth(cellWidth) * getGridCellSize();
 }
 
 function getSquareBrushSnapOffset(cellWidth = state.drawSize) {
-  return getSquareBrushCellWidth(cellWidth) % 2 === 0 ? 0 : gridCellSize / 2;
+  return getSquareBrushCellWidth(cellWidth) % 2 === 0 ? 0 : getGridCellSize() / 2;
 }
 
 function snapDraftPointToSquareBrushCenter(point, cellWidth = state.drawSize) {
@@ -3343,7 +3465,7 @@ function drawGrid() {
   const draftRight = (width - state.camera.x) / zoom;
   const draftTop = (0 - state.camera.y) / zoom;
   const draftBottom = (height - state.camera.y) / zoom;
-  const minorStep = gridCellSize;
+  const minorStep = getGridCellSize();
   const midStep = minorStep * gridMidCellInterval;
   const majorStep = minorStep * gridMajorCellInterval;
   const epsilon = 1e-9;
@@ -3410,11 +3532,11 @@ function drawGrid() {
 }
 
 function formatDraftRulerLabel(cellIndex) {
-  return String(cellIndex);
+  return formatLengthValue(cellIndex * getGridCellSize(), state.settings.displayUnit);
 }
 
 function formatDraftRulerVerticalLabel(cellIndex) {
-  return String(-cellIndex);
+  return formatLengthValue(-cellIndex * getGridCellSize(), state.settings.displayUnit);
 }
 
 function drawHorizontalDraftRulerMark(context, x, cellIndex, major, mid, invert, showCellLabels, showMidLabels, thickness, colors) {
@@ -3487,10 +3609,11 @@ function drawDraftRulers() {
     context.textBaseline = "middle";
   }
 
-  const step = gridCellSize * state.camera.zoom;
+  const step = getGridCellSize() * state.camera.zoom;
   if (step <= 1) return;
 
-  const showCellLabels = step >= 28;
+  const displayValuePerCell = getGridCellSize() / getMeasurementUnit(state.settings.displayUnit).toMm;
+  const showCellLabels = step >= 44 && displayValuePerCell >= 0.1;
   const showMidLabels = step * gridMidCellInterval >= 72;
   const horizontalStart = state.camera.x % step;
   const verticalStart = state.camera.y % step;
@@ -4071,6 +4194,61 @@ zoomOutBtn.addEventListener("click", () => {
     y: height / 2,
   });
 });
+
+if (settingsButton) {
+  settingsButton.addEventListener("click", () => {
+    if (isSettingsMenuOpen()) {
+      closeSettingsMenu();
+      return;
+    }
+
+    openSettingsMenu();
+  });
+}
+
+if (settingsCloseButton) {
+  settingsCloseButton.addEventListener("click", () => {
+    closeSettingsMenu();
+  });
+}
+
+if (settingsApplyButton) {
+  settingsApplyButton.addEventListener("click", () => {
+    applySettingsDraft();
+    closeSettingsMenu();
+  });
+}
+
+if (modalBackdrop) {
+  modalBackdrop.addEventListener("click", () => {
+    closeSettingsMenu();
+  });
+}
+
+for (const button of settingsDisplayUnitButtons) {
+  button.addEventListener("click", () => {
+    if (!state.settingsDraft) return;
+    state.settingsDraft.displayUnit = sanitizeMeasurementUnit(button.dataset.settingsDisplayUnit, state.settingsDraft.displayUnit);
+    syncSettingsMenu();
+  });
+}
+
+for (const button of settingsGridUnitButtons) {
+  button.addEventListener("click", () => {
+    if (!state.settingsDraft) return;
+    state.settingsDraft.gridUnit = sanitizeMeasurementUnit(button.dataset.settingsGridUnit, state.settingsDraft.gridUnit);
+    syncSettingsMenu();
+  });
+}
+
+if (settingsCellSizeInput) {
+  settingsCellSizeInput.addEventListener("input", () => {
+    if (!state.settingsDraft) return;
+    if (settingsCellSizeInput.value.trim() === "") return;
+    state.settingsDraft.cellSize = sanitizeCellSize(settingsCellSizeInput.value, state.settingsDraft.cellSize);
+  });
+}
+
 shapeSelect.addEventListener("change", (e) => {
   state.shapeType = e.target.value;
   syncDrawSizeInput();
@@ -4176,6 +4354,14 @@ window.addEventListener("blur", () => {
 });
 
 window.addEventListener("keydown", (e) => {
+  if (isSettingsMenuOpen()) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeSettingsMenu();
+    }
+    return;
+  }
+
   if (e.key === "Escape" && state.leftPanelPointerDrag) {
     clearLeftPanelPointerDrag(false);
     return;
@@ -4226,6 +4412,8 @@ window.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("keyup", (e) => {
+  if (isSettingsMenuOpen()) return;
+
   if (e.key === "Shift") {
     state.shiftPressed = false;
     clearSquareBrushAxisLock();
@@ -4257,6 +4445,7 @@ updateWorkplaneStatus();
 updateCursor();
 renderLayersPanel();
 syncDrawSizeInput();
+syncSettingsMenu();
 resizeCanvas();
 
 // Debugging Expose

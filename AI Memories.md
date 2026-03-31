@@ -21,6 +21,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 ### UI Structure
 
 - `index.html` contains the canvas, toolbar, zoom controls, live workplane status readout, hint area, and layers panel.
+- `index.html` now also contains a centered settings modal shell with a backdrop for unit and grid configuration.
 - `app.js` reads those DOM elements and drives the whole interaction loop.
 - The app still runs as a plain browser project without a bundler.
 - The preferred project direction is to remain compatible with plain browser deployment through native ES modules and static hosting (for example GitHub Pages or similar simple web hosting) without requiring a build step just to run the app.
@@ -39,6 +40,18 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - The boolean boundary is wrapped by an in-file Clipper adapter layer that preserves the app's nested `[[outer, hole1...]]` multipolygon model.
 - The Clipper adapter uses fixed precision integer scaling with a shared `8`-decimal coordinate policy.
 - Layer geometry is rebuilt by unioning the shapes that belong to the layer.
+
+### Units Model
+
+- The app now treats `1 world unit = 1 mm`.
+- Stored geometry remains in that single canonical internal unit regardless of what the user chooses for display formatting.
+- Display units are now a formatting layer with `mm`, `cm`, and `m` options.
+- Grid cell size is now derived from settings as an integer `Cell Size` plus a `Grid` unit family, then resolved internally into millimeters.
+- The default settings are:
+  - `Display Unit = m`
+  - `Grid = cm`
+  - `Cell Size = 5`
+- This means the default live grid cell size is currently `50 mm`.
 
 ### Important Geometry Note
 
@@ -101,6 +114,9 @@ Layer order controls draw order. The active layer receives new geometry when the
 ### Current Behavioral Rules
 
 - New geometry is created on the active layer.
+- The app now interprets all world-space geometry coordinates as millimeters.
+- Changing `Display Unit` changes measurement formatting only; it does not rescale stored geometry.
+- Changing `Grid` and `Cell Size` changes the live grid spacing, snapping, rulers, and future cell-based draw widths without resizing existing geometry already stored in world space.
 - `Rectangle` and `Ellipse` snapping are active on the visible drafting grid: draw and right-click subtract snap both bounding-box corners to grid intersections, show a snap preview marker at the cursor, and produce bounds aligned exactly to cell multiples.
 - `Stroke Rect` width is expressed in whole grid cells, its generated strip width is always an exact multiple of one cell, and its centerline snapping is parity-aware: odd cell widths snap on half-cell centerline families while even cell widths snap on full grid intersections.
 - `Stroke Rect` can be drawn at arbitrary drafting angles while preserving its cell-multiple width and parity-aware snapping.
@@ -111,7 +127,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Square Brush` supports sticky `Shift` axis lock behavior during an active stroke: pressing `Shift` resets the lock anchor to the current pointer position, the lock direction is chosen from client-space movement, and the chosen axis stays sticky until `Shift` is released.
 - `Square Brush` remembers the previous brush point between strokes, so starting a new square-brush stroke with `Shift` can continue immediately from that remembered point.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
-- Zoom is currently clamped between a minimum of `0.09` and a maximum of `2`.
+- Zoom is currently clamped between a minimum of `0.02` and a maximum of `50`.
 - The app maintains a workplane with separate `origin` and canonical draft-angle state, independent from stored geometry.
 - Existing geometry is displayed relative to the current workplane, while the visible grid remains horizontal and vertical on screen.
 - New drawing input is created in drafting coordinates relative to the current workplane and converted back into world geometry before boolean union with the layer.
@@ -128,7 +144,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The first committed draw or subtract operation while a candidate family is active materializes it into a persistent dynamic family; resetting the plane or leaving that regime without a commit discards the temporary candidate.
 - Pressing `R` while `Space` is held resets the current workplane to the world-aligned plane, cancels any in-progress draft transform drag, and leaves drafting-transforms mode active as long as `Space` remains held.
 - Releasing `Space` during a pending workplane alignment cancels that alignment and returns control to the underlying tool.
-- The toolbar shows a live workplane status readout with the current plane mode, rotation in degrees formatted to up to `15` decimal places, and origin coordinates.
+- The toolbar shows a live workplane status readout with the current plane mode, rotation in degrees formatted to up to `15` decimal places, and origin coordinates formatted in the active display unit.
 - `Select` supports marquee selection in draft/screen space: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed by or intersect the box.
 - Holding `Shift` in `Select` toggles selection membership for both click and marquee selection: newly hit shapes are added while already selected shapes captured by the click or box are removed.
 - Multi-selected shapes move together when dragged from a selected shape.
@@ -138,6 +154,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - After subtractive drawing, the active layer is replaced with the resulting difference geometry instead of deleting whole merged objects by hit-test.
 - Before layer shapes are recreated, both boolean union results and subtractive difference results are passed through Clipper collinear simplification, so exact straight-line extra vertices can be removed from both additive and subtractive outcomes.
 - After moving selected geometry, the affected layer or layers are rebuilt again so intersections and merges stay correct.
+- Draft rulers now format labels in the active display unit rather than as raw cell indices.
 - Hidden layers are not rendered.
 - Locked layers do not accept edits.
 
@@ -214,7 +231,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 - The active task has been reset from the old `Renders` planning track to interface implementation.
 - The current app shell now includes the `millimétré` top bar with the current button order, brand styling, separator, translucent surface treatment, and hover behavior.
-- The top bar buttons are currently visual-only placeholders and are not wired to real actions yet.
+- The `Settings` button in the top bar is now wired to a real modal; the remaining top bar buttons are still visual-only placeholders.
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
 - The canvas shell now includes four-sided drafting rulers around the live canvas viewport plus all four corner blocks, with the inner drawing viewport inset inside that frame.
 - Ruler ticks and labels are now drawn from the app's live camera pan, zoom, and grid intervals instead of static DOM marks, and the ruler canvases resize together with the main drawing canvas.
@@ -240,7 +257,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 ### Current Task 2: Real Dimensions And Units Model
 
 - Task: give the editor real dimensions so drawing happens in physical units, and prepare the app for unit-aware measurements, object readouts, and configurable grid spacing.
-- Status: design/discussion phase before implementation. The current leading proposal is to treat `1 world unit = 1 mm` and keep display units separate from stored geometry.
+- Status: implementation is now in progress. The current model uses `1 world unit = 1 mm` and keeps display units separate from stored geometry.
 
 #### Scope
 
@@ -253,7 +270,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 #### Direction Under Discussion
 
-- The internal geometry model should most likely store everything in millimeters, with `1 world unit = 1 mm`.
+- The internal geometry model now stores everything in millimeters, with `1 world unit = 1 mm`.
 - Display units should be a formatting layer only, not a geometry/storage layer.
 - Grid spacing should also resolve into millimeters internally, even if the user configures it in `cm` or `m`.
 - This task should eventually affect:
@@ -267,7 +284,14 @@ Layer order controls draw order. The active layer receives new geometry when the
 #### Progress
 
 - A second active task has now been opened specifically for real dimensions and units.
-- The current proposal being tracked is that the app should use millimeters as the canonical internal world unit.
-- The desired future behavior is for users to choose display units such as `mm`, `cm`, or `m` independently from the stored geometry model.
-- The desired future behavior is also for users to choose the grid unit family and later the numeric spacing amount within that family, while the app still resolves that spacing into the same canonical internal unit.
-- No implementation has been committed for this task yet; the current step is to lock the data model and interaction approach before code changes begin.
+- The app now uses millimeters as the canonical internal world unit.
+- The top bar `Settings` button now opens a centered settings modal shell styled from the reference modal language, but with app-specific content only.
+- The first settings group now exposes `Display Unit`, `Grid`, and `Cell Size`.
+- The current supported display units are `mm`, `cm`, and `m`.
+- The current supported grid unit families are `mm`, `cm`, and `m`.
+- `Cell Size` now accepts integer values and combines with the selected `Grid` unit to derive the live cell size in millimeters.
+- The default settings are currently `Display Unit = m`, `Grid = cm`, and `Cell Size = 5`.
+- Cell-based tools still operate in whole cells rather than absolute unit inputs; their real world width now changes automatically when the live cell size changes.
+- Existing stored geometry is not rescaled when the user applies new display or grid settings.
+- Rulers and the workplane origin readout now format values using the active display unit.
+- Ruler behavior may still need a follow-up pass after practical testing, especially around when minor-cell labels should appear versus only mid/major labels.

@@ -595,7 +595,8 @@
         color: var(--muted);
       }
 
-      .field input {
+      .field input,
+      .field select {
         width: 100%;
         padding: 8px 10px;
         border-radius: 10px;
@@ -646,6 +647,176 @@
         border-radius: 50%;
         background: var(--ui-text);
         box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+      }
+
+      .menu-panel {
+        z-index: 30;
+      }
+
+      .modal-panel {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        width: min(540px, calc(100vw - 40px));
+        padding: 18px;
+        border: 1px solid var(--ui-line);
+        border-radius: 18px;
+        background: var(--ui-surface-strong);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 18px 48px rgba(17, 24, 39, 0.12);
+        transform: translate(-50%, -50%);
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .menu-title {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .tool-heading {
+        margin-top: 4px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--ui-text);
+      }
+
+      .settings-group + .settings-group {
+        margin-top: 16px;
+        padding-top: 14px;
+        border-top: 1px solid var(--ui-line);
+      }
+
+      .settings-group-title {
+        margin: 14px 0 10px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .menu-section {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .menu-section + .menu-section {
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid var(--ui-line);
+      }
+
+      .menu-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .mode-button {
+        padding: 9px 10px;
+        text-align: center;
+        font-size: 12px;
+        white-space: nowrap;
+        border: 1px solid var(--ui-line);
+        background: var(--ui-surface);
+        color: inherit;
+        border-radius: 12px;
+        cursor: pointer;
+        transition: 140ms ease;
+      }
+
+      .mode-button:hover {
+        background: var(--ui-surface-strong);
+        border-color: var(--ui-line-strong);
+      }
+
+      .mode-button.active {
+        background: rgba(17, 24, 39, 0.08);
+        border-color: var(--ui-line-strong);
+      }
+
+      .stepper-actions {
+        align-items: center;
+        gap: 6px;
+      }
+
+      .stepper-value {
+        min-width: 84px;
+        width: 84px;
+        padding: 9px 12px;
+        border: 1px solid var(--ui-line);
+        border-radius: 12px;
+        background: var(--ui-surface-strong);
+        color: var(--ui-text);
+        font-size: 12px;
+        font-weight: 600;
+        text-align: center;
+        box-sizing: border-box;
+      }
+
+      .stepper-input {
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+
+      .stepper-input::-webkit-outer-spin-button,
+      .stepper-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+
+      .settings-unit-tag {
+        min-width: 52px;
+        padding: 9px 12px;
+        border: 1px solid var(--ui-line);
+        border-radius: 12px;
+        background: var(--ui-surface);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+        text-align: center;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: transparent;
+        z-index: 29;
+      }
+
+      .calibration-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .settings-actions {
+        margin-top: 18px;
+        padding-top: 14px;
+        border-top: 1px solid var(--ui-line);
+      }
+
+      .modal-action-button {
+        transition:
+          background 140ms ease,
+          border-color 140ms ease,
+          transform 120ms ease;
+      }
+
+      .modal-action-button:active:not(:disabled) {
+        background: rgba(17, 24, 39, 0.08);
+        border-color: var(--ui-line-strong);
+        transform: translateY(0.5px);
       }
 
       .canvas-shell {
@@ -914,6 +1085,48 @@
         </div>
       </div>
     </div>
+
+    <div class="menu-panel modal-panel hidden" id="settingsMenu" role="dialog" aria-modal="true" aria-labelledby="settingsMenuHeading">
+      <div class="menu-title">Settings</div>
+      <div class="tool-heading" id="settingsMenuHeading">Units and Grid</div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Display Units</div>
+
+        <div class="menu-section">
+          <div class="menu-title">Display Unit</div>
+          <div class="menu-actions">
+            <button class="mode-button" data-settings-display-unit="mm" type="button">Millimeters</button>
+            <button class="mode-button" data-settings-display-unit="cm" type="button">Centimeters</button>
+            <button class="mode-button" data-settings-display-unit="m" type="button">Meters</button>
+          </div>
+        </div>
+
+        <div class="menu-section">
+          <div class="menu-title">Grid</div>
+          <div class="menu-actions">
+            <button class="mode-button" data-settings-grid-unit="mm" type="button">Millimeters</button>
+            <button class="mode-button" data-settings-grid-unit="cm" type="button">Centimeters</button>
+            <button class="mode-button" data-settings-grid-unit="m" type="button">Meters</button>
+          </div>
+        </div>
+
+        <div class="menu-section">
+          <div class="menu-title">Cell Size</div>
+          <div class="menu-actions stepper-actions">
+            <input class="stepper-value stepper-input" id="settingsCellSizeInput" type="number" min="1" step="1" value="5" />
+            <div class="settings-unit-tag" id="settingsCellUnitTag">cm</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="calibration-actions settings-actions">
+        <button class="ghost-button modal-action-button" id="settingsCloseButton" type="button">Close</button>
+        <button class="ghost-button modal-action-button" id="settingsApplyButton" type="button">Apply</button>
+      </div>
+    </div>
+
+    <div class="modal-backdrop hidden" id="modalBackdrop"></div>
 
     <script type="importmap">
       {

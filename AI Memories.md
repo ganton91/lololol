@@ -156,7 +156,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The first committed draw or subtract operation while a candidate family is active materializes it into a persistent dynamic family; resetting the plane or leaving that regime without a commit discards the temporary candidate.
 - Pressing `R` while `Space` is held resets the current workplane to the world-aligned plane, cancels any in-progress draft transform drag, and leaves drafting-transforms mode active as long as `Space` remains held.
 - Releasing `Space` during a pending workplane alignment cancels that alignment and returns control to the underlying tool.
-- The toolbar shows a live workplane status readout with the current plane mode, rotation in degrees formatted to up to `15` decimal places, and origin coordinates formatted in the active display unit.
+- The top bar now shows a live workplane status readout with the current plane mode (`default` when the workplane is unmodified, otherwise `custom`), rotation in degrees formatted to up to `2` decimal places, and origin coordinates formatted in the active display unit.
 - `Select` supports marquee selection in draft/screen space: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed by or intersect the box.
 - Holding `Shift` in `Select` toggles selection membership for both click and marquee selection: newly hit shapes are added while already selected shapes captured by the click or box are removed.
 - Multi-selected shapes move together when dragged from a selected shape.
@@ -249,7 +249,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
 - The canvas shell now includes four-sided drafting rulers around the live canvas viewport plus all four corner blocks, with the inner drawing viewport inset inside that frame.
 - Ruler ticks and labels are now drawn from the app's live camera pan, zoom, and grid intervals instead of static DOM marks, and the ruler canvases resize together with the main drawing canvas.
-- The toolbar now includes a compact grid status readout that shows the current snap mode, current effective cell, and when applicable the adaptive ruler step used at the current zoom.
+- The right side of the top bar now includes compact live status readouts for grid/workplane state instead of showing them inside the floating canvas toolbar.
 - The old floating layers widget has been replaced by a left-side panel shell with a `Drawings` section.
 - The left panel now renders a `Drawing 1` container with nested `Layers` cards and the new card-based visual hierarchy.
 - Layer cards now show inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
@@ -279,9 +279,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Make the drawing space represent real physical size rather than arbitrary abstract units.
 - Preserve a single canonical storage unit internally even when the user later changes display units.
 - Allow future UI readouts to display values in `mm`, `cm`, or `m` without changing stored geometry.
-- Allow the grid system to expose both:
-  - display unit family for the grid
-  - numeric spacing value inside that unit family
+- Allow the grid system to expose a user-configured cell size together with adaptive or locked snapping behavior.
 
 #### Direction Under Discussion
 
@@ -313,4 +311,5 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Rulers and the workplane origin readout now format values using the active display unit.
 - In `Adaptive`, the visible grid and rulers adapt to zoom with a `1-2-5` step ladder, so very small cells stay usable when zoomed far out instead of turning into dense visual noise.
 - In `Locked`, the rendered grid stays fixed to the configured cell while the rulers still use adaptive `1-2-5` graduations.
-- The toolbar grid status readout now shows the current snap mode (`Adaptive` or `Locked`) together with the current effective cell and, when promoted, the current adaptive ruler step.
+- The top-bar grid status readout now shows only the current snap mode (`Adaptive` or `Locked`) together with the current effective cell.
+- The top-bar `Cell` value is always formatted in the active `Display Unit`; in `Adaptive`, it reflects the current effective adaptive view cell, and in `Locked`, it reflects the user's configured fixed cell.

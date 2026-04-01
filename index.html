@@ -96,6 +96,15 @@
         gap: 6px;
       }
 
+      .topbar-status {
+        margin-left: auto;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 12px;
+      }
+
       .ghost-button {
         border: 1px solid var(--ui-line);
         background: var(--ui-surface);
@@ -998,13 +1007,13 @@
       }
 
       .workplane-status {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--muted);
         white-space: nowrap;
       }
 
       .grid-status {
-        font-size: 12px;
+        font-size: 11px;
         color: #475569;
         white-space: nowrap;
       }
@@ -1024,6 +1033,10 @@
           <button class="ghost-button" id="settingsButton" type="button">Settings</button>
           <button class="ghost-button stub" id="exportButton" type="button">Export</button>
           <button class="ghost-button stub" id="importButton" type="button">Import</button>
+        </div>
+        <div class="topbar-status">
+          <span id="grid-status" class="grid-status">Grid Adaptive | Cell 1 mm</span>
+          <span id="workplane-status" class="workplane-status">Plane: default | Rot: 0deg | Origin: 0, 0</span>
         </div>
       </header>
 
@@ -1085,8 +1098,6 @@
             <button id="zoom-out" class="tool-btn" type="button" aria-label="Zoom out">-</button>
             <button id="zoom-in" class="tool-btn" type="button" aria-label="Zoom in">+</button>
             <span id="zoom-level" style="font-size: 12px; color: #334155; min-width: 52px">100%</span>
-            <span id="grid-status" class="grid-status">Grid 5 cm</span>
-            <span id="workplane-status" class="workplane-status">Plane: world | Rot: 0deg | Origin: 0, 0</span>
           </div>
         </div>
       </div>

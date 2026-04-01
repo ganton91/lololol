@@ -386,21 +386,12 @@ function updateZoomLabel() {
 function updateGridStatus() {
   if (!gridStatus) return;
 
-  const gridMetrics = getVisibleGridMetrics();
-  const rulerMetrics = getAdaptiveGridMetrics();
   const snapModeLabel = GRID_SNAP_MODES[state.settings.snapMode]?.label || GRID_SNAP_MODES.adaptive.label;
-  const baseFallbackUnitId = state.settings.snapMode === "adaptive" ? "mm" : state.settings.cellUnit;
-  const cellLabel = formatCompactLengthWithUnit(gridMetrics.baseStep, baseFallbackUnitId);
-  const viewLabel = formatCompactLengthWithUnit(rulerMetrics.visibleStep, baseFallbackUnitId);
-  const usesAdaptiveRuler = Math.abs(rulerMetrics.visibleStep - gridMetrics.baseStep) > 1e-9;
-  const cellCaption = state.settings.snapMode === "adaptive" ? "Min" : "Cell";
+  const cellSizeMm = state.settings.snapMode === "adaptive" ? getEffectiveGridSnapStep() : getGridCellSize();
+  const cellLabel = formatLengthWithUnit(cellSizeMm, state.settings.displayUnit);
 
-  gridStatus.textContent = usesAdaptiveRuler
-    ? `Grid ${snapModeLabel} | ${cellCaption} ${cellLabel} | Ruler ${viewLabel}`
-    : `Grid ${snapModeLabel} | ${cellCaption} ${cellLabel}`;
-  gridStatus.title = usesAdaptiveRuler
-    ? `Grid snap mode ${snapModeLabel}. ${cellCaption} ${cellLabel}; adaptive ruler step ${viewLabel}.`
-    : `Grid snap mode ${snapModeLabel}. ${cellCaption} ${cellLabel}.`;
+  gridStatus.textContent = `Grid ${snapModeLabel} | Cell ${cellLabel}`;
+  gridStatus.title = `Grid ${snapModeLabel}. Cell ${cellLabel}.`;
 }
 
 function formatWorkplaneValue(value) {
@@ -408,15 +399,15 @@ function formatWorkplaneValue(value) {
 }
 
 function formatWorkplaneAngleValue(value) {
-  if (Math.abs(value) <= 1e-15) return "0";
-  return value.toFixed(15).replace(/\.?0+$/, "");
+  if (Math.abs(value) <= 0.005) return "0";
+  return value.toFixed(2).replace(/\.?0+$/, "");
 }
 
 function updateWorkplaneStatus() {
   const draftRotation = getActiveDraftAngleRotation();
   const atWorldOrigin = Math.abs(state.draftOrigin.x) <= 1e-9 && Math.abs(state.draftOrigin.y) <= 1e-9;
   const atWorldAngle = Math.abs(draftRotation.signedAngleDeg) <= 1e-9;
-  const planeLabel = atWorldOrigin && atWorldAngle ? "world" : "custom";
+  const planeLabel = atWorldOrigin && atWorldAngle ? "default" : "custom";
   const angleDeg = draftRotation.signedAngleDeg;
   workplaneStatus.textContent = `Plane: ${planeLabel} | Rot: ${formatWorkplaneAngleValue(angleDeg)}deg | Origin: ${formatWorkplaneValue(state.draftOrigin.x)}, ${formatWorkplaneValue(state.draftOrigin.y)}`;
 }

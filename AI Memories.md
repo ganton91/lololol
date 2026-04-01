@@ -50,7 +50,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - `Grid Snap` now has two user-facing modes:
   - `Adaptive`: the effective minimum cell is fixed to `1 mm`, the rendered grid and rulers both promote from that minimum through the zoom-adaptive `1-2-5` ladder, and the `Cell Size` controls are shown as locked to `1 mm`.
   - `Locked`: the effective cell comes from the configured `Cell Size` value and its chosen `mm` / `cm` / `m` unit; the rendered grid stays fixed to that locked cell, while the rulers continue to use adaptive graduations derived from it.
-- In `Locked`, the grid renderer now density-caps line drawing instead of promoting to a coarser spacing, so the visual grid can thin out at extreme zoom distances without changing its locked cell size.
+- In `Locked`, grid tiers now fade out by screen density instead of promoting to a coarser spacing, and any tier whose opacity reaches zero is skipped entirely so the canvas does not spend time drawing invisible lines.
 - The default settings are:
   - `Display Unit = m`
   - `Cell Size = 5 cm` when `Grid Snap = Locked`
@@ -125,6 +125,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Changing `Cell Size` while `Grid Snap = Locked` changes the effective cell spacing, snapping, rulers, and future cell-based draw widths without resizing existing geometry already stored in world space.
 - When zooming far out in `Adaptive`, the visible grid and ruler graduations automatically promote to coarser multiples of the current effective cell so the canvas stays legible instead of drawing every tiny base interval.
 - In `Grid Snap = Adaptive`, grid-based snapping and cell-based draw widths follow the promoted visible step, which starts from a fixed `1 mm` minimum cell; in `Grid Snap = Locked`, snapping and cell-based widths stay on the configured `Cell Size`, the rendered grid stays fixed to that cell, and only the rulers continue promoting adaptively.
+- In `Locked`, minor grid lines fade first, then mid lines, then major lines as screen spacing collapses, rather than disappearing all at once.
 - `Rectangle` and `Ellipse` snapping are active on the visible drafting grid: draw and right-click subtract snap both bounding-box corners to grid intersections, show a snap preview marker at the cursor, and produce bounds aligned exactly to cell multiples.
 - `Stroke Rect` width is expressed in whole grid cells, its generated strip width is always an exact multiple of one cell, and its centerline snapping is parity-aware: odd cell widths snap on half-cell centerline families while even cell widths snap on full grid intersections.
 - `Stroke Rect` can be drawn at arbitrary drafting angles while preserving its cell-multiple width and parity-aware snapping.

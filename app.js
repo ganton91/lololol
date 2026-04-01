@@ -133,6 +133,8 @@ const rulerMinorLabelMinPx = 84;
 const rulerMidLabelMinPx = 120;
 const rulerLabelPaddingPx = 12;
 const adaptiveMinimumCellSizeMm = 1;
+const gridFadeMinPx = 4;
+const gridFadeMaxPx = 14;
 const maxGridLinesPerAxis = 2000;
 const snapPreviewSize = 8;
 const draftTransformSnapRadiusPx = 14;
@@ -290,6 +292,12 @@ function getVisibleGridMetrics() {
 
 function getEffectiveGridSnapStep() {
   return state.settings.snapMode === "adaptive" ? getAdaptiveGridMetrics().visibleStep : getGridCellSize();
+}
+
+function getGridTierOpacity(stepPx) {
+  if (!Number.isFinite(stepPx) || stepPx <= gridFadeMinPx) return 0;
+  if (stepPx >= gridFadeMaxPx) return 1;
+  return Math.max(0, Math.min(1, (stepPx - gridFadeMinPx) / (gridFadeMaxPx - gridFadeMinPx)));
 }
 
 function formatLengthValue(valueMm, unitId = state.settings.displayUnit, maxFractionDigits = null) {
@@ -3315,14 +3323,20 @@ function drawGrid() {
   const minorStep = metrics.visibleStep;
   const midStep = metrics.midStep;
   const majorStep = metrics.majorStep;
+  const minorOpacity = getGridTierOpacity(minorStep * zoom);
+  const midOpacity = getGridTierOpacity(midStep * zoom);
+  const majorOpacity = getGridTierOpacity(majorStep * zoom);
   const epsilon = 1e-9;
 
   function isAxisCoordinate(value) {
     return Math.abs(value) <= epsilon;
   }
 
-  function drawVerticalLines(step, strokeStyle, shouldSkip = null) {
+  function drawVerticalLines(step, strokeStyle, opacity = 1, shouldSkip = null) {
+    if (opacity <= 0) return;
     if ((draftRight - draftLeft) / step > maxGridLinesPerAxis) return;
+    ctx.save();
+    ctx.globalAlpha = opacity;
     ctx.beginPath();
     ctx.strokeStyle = strokeStyle;
     const startX = Math.floor(draftLeft / step) * step;
@@ -3333,10 +3347,14 @@ function drawGrid() {
       ctx.lineTo(sx, height);
     }
     ctx.stroke();
+    ctx.restore();
   }
 
-  function drawHorizontalLines(step, strokeStyle, shouldSkip = null) {
+  function drawHorizontalLines(step, strokeStyle, opacity = 1, shouldSkip = null) {
+    if (opacity <= 0) return;
     if ((draftBottom - draftTop) / step > maxGridLinesPerAxis) return;
+    ctx.save();
+    ctx.globalAlpha = opacity;
     ctx.beginPath();
     ctx.strokeStyle = strokeStyle;
     const startY = Math.floor(draftTop / step) * step;
@@ -3347,6 +3365,7 @@ function drawGrid() {
       ctx.lineTo(width, sy);
     }
     ctx.stroke();
+    ctx.restore();
   }
 
   function isMidOrMajorCoordinate(value) {
@@ -3361,12 +3380,12 @@ function drawGrid() {
 
   ctx.save();
   ctx.lineWidth = 1;
-  drawVerticalLines(minorStep, gridMinorStrokeColor, (x) => isAxisCoordinate(x) || isMidOrMajorCoordinate(x));
-  drawHorizontalLines(minorStep, gridMinorStrokeColor, (y) => isAxisCoordinate(y) || isMidOrMajorCoordinate(y));
-  drawVerticalLines(midStep, gridMidStrokeColor, (x) => isAxisCoordinate(x) || isMajorCoordinate(x));
-  drawHorizontalLines(midStep, gridMidStrokeColor, (y) => isAxisCoordinate(y) || isMajorCoordinate(y));
-  drawVerticalLines(majorStep, gridMajorStrokeColor, isAxisCoordinate);
-  drawHorizontalLines(majorStep, gridMajorStrokeColor, isAxisCoordinate);
+  drawVerticalLines(minorStep, gridMinorStrokeColor, minorOpacity, (x) => isAxisCoordinate(x) || isMidOrMajorCoordinate(x));
+  drawHorizontalLines(minorStep, gridMinorStrokeColor, minorOpacity, (y) => isAxisCoordinate(y) || isMidOrMajorCoordinate(y));
+  drawVerticalLines(midStep, gridMidStrokeColor, midOpacity, (x) => isAxisCoordinate(x) || isMajorCoordinate(x));
+  drawHorizontalLines(midStep, gridMidStrokeColor, midOpacity, (y) => isAxisCoordinate(y) || isMajorCoordinate(y));
+  drawVerticalLines(majorStep, gridMajorStrokeColor, majorOpacity, isAxisCoordinate);
+  drawHorizontalLines(majorStep, gridMajorStrokeColor, majorOpacity, isAxisCoordinate);
 
   ctx.beginPath();
   ctx.strokeStyle = "#475569";

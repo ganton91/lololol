@@ -190,10 +190,17 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ### 1. Non-Orthogonal Draft-Plane Re-Align / Diagonal Canonicalization Bug
 
-- Status: open.
-- Symptom: when the user draws geometry under a non-orthogonal draft-plane direction and later re-aligns the workplane back onto that same diagonal direction, extra vertices can still appear instead of the shape behaving as a fully canonicalized regime.
-- Current understanding: the remaining issue no longer appears to be the old edge-start align-origin instability that was mitigated through the UI rule. The current failure is more specific to diagonal geometry that was created relative to the draft plane and later aligned back onto that same non-orthogonal regime.
-- Current hypothesis: the diagonal shape or its stored world-space representation is not being canonicalized strongly enough relative to the draft-plane family that created it, so a later align back onto that direction can still produce slight mismatch artifacts and visible extra vertices.
+- Status: open. Investigating fix via `clipperSimplifyCollinearEpsilon = 2` (currently testing).
+- Symptom: when the user aligns the workplane onto a diagonal shape that was not originally drawn inside that family, new geometry drawn in the resulting family is not perfectly orthonormal with the original diagonal shape. This causes small misalignment artifacts and spurious vertices when the two interact in boolean operations.
+- Root cause (identified 2026-04-01): the `cos/sin` coefficients stored in draft-angle family lookup entries are quantized to 8 decimal places via `quantizeAngleValue`. This introduces an error of ~5e-9 per unit, which at the Clipper scale of 1e8 accumulates to ~50 Clipper units for a 100-unit shape. The resulting edge directions are slightly off from the true aligned direction, so edges that should be exactly parallel or collinear are not.
+- Principled fix (not yet implemented): in `buildDraftAngleEntry` in `draft-angle.js`, store full IEEE 754 precision `cos/sin` for geometry use and keep quantized values only for the signature lookup. This eliminates the quantization error at the source.
+- Current test: checking whether raising `clipperSimplifyCollinearEpsilon` from 1 to 2 is sufficient to absorb the angular mismatch artifacts in practice, before committing to the more invasive draft-angle change.
+
+### 2. Clipper Integer Rounding Creates Spurious Vertices At Non-Orthogonal Intersections
+
+- Status: fixed 2026-04-01 with `clipperSimplifyCollinearEpsilon = 1`.
+- Symptom: when boolean-unioning shapes that intersect at non-orthogonal angles (e.g. a diagonal stroke crossing an axis-aligned stroke), Clipper's integer arithmetic placed intersection vertices up to 1 Clipper unit (1e-8 world units) off the original edge. With epsilon=0 the collinear simplifier did not remove these, leaving visible spurious vertex markers on what should be a clean straight edge.
+- Fix: changed `clipperSimplifyCollinearEpsilon` from `0` to `1` in `app.js` (line 139). The simplifier now removes near-collinear intermediate vertices within 1 Clipper unit, which is imperceptible (1e-8 world units) and does not affect geometry visible at any zoom level or affect alignment between layers.
 
 ## Current Tasks
 

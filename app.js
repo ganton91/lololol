@@ -136,7 +136,7 @@ const clipperScaleFactor = 10 ** clipperDecimals;
 const geometryPrecisionDecimals = clipperDecimals;
 const geometryPrecisionFactor = clipperScaleFactor;
 const clipperFillRule = FillRule.NonZero;
-const clipperSimplifyCollinearEpsilon = 0;
+const clipperSimplifyCollinearEpsilon = 1;
 const MEASUREMENT_UNITS = Object.freeze({
   mm: { id: "mm", label: "Millimeters", shortLabel: "mm", toMm: 1, fractionDigits: 1 },
   cm: { id: "cm", label: "Centimeters", shortLabel: "cm", toMm: 10, fractionDigits: 2 },

@@ -3431,8 +3431,8 @@ function reserveVerticalRulerLabel(context, y, labelText, font, labelState) {
 function drawHorizontalDraftRulerMark(context, x, major, mid, invert, labelText, thickness, colors) {
   const tick = major ? 7 : mid ? 11 : 16;
   context.beginPath();
-  context.moveTo(x + 0.5, invert ? 0 : thickness);
-  context.lineTo(x + 0.5, invert ? thickness - tick : tick);
+  context.moveTo(x, invert ? 0 : thickness);
+  context.lineTo(x, invert ? thickness - tick : tick);
   context.strokeStyle = major ? colors.major : mid ? colors.mid : colors.minor;
   context.lineWidth = major ? 0.56 : mid ? 0.4 : 0.26;
   context.stroke();
@@ -3446,8 +3446,8 @@ function drawHorizontalDraftRulerMark(context, x, major, mid, invert, labelText,
 function drawVerticalDraftRulerMark(context, y, major, mid, invert, labelText, thickness, colors) {
   const tick = major ? 8 : mid ? 11 : 16;
   context.beginPath();
-  context.moveTo(invert ? 0 : thickness, y + 0.5);
-  context.lineTo(invert ? thickness - tick : tick, y + 0.5);
+  context.moveTo(invert ? 0 : thickness, y);
+  context.lineTo(invert ? thickness - tick : tick, y);
   context.strokeStyle = major ? colors.major : mid ? colors.mid : colors.minor;
   context.lineWidth = major ? 0.56 : mid ? 0.4 : 0.26;
   context.stroke();

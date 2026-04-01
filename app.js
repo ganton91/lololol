@@ -133,6 +133,7 @@ const rulerMinorLabelMinPx = 84;
 const rulerMidLabelMinPx = 120;
 const rulerLabelPaddingPx = 12;
 const adaptiveMinimumCellSizeMm = 1;
+const maxGridLinesPerAxis = 2000;
 const snapPreviewSize = 8;
 const draftTransformSnapRadiusPx = 14;
 const draftTransformCornerSnapRadiusPx = 20;
@@ -266,6 +267,27 @@ function getAdaptiveGridMetrics() {
   };
 }
 
+function getVisibleGridMetrics() {
+  if (state.settings.snapMode === "locked") {
+    const visibleStep = getGridCellSize();
+    const visibleStepPx = visibleStep * state.camera.zoom;
+    return {
+      baseStep: visibleStep,
+      baseStepPx: visibleStepPx,
+      visibleMultiplier: 1,
+      visibleStep,
+      visibleStepPx,
+      midEvery: visibleGridMidInterval,
+      majorEvery: visibleGridMajorInterval,
+      labelEvery: visibleGridMajorInterval,
+      midStep: visibleStep * visibleGridMidInterval,
+      majorStep: visibleStep * visibleGridMajorInterval,
+    };
+  }
+
+  return getAdaptiveGridMetrics();
+}
+
 function getEffectiveGridSnapStep() {
   return state.settings.snapMode === "adaptive" ? getAdaptiveGridMetrics().visibleStep : getGridCellSize();
 }
@@ -356,19 +378,20 @@ function updateZoomLabel() {
 function updateGridStatus() {
   if (!gridStatus) return;
 
-  const metrics = getAdaptiveGridMetrics();
+  const gridMetrics = getVisibleGridMetrics();
+  const rulerMetrics = getAdaptiveGridMetrics();
   const snapModeLabel = GRID_SNAP_MODES[state.settings.snapMode]?.label || GRID_SNAP_MODES.adaptive.label;
   const baseFallbackUnitId = state.settings.snapMode === "adaptive" ? "mm" : state.settings.cellUnit;
-  const cellLabel = formatCompactLengthWithUnit(metrics.baseStep, baseFallbackUnitId);
-  const viewLabel = formatCompactLengthWithUnit(metrics.visibleStep, baseFallbackUnitId);
-  const usesAdaptiveView = Math.abs(metrics.visibleStep - metrics.baseStep) > 1e-9;
+  const cellLabel = formatCompactLengthWithUnit(gridMetrics.baseStep, baseFallbackUnitId);
+  const viewLabel = formatCompactLengthWithUnit(rulerMetrics.visibleStep, baseFallbackUnitId);
+  const usesAdaptiveRuler = Math.abs(rulerMetrics.visibleStep - gridMetrics.baseStep) > 1e-9;
   const cellCaption = state.settings.snapMode === "adaptive" ? "Min" : "Cell";
 
-  gridStatus.textContent = usesAdaptiveView
-    ? `Grid ${snapModeLabel} | ${cellCaption} ${cellLabel} | View ${viewLabel}`
+  gridStatus.textContent = usesAdaptiveRuler
+    ? `Grid ${snapModeLabel} | ${cellCaption} ${cellLabel} | Ruler ${viewLabel}`
     : `Grid ${snapModeLabel} | ${cellCaption} ${cellLabel}`;
-  gridStatus.title = usesAdaptiveView
-    ? `Grid snap mode ${snapModeLabel}. ${cellCaption} ${cellLabel}; zoomed view step ${viewLabel}.`
+  gridStatus.title = usesAdaptiveRuler
+    ? `Grid snap mode ${snapModeLabel}. ${cellCaption} ${cellLabel}; adaptive ruler step ${viewLabel}.`
     : `Grid snap mode ${snapModeLabel}. ${cellCaption} ${cellLabel}.`;
 }
 
@@ -3282,7 +3305,7 @@ function drawLayerMerged(layer) {
 }
 
 function drawGrid() {
-  const metrics = getAdaptiveGridMetrics();
+  const metrics = getVisibleGridMetrics();
   const zoom = state.camera.zoom;
   const { width, height } = getCanvasViewportSize();
   const draftLeft = (0 - state.camera.x) / zoom;
@@ -3299,6 +3322,7 @@ function drawGrid() {
   }
 
   function drawVerticalLines(step, strokeStyle, shouldSkip = null) {
+    if ((draftRight - draftLeft) / step > maxGridLinesPerAxis) return;
     ctx.beginPath();
     ctx.strokeStyle = strokeStyle;
     const startX = Math.floor(draftLeft / step) * step;
@@ -3312,6 +3336,7 @@ function drawGrid() {
   }
 
   function drawHorizontalLines(step, strokeStyle, shouldSkip = null) {
+    if ((draftBottom - draftTop) / step > maxGridLinesPerAxis) return;
     ctx.beginPath();
     ctx.strokeStyle = strokeStyle;
     const startY = Math.floor(draftTop / step) * step;

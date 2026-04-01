@@ -48,9 +48,9 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - Display units are now a formatting layer with `mm`, `cm`, and `m` options.
 - `Cell Size` is now the user-facing size control for the drafting cell, with an integer value plus inline `mm`, `cm`, or `m` unit buttons.
 - `Grid Snap` now has two user-facing modes:
-  - `Adaptive`: the effective minimum cell is fixed to `1 mm`, the visible grid and rulers promote from that minimum through the zoom-adaptive `1-2-5` ladder, and the `Cell Size` controls are shown as locked to `1 mm`.
-  - `Locked`: the effective cell comes from the configured `Cell Size` value and its chosen `mm` / `cm` / `m` unit.
-- The rendered grid and rulers derive a zoom-adaptive visible step from the current effective cell, so zooming far out promotes the visible spacing to coarser multiples instead of drawing every tiny base cell.
+  - `Adaptive`: the effective minimum cell is fixed to `1 mm`, the rendered grid and rulers both promote from that minimum through the zoom-adaptive `1-2-5` ladder, and the `Cell Size` controls are shown as locked to `1 mm`.
+  - `Locked`: the effective cell comes from the configured `Cell Size` value and its chosen `mm` / `cm` / `m` unit; the rendered grid stays fixed to that locked cell, while the rulers continue to use adaptive graduations derived from it.
+- In `Locked`, the grid renderer now density-caps line drawing instead of promoting to a coarser spacing, so the visual grid can thin out at extreme zoom distances without changing its locked cell size.
 - The default settings are:
   - `Display Unit = m`
   - `Cell Size = 5 cm` when `Grid Snap = Locked`
@@ -123,8 +123,8 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The app now interprets all world-space geometry coordinates as millimeters.
 - Changing `Display Unit` changes measurement formatting only; it does not rescale stored geometry.
 - Changing `Cell Size` while `Grid Snap = Locked` changes the effective cell spacing, snapping, rulers, and future cell-based draw widths without resizing existing geometry already stored in world space.
-- When zooming far out, the visible grid and ruler graduations automatically promote to coarser multiples of the current effective cell so the canvas stays legible instead of drawing every tiny base interval.
-- In `Grid Snap = Adaptive`, grid-based snapping and cell-based draw widths follow the promoted visible step, which starts from a fixed `1 mm` minimum cell; in `Grid Snap = Locked`, snapping and cell-based widths stay on the configured `Cell Size` even when the visible grid is visually promoted.
+- When zooming far out in `Adaptive`, the visible grid and ruler graduations automatically promote to coarser multiples of the current effective cell so the canvas stays legible instead of drawing every tiny base interval.
+- In `Grid Snap = Adaptive`, grid-based snapping and cell-based draw widths follow the promoted visible step, which starts from a fixed `1 mm` minimum cell; in `Grid Snap = Locked`, snapping and cell-based widths stay on the configured `Cell Size`, the rendered grid stays fixed to that cell, and only the rulers continue promoting adaptively.
 - `Rectangle` and `Ellipse` snapping are active on the visible drafting grid: draw and right-click subtract snap both bounding-box corners to grid intersections, show a snap preview marker at the cursor, and produce bounds aligned exactly to cell multiples.
 - `Stroke Rect` width is expressed in whole grid cells, its generated strip width is always an exact multiple of one cell, and its centerline snapping is parity-aware: odd cell widths snap on half-cell centerline families while even cell widths snap on full grid intersections.
 - `Stroke Rect` can be drawn at arbitrary drafting angles while preserving its cell-multiple width and parity-aware snapping.
@@ -248,7 +248,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
 - The canvas shell now includes four-sided drafting rulers around the live canvas viewport plus all four corner blocks, with the inner drawing viewport inset inside that frame.
 - Ruler ticks and labels are now drawn from the app's live camera pan, zoom, and grid intervals instead of static DOM marks, and the ruler canvases resize together with the main drawing canvas.
-- The toolbar now includes a compact grid status readout that shows the user's base grid and, when zoomed far out, the coarser adaptive view step currently used for the visible grid/rulers.
+- The toolbar now includes a compact grid status readout that shows the current snap mode, current effective cell, and when applicable the adaptive ruler step used at the current zoom.
 - The old floating layers widget has been replaced by a left-side panel shell with a `Drawings` section.
 - The left panel now renders a `Drawing 1` container with nested `Layers` cards and the new card-based visual hierarchy.
 - Layer cards now show inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
@@ -310,5 +310,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Cell-based tools still operate in whole cells rather than absolute unit inputs; their real world width now follows the current effective cell, which is adaptive in `Adaptive` mode and user-configured in `Locked` mode.
 - Existing stored geometry is not rescaled when the user applies new display or grid settings.
 - Rulers and the workplane origin readout now format values using the active display unit.
-- The visible grid and ruler graduations now adapt to zoom with a `1-2-5` step ladder, so very small base grids stay usable when zoomed far out instead of turning into dense visual noise.
-- The toolbar grid status readout now shows the current snap mode (`Adaptive` or `Locked`) together with the current effective cell and, when promoted, the current visible view step.
+- In `Adaptive`, the visible grid and rulers adapt to zoom with a `1-2-5` step ladder, so very small cells stay usable when zoomed far out instead of turning into dense visual noise.
+- In `Locked`, the rendered grid stays fixed to the configured cell while the rulers still use adaptive `1-2-5` graduations.
+- The toolbar grid status readout now shows the current snap mode (`Adaptive` or `Locked`) together with the current effective cell and, when promoted, the current adaptive ruler step.

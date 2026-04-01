@@ -46,7 +46,8 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - The app now treats `1 world unit = 1 mm`.
 - Stored geometry remains in that single canonical internal unit regardless of what the user chooses for display formatting.
 - Display units are now a formatting layer with `mm`, `cm`, and `m` options.
-- Grid cell size is now derived from settings as an integer `Cell Size` plus a `Grid` unit family, then resolved internally into millimeters.
+- Grid cell size is now derived from settings as an integer `Cell Size` plus a `Grid` unit family, then resolved internally into millimeters as the base authoring/snap step.
+- The rendered grid and rulers now derive a zoom-adaptive visible step from that base grid using a `1-2-5` ladder, so zooming far out promotes the visible spacing to coarser multiples instead of drawing every tiny base cell.
 - The default settings are:
   - `Display Unit = m`
   - `Grid = cm`
@@ -62,7 +63,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 ### Rendering Model
 
 - Rendering is direct vector drawing on the main canvas.
-- The canvas background grid uses three line tiers: minor lines every cell, mid lines every 10 cells, and major lines every 20 cells.
+- The canvas background grid now uses a zoom-adaptive visible minor step derived from the base grid, with mid and major tiers rendered at `5x` and `10x` that visible step.
 - The active workplane origin is visualized with dedicated draft X=0 and Y=0 axis lines.
 - The visible grid stays screen-aligned even when the drafting angle changes.
 - World content is rendered through a drafting/workplane transform with both `origin` and `angle`, so stored geometry stays in world coordinates while the user can draw against a translated and rotated drafting frame.
@@ -118,7 +119,8 @@ Layer order controls draw order. The active layer receives new geometry when the
 - New geometry is created on the active layer.
 - The app now interprets all world-space geometry coordinates as millimeters.
 - Changing `Display Unit` changes measurement formatting only; it does not rescale stored geometry.
-- Changing `Grid` and `Cell Size` changes the live grid spacing, snapping, rulers, and future cell-based draw widths without resizing existing geometry already stored in world space.
+- Changing `Grid` and `Cell Size` changes the base grid spacing, snapping, rulers, and future cell-based draw widths without resizing existing geometry already stored in world space.
+- When zooming far out, the visible grid and ruler graduations automatically promote to coarser multiples of that base grid so the canvas stays legible instead of drawing every tiny base interval.
 - `Rectangle` and `Ellipse` snapping are active on the visible drafting grid: draw and right-click subtract snap both bounding-box corners to grid intersections, show a snap preview marker at the cursor, and produce bounds aligned exactly to cell multiples.
 - `Stroke Rect` width is expressed in whole grid cells, its generated strip width is always an exact multiple of one cell, and its centerline snapping is parity-aware: odd cell widths snap on half-cell centerline families while even cell widths snap on full grid intersections.
 - `Stroke Rect` can be drawn at arbitrary drafting angles while preserving its cell-multiple width and parity-aware snapping.
@@ -159,7 +161,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - After subtractive drawing, the active layer is replaced with the resulting difference geometry instead of deleting whole merged objects by hit-test.
 - Before layer shapes are recreated, both boolean union results and subtractive difference results are passed through Clipper collinear simplification, so exact straight-line extra vertices can be removed from both additive and subtractive outcomes.
 - After moving selected geometry, the affected layer or layers are rebuilt again so intersections and merges stay correct.
-- Draft rulers now format labels in the active display unit rather than as raw cell indices.
+- Draft rulers now format labels in the active display unit rather than as raw cell indices, and they use adaptive label thinning/collision avoidance so labels stay readable at far zoom.
 - Hidden layers are not rendered.
 - Locked layers do not accept edits.
 
@@ -242,6 +244,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
 - The canvas shell now includes four-sided drafting rulers around the live canvas viewport plus all four corner blocks, with the inner drawing viewport inset inside that frame.
 - Ruler ticks and labels are now drawn from the app's live camera pan, zoom, and grid intervals instead of static DOM marks, and the ruler canvases resize together with the main drawing canvas.
+- The toolbar now includes a compact grid status readout that shows the user's base grid and, when zoomed far out, the coarser adaptive view step currently used for the visible grid/rulers.
 - The old floating layers widget has been replaced by a left-side panel shell with a `Drawings` section.
 - The left panel now renders a `Drawing 1` container with nested `Layers` cards and the new card-based visual hierarchy.
 - Layer cards now show inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
@@ -301,4 +304,4 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Cell-based tools still operate in whole cells rather than absolute unit inputs; their real world width now changes automatically when the live cell size changes.
 - Existing stored geometry is not rescaled when the user applies new display or grid settings.
 - Rulers and the workplane origin readout now format values using the active display unit.
-- Ruler behavior may still need a follow-up pass after practical testing, especially around when minor-cell labels should appear versus only mid/major labels.
+- The visible grid and ruler graduations now adapt to zoom with a `1-2-5` step ladder, so very small base grids stay usable when zoomed far out instead of turning into dense visual noise.

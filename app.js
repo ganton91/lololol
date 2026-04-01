@@ -13,6 +13,7 @@ const drawSizeInput = document.getElementById("draw-size");
 const zoomOutBtn = document.getElementById("zoom-out");
 const zoomInBtn = document.getElementById("zoom-in");
 const zoomLevel = document.getElementById("zoom-level");
+const gridStatus = document.getElementById("grid-status");
 const workplaneStatus = document.getElementById("workplane-status");
 const settingsButton = document.getElementById("settingsButton");
 const settingsMenu = document.getElementById("settingsMenu");
@@ -120,11 +121,16 @@ const maxZoom = 50;
 const ellipseSegments = 96;
 const squareBrushAxisDecisionDistancePx = 18;
 const squareBrushAxisDecisionBiasPx = 8;
-const gridMidCellInterval = 10;
-const gridMajorCellInterval = 20;
 const gridMinorStrokeColor = "rgba(8, 12, 16, 0.12)";
 const gridMidStrokeColor = "rgba(8, 12, 16, 0.2)";
 const gridMajorStrokeColor = "rgba(8, 12, 16, 0.3)";
+const gridAdaptiveStepFactors = Object.freeze([2, 2.5, 2]);
+const visibleGridMidInterval = 5;
+const visibleGridMajorInterval = 10;
+const minVisibleGridStepPx = 18;
+const rulerMinorLabelMinPx = 84;
+const rulerMidLabelMinPx = 120;
+const rulerLabelPaddingPx = 12;
 const snapPreviewSize = 8;
 const draftTransformSnapRadiusPx = 14;
 const draftTransformCornerSnapRadiusPx = 20;
@@ -188,6 +194,61 @@ function convertLengthToMm(value, unitId) {
 
 function getGridCellSize() {
   return convertLengthToMm(state.settings.cellSize, state.settings.gridUnit);
+}
+
+function getCompactLengthUnitId(valueMm, fallbackUnitId = state.settings.gridUnit) {
+  const absValueMm = Math.abs(Number(valueMm));
+  if (!Number.isFinite(absValueMm)) return fallbackUnitId;
+  if (absValueMm >= MEASUREMENT_UNITS.m.toMm) return "m";
+  if (absValueMm >= MEASUREMENT_UNITS.cm.toMm) return "cm";
+  if (absValueMm >= MEASUREMENT_UNITS.mm.toMm) return "mm";
+  return fallbackUnitId;
+}
+
+function formatCompactLengthWithUnit(valueMm, fallbackUnitId = state.settings.gridUnit) {
+  return formatLengthWithUnit(valueMm, getCompactLengthUnitId(valueMm, fallbackUnitId));
+}
+
+function getAdaptiveGridStepMultiplier(baseStepPx, minimumVisiblePx = minVisibleGridStepPx) {
+  if (!Number.isFinite(baseStepPx) || baseStepPx <= 0) return 1;
+
+  let multiplier = 1;
+  let factorIndex = 0;
+  while (baseStepPx * multiplier < minimumVisiblePx && multiplier < 1e12) {
+    multiplier *= gridAdaptiveStepFactors[factorIndex % gridAdaptiveStepFactors.length];
+    factorIndex += 1;
+  }
+  return multiplier;
+}
+
+function getAdaptiveGridMetrics() {
+  const baseStep = getGridCellSize();
+  const baseStepPx = baseStep * state.camera.zoom;
+  const visibleMultiplier = getAdaptiveGridStepMultiplier(baseStepPx);
+  const visibleStep = baseStep * visibleMultiplier;
+  const visibleStepPx = baseStepPx * visibleMultiplier;
+  const midEvery = visibleGridMidInterval;
+  const majorEvery = visibleGridMajorInterval;
+  let labelEvery = majorEvery;
+
+  if (visibleStepPx >= rulerMinorLabelMinPx) {
+    labelEvery = 1;
+  } else if (visibleStepPx * midEvery >= rulerMidLabelMinPx) {
+    labelEvery = midEvery;
+  }
+
+  return {
+    baseStep,
+    baseStepPx,
+    visibleMultiplier,
+    visibleStep,
+    visibleStepPx,
+    midEvery,
+    majorEvery,
+    labelEvery,
+    midStep: visibleStep * midEvery,
+    majorStep: visibleStep * majorEvery,
+  };
 }
 
 function formatLengthValue(valueMm, unitId = state.settings.displayUnit, maxFractionDigits = null) {
@@ -273,6 +334,18 @@ function updateZoomLabel() {
   zoomLevel.textContent = Math.round(state.camera.zoom * 100) + "%";
 }
 
+function updateGridStatus() {
+  if (!gridStatus) return;
+
+  const metrics = getAdaptiveGridMetrics();
+  const baseLabel = formatCompactLengthWithUnit(metrics.baseStep, state.settings.gridUnit);
+  const viewLabel = formatCompactLengthWithUnit(metrics.visibleStep, state.settings.gridUnit);
+  const usesAdaptiveView = Math.abs(metrics.visibleStep - metrics.baseStep) > 1e-9;
+
+  gridStatus.textContent = usesAdaptiveView ? `Grid ${baseLabel} | View ${viewLabel}` : `Grid ${baseLabel}`;
+  gridStatus.title = usesAdaptiveView ? `Base grid ${baseLabel}; zoomed view step ${viewLabel}` : `Base grid ${baseLabel}`;
+}
+
 function formatWorkplaneValue(value) {
   return formatLengthWithUnit(value, state.settings.displayUnit);
 }
@@ -343,6 +416,7 @@ function applySettingsDraft() {
   state.settingsDraft = cloneSettings(state.settings);
   syncSettingsMenu();
   refreshPointerDerivedState();
+  updateGridStatus();
   updateWorkplaneStatus();
   render();
 }
@@ -2950,6 +3024,7 @@ function zoomAtScreenPoint(nextZoom, screenPoint) {
   state.camera.x = screenPoint.x - draftPoint.x * targetZoom;
   state.camera.y = screenPoint.y - draftPoint.y * targetZoom;
   updateZoomLabel();
+  updateGridStatus();
   render();
 }
 
@@ -3175,15 +3250,16 @@ function drawLayerMerged(layer) {
 }
 
 function drawGrid() {
+  const metrics = getAdaptiveGridMetrics();
   const zoom = state.camera.zoom;
   const { width, height } = getCanvasViewportSize();
   const draftLeft = (0 - state.camera.x) / zoom;
   const draftRight = (width - state.camera.x) / zoom;
   const draftTop = (0 - state.camera.y) / zoom;
   const draftBottom = (height - state.camera.y) / zoom;
-  const minorStep = getGridCellSize();
-  const midStep = minorStep * gridMidCellInterval;
-  const majorStep = minorStep * gridMajorCellInterval;
+  const minorStep = metrics.visibleStep;
+  const midStep = metrics.midStep;
+  const majorStep = metrics.majorStep;
   const epsilon = 1e-9;
 
   function isAxisCoordinate(value) {
@@ -3218,12 +3294,12 @@ function drawGrid() {
 
   function isMidOrMajorCoordinate(value) {
     const cellIndex = Math.round(value / minorStep);
-    return cellIndex % 10 === 0;
+    return cellIndex % metrics.midEvery === 0;
   }
 
   function isMajorCoordinate(value) {
     const cellIndex = Math.round(value / minorStep);
-    return cellIndex % 20 === 0;
+    return cellIndex % metrics.majorEvery === 0;
   }
 
   ctx.save();
@@ -3247,15 +3323,37 @@ function drawGrid() {
   ctx.restore();
 }
 
-function formatDraftRulerLabel(cellIndex) {
-  return formatLengthValue(cellIndex * getGridCellSize(), state.settings.displayUnit);
+function formatDraftRulerLabel(valueMm) {
+  return formatLengthValue(valueMm, state.settings.displayUnit);
 }
 
-function formatDraftRulerVerticalLabel(cellIndex) {
-  return formatLengthValue(-cellIndex * getGridCellSize(), state.settings.displayUnit);
+function getDraftRulerLabelFont(major, mid) {
+  if (major) return "600 10px IBM Plex Sans, Segoe UI, sans-serif";
+  if (mid) return "10px IBM Plex Sans, Segoe UI, sans-serif";
+  return "9px IBM Plex Sans, Segoe UI, sans-serif";
 }
 
-function drawHorizontalDraftRulerMark(context, x, cellIndex, major, mid, invert, showCellLabels, showMidLabels, thickness, colors) {
+function reserveHorizontalRulerLabel(context, x, labelText, font, labelState) {
+  context.font = font;
+  const labelWidth = context.measureText(labelText).width;
+  const start = x + 4;
+  const end = start + labelWidth;
+  if (start <= labelState.lastEnd + rulerLabelPaddingPx) return null;
+  labelState.lastEnd = end;
+  return labelText;
+}
+
+function reserveVerticalRulerLabel(context, y, labelText, font, labelState) {
+  context.font = font;
+  const labelExtent = context.measureText(labelText).width;
+  const start = y - labelExtent / 2;
+  const end = y + labelExtent / 2;
+  if (start <= labelState.lastEnd + rulerLabelPaddingPx) return null;
+  labelState.lastEnd = end;
+  return labelText;
+}
+
+function drawHorizontalDraftRulerMark(context, x, major, mid, invert, labelText, thickness, colors) {
   const tick = major ? 7 : mid ? 11 : 16;
   context.beginPath();
   context.moveTo(x + 0.5, invert ? 0 : thickness);
@@ -3264,19 +3362,13 @@ function drawHorizontalDraftRulerMark(context, x, cellIndex, major, mid, invert,
   context.lineWidth = major ? 0.56 : mid ? 0.4 : 0.26;
   context.stroke();
 
-  const shouldLabel = major || (showMidLabels && mid) || showCellLabels;
-  if (!shouldLabel) return;
-
+  if (!labelText) return;
   context.fillStyle = colors.text;
-  context.font = major
-    ? "600 10px IBM Plex Sans, Segoe UI, sans-serif"
-    : showMidLabels && mid
-    ? "10px IBM Plex Sans, Segoe UI, sans-serif"
-    : "9px IBM Plex Sans, Segoe UI, sans-serif";
-  context.fillText(formatDraftRulerLabel(cellIndex), x + 4, invert ? thickness - 8 : 9);
+  context.font = getDraftRulerLabelFont(major, mid);
+  context.fillText(labelText, x + 4, invert ? thickness - 8 : 9);
 }
 
-function drawVerticalDraftRulerMark(context, y, cellIndex, major, mid, invert, showCellLabels, showMidLabels, thickness, colors) {
+function drawVerticalDraftRulerMark(context, y, major, mid, invert, labelText, thickness, colors) {
   const tick = major ? 8 : mid ? 11 : 16;
   context.beginPath();
   context.moveTo(invert ? 0 : thickness, y + 0.5);
@@ -3285,23 +3377,18 @@ function drawVerticalDraftRulerMark(context, y, cellIndex, major, mid, invert, s
   context.lineWidth = major ? 0.56 : mid ? 0.4 : 0.26;
   context.stroke();
 
-  const shouldLabel = major || (showMidLabels && mid) || showCellLabels;
-  if (!shouldLabel) return;
-
+  if (!labelText) return;
   context.save();
   context.translate(invert ? thickness - 8 : 9, y);
   context.rotate(-Math.PI / 2);
   context.fillStyle = colors.text;
-  context.font = major
-    ? "600 10px IBM Plex Sans, Segoe UI, sans-serif"
-    : showMidLabels && mid
-    ? "10px IBM Plex Sans, Segoe UI, sans-serif"
-    : "9px IBM Plex Sans, Segoe UI, sans-serif";
-  context.fillText(formatDraftRulerVerticalLabel(cellIndex), 4, 0);
+  context.font = getDraftRulerLabelFont(major, mid);
+  context.fillText(labelText, 4, 0);
   context.restore();
 }
 
 function drawDraftRulers() {
+  const metrics = getAdaptiveGridMetrics();
   const topWidth = Math.round(draftRulerTop.clientWidth);
   const leftHeight = Math.round(draftRulerLeft.clientHeight);
   const topThickness = Math.round(draftRulerTop.clientHeight);
@@ -3325,40 +3412,46 @@ function drawDraftRulers() {
     context.textBaseline = "middle";
   }
 
-  const step = getGridCellSize() * state.camera.zoom;
+  const step = metrics.visibleStepPx;
   if (step <= 1) return;
 
-  const displayValuePerCell = getGridCellSize() / getMeasurementUnit(state.settings.displayUnit).toMm;
-  const showCellLabels = step >= 44 && displayValuePerCell >= 0.1;
-  const showMidLabels = step * gridMidCellInterval >= 72;
   const horizontalStart = state.camera.x % step;
   const verticalStart = state.camera.y % step;
+  const horizontalLabelState = { lastEnd: -Infinity };
+  const verticalLabelState = { lastEnd: -Infinity };
 
   for (let x = horizontalStart; x <= topWidth; x += step) {
     const cellIndex = Math.round((x - state.camera.x) / step);
-    const major = cellIndex % gridMajorCellInterval === 0;
-    const mid = cellIndex % gridMidCellInterval === 0;
+    const major = cellIndex % metrics.majorEvery === 0;
+    const mid = !major && cellIndex % metrics.midEvery === 0;
+    const labelValueMm = cellIndex * metrics.visibleStep;
+    const labelText =
+      cellIndex % metrics.labelEvery === 0
+        ? reserveHorizontalRulerLabel(
+            draftRulerTopCtx,
+            x,
+            formatDraftRulerLabel(labelValueMm),
+            getDraftRulerLabelFont(major, mid),
+            horizontalLabelState
+          )
+        : null;
     drawHorizontalDraftRulerMark(
       draftRulerTopCtx,
       x,
-      cellIndex,
       major,
       mid,
       false,
-      showCellLabels,
-      showMidLabels,
+      labelText,
       topThickness,
       colors
     );
     drawHorizontalDraftRulerMark(
       draftRulerBottomCtx,
       x,
-      cellIndex,
       major,
       mid,
       true,
-      showCellLabels,
-      showMidLabels,
+      labelText,
       bottomThickness,
       colors
     );
@@ -3366,29 +3459,36 @@ function drawDraftRulers() {
 
   for (let y = verticalStart; y <= leftHeight; y += step) {
     const cellIndex = Math.round((y - state.camera.y) / step);
-    const major = cellIndex % gridMajorCellInterval === 0;
-    const mid = cellIndex % gridMidCellInterval === 0;
+    const major = cellIndex % metrics.majorEvery === 0;
+    const mid = !major && cellIndex % metrics.midEvery === 0;
+    const labelValueMm = -cellIndex * metrics.visibleStep;
+    const labelText =
+      cellIndex % metrics.labelEvery === 0
+        ? reserveVerticalRulerLabel(
+            draftRulerLeftCtx,
+            y,
+            formatDraftRulerLabel(labelValueMm),
+            getDraftRulerLabelFont(major, mid),
+            verticalLabelState
+          )
+        : null;
     drawVerticalDraftRulerMark(
       draftRulerLeftCtx,
       y,
-      cellIndex,
       major,
       mid,
       false,
-      showCellLabels,
-      showMidLabels,
+      labelText,
       leftThickness,
       colors
     );
     drawVerticalDraftRulerMark(
       draftRulerRightCtx,
       y,
-      cellIndex,
       major,
       mid,
       true,
-      showCellLabels,
-      showMidLabels,
+      labelText,
       rightThickness,
       colors
     );
@@ -4180,6 +4280,7 @@ window.addEventListener("keyup", (e) => {
 window.addEventListener("resize", resizeCanvas);
 
 updateZoomLabel();
+updateGridStatus();
 updateWorkplaneStatus();
 updateCursor();
 renderLayersPanel();

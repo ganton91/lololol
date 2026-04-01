@@ -137,6 +137,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - While the square-brush axis choice is still undecided after `Shift` is pressed, the stroke holds at the lock anchor instead of recording free diagonal points, so the first committed constrained segment does not leave a diagonal stub.
 - `Square Brush` remembers the previous brush point between strokes, so starting a new square-brush stroke with `Shift` can continue immediately from that remembered point.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
+- In `Draw`, the drafting rulers now show live cyan/red capsule indicators derived from the same snapped preview source as the canvas preview: idle non-brush tools collapse to a dot-like capsule at the snap point, drag operations expand the capsule to the live draft-space extent on each axis, and idle `Square Brush` shows its footprint rather than only its center.
 - Zoom is currently clamped between a minimum of `0.02` and a maximum of `50`.
 - The app maintains a workplane with separate `origin` and canonical draft-angle state, independent from stored geometry.
 - Existing geometry is displayed relative to the current workplane, while the visible grid remains horizontal and vertical on screen.

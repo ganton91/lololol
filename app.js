@@ -138,6 +138,9 @@ const gridFadeMinPx = 4;
 const gridFadeMaxPx = 14;
 const maxGridLinesPerAxis = 2000;
 const snapPreviewSize = 8;
+const rulerPreviewIndicatorThicknessPx = 5;
+const rulerPreviewIndicatorMinLengthPx = 0;
+const rulerPreviewIndicatorInsetPx = 4;
 const draftTransformSnapRadiusPx = 14;
 const draftTransformCornerSnapRadiusPx = 20;
 const draftTransformCornerPriorityRadiusPx = 16;
@@ -3459,6 +3462,184 @@ function drawVerticalDraftRulerMark(context, y, major, mid, invert, labelText, t
   context.restore();
 }
 
+function getActiveDrawPreviewState() {
+  if (!state.pointerInCanvas || state.panning || state.draggingDraftOrigin || state.spacePressed) return null;
+  if (state.tool !== "draw") return null;
+
+  const activeLayer = getActiveLayer();
+  if (!isLayerAvailableForEditing(activeLayer)) return null;
+
+  let snapPoint = null;
+  if (isBoxSnapShapeType()) {
+    snapPoint = snapDraftPointToGrid(state.draftCurrent);
+  } else if (isStripShapeType()) {
+    snapPoint =
+      state.dragging && state.draftStart
+        ? getSnappedStripSegment(state.draftStart, state.draftCurrent).end
+        : snapDraftPointToStripCenterline(state.draftCurrent);
+  } else if (isSquareBrushShapeType()) {
+    snapPoint = snapDraftPointToSquareBrushCenter(state.draftCurrent);
+  }
+
+  if (!snapPoint) return null;
+
+  return {
+    snapPoint,
+    isSubtract: state.dragging && state.drawOperation === "subtract",
+  };
+}
+
+function getActiveDrawRulerIndicatorBounds(previewState = getActiveDrawPreviewState()) {
+  if (!previewState) return null;
+
+  if (isSquareBrushShapeType()) {
+    const draftGeometry =
+      state.dragging && state.brushPoints.length
+        ? buildSquareBrushStrokeDraftGeometry(state.brushPoints, state.drawSize)
+        : createSquareBrushDabGeometry(previewState.snapPoint, state.drawSize);
+    return getGeometryBounds(draftGeometry);
+  }
+
+  if (state.dragging && state.draftStart) {
+    if (isStripShapeType()) {
+      const segment = getSnappedStripSegment(state.draftStart, state.draftCurrent);
+      return getGeometryBounds(createStripGeometry(segment.start, segment.end, getStripWidthInDraftUnits()).geometry);
+    }
+
+    if (isBoxSnapShapeType()) {
+      return normalizeRect(snapDraftPointToGrid(state.draftStart), snapDraftPointToGrid(state.draftCurrent));
+    }
+  }
+
+  return {
+    x: previewState.snapPoint.x,
+    y: previewState.snapPoint.y,
+    w: 0,
+    h: 0,
+  };
+}
+
+function getRulerPreviewIndicatorColors(isSubtract = false) {
+  return isSubtract
+    ? {
+        fill: "#dc2626",
+      }
+    : {
+        fill: previewStrokeColor,
+      };
+}
+
+function getClampedRulerIndicatorSpan(start, end, surfaceLength, radius = rulerPreviewIndicatorThicknessPx / 2) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(surfaceLength) || surfaceLength <= 0) return null;
+
+  const padding = 1 + radius;
+  const usableLength = Math.max(0, surfaceLength - padding * 2);
+  if (usableLength <= 0) return null;
+
+  const center = (start + end) / 2;
+  const requestedLength = Math.max(rulerPreviewIndicatorMinLengthPx, Math.abs(end - start));
+  const spanLength = Math.min(usableLength, requestedLength);
+  let clampedStart = center - spanLength / 2;
+  let clampedEnd = center + spanLength / 2;
+
+  if (clampedStart < padding) {
+    clampedEnd += padding - clampedStart;
+    clampedStart = padding;
+  }
+
+  if (clampedEnd > surfaceLength - padding) {
+    clampedStart -= clampedEnd - (surfaceLength - padding);
+    clampedEnd = surfaceLength - padding;
+  }
+
+  return {
+    start: Math.max(padding, clampedStart),
+    end: Math.min(surfaceLength - padding, clampedEnd),
+  };
+}
+
+function traceHorizontalRulerCapsule(context, start, end, top, height) {
+  const radius = height / 2;
+  const leftCenterX = Math.min(start, end);
+  const rightCenterX = Math.max(start, end);
+  const centerY = top + radius;
+
+  context.rect(leftCenterX, top, Math.max(0, rightCenterX - leftCenterX), height);
+  context.moveTo(leftCenterX + radius, centerY);
+  context.arc(leftCenterX, centerY, radius, 0, Math.PI * 2);
+  context.moveTo(rightCenterX + radius, centerY);
+  context.arc(rightCenterX, centerY, radius, 0, Math.PI * 2);
+}
+
+function traceVerticalRulerCapsule(context, left, start, end, width) {
+  const radius = width / 2;
+  const topCenterY = Math.min(start, end);
+  const bottomCenterY = Math.max(start, end);
+  const centerX = left + radius;
+
+  context.rect(left, topCenterY, width, Math.max(0, bottomCenterY - topCenterY));
+  context.moveTo(centerX + radius, topCenterY);
+  context.arc(centerX, topCenterY, radius, 0, Math.PI * 2);
+  context.moveTo(centerX + radius, bottomCenterY);
+  context.arc(centerX, bottomCenterY, radius, 0, Math.PI * 2);
+}
+
+function drawDraftRulerPreviewIndicator(bounds, isSubtract, dimensions) {
+  if (!bounds) return;
+
+  const { topWidth, leftHeight, topThickness, leftThickness, bottomThickness, rightThickness } = dimensions;
+  const colors = getRulerPreviewIndicatorColors(isSubtract);
+  const radius = rulerPreviewIndicatorThicknessPx / 2;
+  const startScreen = draftToScreen({ x: bounds.x, y: bounds.y });
+  const endScreen = draftToScreen({ x: bounds.x + bounds.w, y: bounds.y + bounds.h });
+  const horizontalSpan = getClampedRulerIndicatorSpan(startScreen.x, endScreen.x, topWidth, radius);
+  const verticalSpan = getClampedRulerIndicatorSpan(startScreen.y, endScreen.y, leftHeight, radius);
+  const horizontalTop = Math.max(1, topThickness - rulerPreviewIndicatorInsetPx - rulerPreviewIndicatorThicknessPx);
+  const horizontalBottom = rulerPreviewIndicatorInsetPx;
+  const verticalLeft = Math.max(1, leftThickness - rulerPreviewIndicatorInsetPx - rulerPreviewIndicatorThicknessPx);
+  const verticalRight = rulerPreviewIndicatorInsetPx;
+
+  if (horizontalSpan) {
+    for (const [context, top] of [
+      [draftRulerTopCtx, horizontalTop],
+      [draftRulerBottomCtx, horizontalBottom],
+    ]) {
+      context.save();
+      context.beginPath();
+      traceHorizontalRulerCapsule(
+        context,
+        horizontalSpan.start,
+        horizontalSpan.end,
+        top,
+        rulerPreviewIndicatorThicknessPx
+      );
+      context.fillStyle = colors.fill;
+      context.fill();
+      context.restore();
+    }
+  }
+
+  if (verticalSpan) {
+    for (const [context, left] of [
+      [draftRulerLeftCtx, verticalLeft],
+      [draftRulerRightCtx, verticalRight],
+    ]) {
+      context.save();
+      context.beginPath();
+      traceVerticalRulerCapsule(
+        context,
+        left,
+        verticalSpan.start,
+        verticalSpan.end,
+        rulerPreviewIndicatorThicknessPx
+      );
+      context.fillStyle = colors.fill;
+      context.fill();
+      context.restore();
+    }
+  }
+}
+
 function drawDraftRulers() {
   const metrics = getAdaptiveGridMetrics();
   const topWidth = Math.round(draftRulerTop.clientWidth);
@@ -3467,6 +3648,8 @@ function drawDraftRulers() {
   const leftThickness = Math.round(draftRulerLeft.clientWidth);
   const bottomThickness = Math.round(draftRulerBottom.clientHeight);
   const rightThickness = Math.round(draftRulerRight.clientWidth);
+  const previewState = getActiveDrawPreviewState();
+  const previewBounds = getActiveDrawRulerIndicatorBounds(previewState);
   const colors = {
     background: getCssTokenValue("--ruler-bg"),
     text: getCssTokenValue("--muted"),
@@ -3485,86 +3668,95 @@ function drawDraftRulers() {
   }
 
   const step = metrics.visibleStepPx;
-  if (step <= 1) return;
+  if (step > 1) {
+    const horizontalStart = state.camera.x % step;
+    const verticalStart = state.camera.y % step;
+    const horizontalLabelState = { lastEnd: -Infinity };
+    const verticalLabelState = { lastEnd: -Infinity };
 
-  const horizontalStart = state.camera.x % step;
-  const verticalStart = state.camera.y % step;
-  const horizontalLabelState = { lastEnd: -Infinity };
-  const verticalLabelState = { lastEnd: -Infinity };
+    for (let x = horizontalStart; x <= topWidth; x += step) {
+      const cellIndex = Math.round((x - state.camera.x) / step);
+      const major = cellIndex % metrics.majorEvery === 0;
+      const mid = !major && cellIndex % metrics.midEvery === 0;
+      const labelValueMm = cellIndex * metrics.visibleStep;
+      const labelText =
+        cellIndex % metrics.labelEvery === 0
+          ? reserveHorizontalRulerLabel(
+              draftRulerTopCtx,
+              x,
+              formatDraftRulerLabel(labelValueMm),
+              getDraftRulerLabelFont(major, mid),
+              horizontalLabelState
+            )
+          : null;
+      drawHorizontalDraftRulerMark(
+        draftRulerTopCtx,
+        x,
+        major,
+        mid,
+        false,
+        labelText,
+        topThickness,
+        colors
+      );
+      drawHorizontalDraftRulerMark(
+        draftRulerBottomCtx,
+        x,
+        major,
+        mid,
+        true,
+        labelText,
+        bottomThickness,
+        colors
+      );
+    }
 
-  for (let x = horizontalStart; x <= topWidth; x += step) {
-    const cellIndex = Math.round((x - state.camera.x) / step);
-    const major = cellIndex % metrics.majorEvery === 0;
-    const mid = !major && cellIndex % metrics.midEvery === 0;
-    const labelValueMm = cellIndex * metrics.visibleStep;
-    const labelText =
-      cellIndex % metrics.labelEvery === 0
-        ? reserveHorizontalRulerLabel(
-            draftRulerTopCtx,
-            x,
-            formatDraftRulerLabel(labelValueMm),
-            getDraftRulerLabelFont(major, mid),
-            horizontalLabelState
-          )
-        : null;
-    drawHorizontalDraftRulerMark(
-      draftRulerTopCtx,
-      x,
-      major,
-      mid,
-      false,
-      labelText,
-      topThickness,
-      colors
-    );
-    drawHorizontalDraftRulerMark(
-      draftRulerBottomCtx,
-      x,
-      major,
-      mid,
-      true,
-      labelText,
-      bottomThickness,
-      colors
-    );
+    for (let y = verticalStart; y <= leftHeight; y += step) {
+      const cellIndex = Math.round((y - state.camera.y) / step);
+      const major = cellIndex % metrics.majorEvery === 0;
+      const mid = !major && cellIndex % metrics.midEvery === 0;
+      const labelValueMm = -cellIndex * metrics.visibleStep;
+      const labelText =
+        cellIndex % metrics.labelEvery === 0
+          ? reserveVerticalRulerLabel(
+              draftRulerLeftCtx,
+              y,
+              formatDraftRulerLabel(labelValueMm),
+              getDraftRulerLabelFont(major, mid),
+              verticalLabelState
+            )
+          : null;
+      drawVerticalDraftRulerMark(
+        draftRulerLeftCtx,
+        y,
+        major,
+        mid,
+        false,
+        labelText,
+        leftThickness,
+        colors
+      );
+      drawVerticalDraftRulerMark(
+        draftRulerRightCtx,
+        y,
+        major,
+        mid,
+        true,
+        labelText,
+        rightThickness,
+        colors
+      );
+    }
   }
 
-  for (let y = verticalStart; y <= leftHeight; y += step) {
-    const cellIndex = Math.round((y - state.camera.y) / step);
-    const major = cellIndex % metrics.majorEvery === 0;
-    const mid = !major && cellIndex % metrics.midEvery === 0;
-    const labelValueMm = -cellIndex * metrics.visibleStep;
-    const labelText =
-      cellIndex % metrics.labelEvery === 0
-        ? reserveVerticalRulerLabel(
-            draftRulerLeftCtx,
-            y,
-            formatDraftRulerLabel(labelValueMm),
-            getDraftRulerLabelFont(major, mid),
-            verticalLabelState
-          )
-        : null;
-    drawVerticalDraftRulerMark(
-      draftRulerLeftCtx,
-      y,
-      major,
-      mid,
-      false,
-      labelText,
-      leftThickness,
-      colors
-    );
-    drawVerticalDraftRulerMark(
-      draftRulerRightCtx,
-      y,
-      major,
-      mid,
-      true,
-      labelText,
-      rightThickness,
-      colors
-    );
-  }
+  drawDraftRulerPreviewIndicator(previewBounds, previewState?.isSubtract, {
+    topWidth,
+    leftHeight,
+    topThickness,
+    leftThickness,
+    bottomThickness,
+    rightThickness,
+  });
 }
 
 function drawDraftTransformSnapMarker(target, size = snapPreviewSize + 2) {
@@ -3684,27 +3876,10 @@ function drawDraftTransformPreview() {
 }
 
 function drawSnapPreview() {
-  if (!state.pointerInCanvas || state.panning || state.draggingDraftOrigin || state.spacePressed) return;
-  if (state.tool !== "draw") return;
+  const previewState = getActiveDrawPreviewState();
+  if (!previewState) return;
 
-  const activeLayer = getActiveLayer();
-  if (!isLayerAvailableForEditing(activeLayer)) return;
-
-  let snapPoint = null;
-  if (isBoxSnapShapeType()) {
-    snapPoint = snapDraftPointToGrid(state.draftCurrent);
-  } else if (isStripShapeType()) {
-    snapPoint =
-      state.dragging && state.draftStart
-        ? getSnappedStripSegment(state.draftStart, state.draftCurrent).end
-        : snapDraftPointToStripCenterline(state.draftCurrent);
-  } else if (isSquareBrushShapeType()) {
-    snapPoint = snapDraftPointToSquareBrushCenter(state.draftCurrent);
-  }
-
-  if (!snapPoint) return;
-
-  const isSubtract = state.dragging && state.drawOperation === "subtract";
+  const { snapPoint, isSubtract } = previewState;
   const screenPoint = draftToScreen(snapPoint);
 
   if (isSquareBrushShapeType()) {

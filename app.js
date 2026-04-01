@@ -120,8 +120,8 @@ const vertexMarkerRadiusPx = 2.5;
 const minZoom = 0.02;
 const maxZoom = 50;
 const ellipseSegments = 96;
-const squareBrushAxisDecisionDistancePx = 18;
-const squareBrushAxisDecisionBiasPx = 8;
+const squareBrushAxisDecisionDistancePx = 12;
+const squareBrushAxisDecisionBiasPx = 5;
 const gridMinorStrokeColor = "rgba(8, 12, 16, 0.12)";
 const gridMidStrokeColor = "rgba(8, 12, 16, 0.2)";
 const gridMajorStrokeColor = "rgba(8, 12, 16, 0.3)";
@@ -1215,6 +1215,10 @@ function getSquareBrushInputPoint(point, shiftKey = false, screenPoint = state.p
 
   if (!state.squareBrushLockedAxis) {
     state.squareBrushLockedAxis = getSquareBrushLockedAxis(screenPoint);
+  }
+
+  if (!state.squareBrushLockedAxis) {
+    return cloneDraftPoint(state.squareBrushLockAnchorDraft) || snapDraftPointToSquareBrushCenter(point);
   }
 
   const constrainedPoint = constrainPointToAxis(point, state.squareBrushLockAnchorDraft, state.squareBrushLockedAxis);

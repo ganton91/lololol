@@ -133,6 +133,7 @@ const rulerMinorLabelMinPx = 84;
 const rulerMidLabelMinPx = 120;
 const rulerLabelPaddingPx = 12;
 const adaptiveMinimumCellSizeMm = 1;
+const minDrawableDraftExtent = 1e-6;
 const gridFadeMinPx = 4;
 const gridFadeMaxPx = 14;
 const maxGridLinesPerAxis = 2000;
@@ -1709,7 +1710,7 @@ function createStripGeometry(a, b, width) {
   const safeLen = Math.max(length, 0.00001);
   const nx = -dy / safeLen;
   const ny = dx / safeLen;
-  const half = Math.max(1, width / 2);
+  const half = Math.max(minDrawableDraftExtent / 2, width / 2);
 
   return {
     geometry: [
@@ -1910,7 +1911,7 @@ function makeDraftShape(a, b) {
     return {
       geometry,
       bounds: getGeometryBounds(geometry),
-      small: strip.length < 2,
+      small: strip.length <= minDrawableDraftExtent,
     };
   }
 
@@ -1920,7 +1921,7 @@ function makeDraftShape(a, b) {
   return {
     geometry,
     bounds: getGeometryBounds(geometry),
-    small: rect.w < 2 || rect.h < 2,
+    small: rect.w <= minDrawableDraftExtent || rect.h <= minDrawableDraftExtent,
   };
 }
 

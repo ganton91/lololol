@@ -744,6 +744,12 @@
         border-color: var(--ui-line-strong);
       }
 
+      .mode-button:disabled {
+        cursor: default;
+        opacity: 0.55;
+        color: var(--muted);
+      }
+
       .stepper-actions {
         align-items: center;
         gap: 6px;
@@ -774,16 +780,9 @@
         margin: 0;
       }
 
-      .settings-unit-tag {
-        min-width: 52px;
-        padding: 9px 12px;
-        border: 1px solid var(--ui-line);
-        border-radius: 12px;
-        background: var(--ui-surface);
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 600;
-        text-align: center;
+      .stepper-value:disabled {
+        cursor: default;
+        opacity: 0.55;
       }
 
       .modal-backdrop {
@@ -1110,19 +1109,10 @@
         </div>
 
         <div class="menu-section">
-          <div class="menu-title">Grid</div>
-          <div class="menu-actions">
-            <button class="mode-button" data-settings-grid-unit="mm" type="button">Millimeters</button>
-            <button class="mode-button" data-settings-grid-unit="cm" type="button">Centimeters</button>
-            <button class="mode-button" data-settings-grid-unit="m" type="button">Meters</button>
-          </div>
-        </div>
-
-        <div class="menu-section">
           <div class="menu-title">Grid Snap</div>
           <div class="menu-actions">
-            <button class="mode-button" data-settings-snap-mode="auto" type="button">Auto</button>
-            <button class="mode-button" data-settings-snap-mode="base" type="button">Base</button>
+            <button class="mode-button" data-settings-snap-mode="adaptive" type="button">Adaptive</button>
+            <button class="mode-button" data-settings-snap-mode="locked" type="button">Locked</button>
           </div>
         </div>
 
@@ -1130,7 +1120,9 @@
           <div class="menu-title">Cell Size</div>
           <div class="menu-actions stepper-actions">
             <input class="stepper-value stepper-input" id="settingsCellSizeInput" type="number" min="1" step="1" value="5" />
-            <div class="settings-unit-tag" id="settingsCellUnitTag">cm</div>
+            <button class="mode-button" data-settings-cell-unit="mm" type="button">mm</button>
+            <button class="mode-button" data-settings-cell-unit="cm" type="button">cm</button>
+            <button class="mode-button" data-settings-cell-unit="m" type="button">m</button>
           </div>
         </div>
       </div>

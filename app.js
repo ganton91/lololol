@@ -35,11 +35,13 @@ const addDrawingBtn = document.getElementById("addDrawingButton");
 const layerFillInput = document.getElementById("layer-fill");
 const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
 const settingsGridUnitButtons = Array.from(document.querySelectorAll("[data-settings-grid-unit]"));
+const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-settings-snap-mode]"));
 
 const DEFAULT_SETTINGS = Object.freeze({
   displayUnit: "m",
   gridUnit: "cm",
   cellSize: 5,
+  snapMode: "auto",
 });
 
 const state = {
@@ -148,6 +150,10 @@ const MEASUREMENT_UNITS = Object.freeze({
   cm: { id: "cm", label: "Centimeters", shortLabel: "cm", toMm: 10, fractionDigits: 2 },
   m: { id: "m", label: "Meters", shortLabel: "m", toMm: 1000, fractionDigits: 3 },
 });
+const GRID_SNAP_MODES = Object.freeze({
+  auto: { id: "auto", label: "Auto" },
+  base: { id: "base", label: "Base" },
+});
 const draftRulerTopCtx = draftRulerTop.getContext("2d");
 const draftRulerLeftCtx = draftRulerLeft.getContext("2d");
 const draftRulerBottomCtx = draftRulerBottom.getContext("2d");
@@ -174,6 +180,10 @@ function sanitizeMeasurementUnit(unitId, fallback = DEFAULT_SETTINGS.displayUnit
   return MEASUREMENT_UNITS[unitId] ? unitId : fallback;
 }
 
+function sanitizeGridSnapMode(modeId, fallback = DEFAULT_SETTINGS.snapMode) {
+  return GRID_SNAP_MODES[modeId] ? modeId : fallback;
+}
+
 function sanitizeCellSize(value, fallback = DEFAULT_SETTINGS.cellSize) {
   const rounded = Math.round(Number(value));
   if (!Number.isFinite(rounded)) return fallback;
@@ -185,6 +195,7 @@ function cloneSettings(settings = state.settings) {
     displayUnit: sanitizeMeasurementUnit(settings?.displayUnit, DEFAULT_SETTINGS.displayUnit),
     gridUnit: sanitizeMeasurementUnit(settings?.gridUnit, DEFAULT_SETTINGS.gridUnit),
     cellSize: sanitizeCellSize(settings?.cellSize, DEFAULT_SETTINGS.cellSize),
+    snapMode: sanitizeGridSnapMode(settings?.snapMode, DEFAULT_SETTINGS.snapMode),
   };
 }
 
@@ -249,6 +260,10 @@ function getAdaptiveGridMetrics() {
     midStep: visibleStep * midEvery,
     majorStep: visibleStep * majorEvery,
   };
+}
+
+function getEffectiveGridSnapStep() {
+  return state.settings.snapMode === "auto" ? getAdaptiveGridMetrics().visibleStep : getGridCellSize();
 }
 
 function formatLengthValue(valueMm, unitId = state.settings.displayUnit, maxFractionDigits = null) {
@@ -338,12 +353,15 @@ function updateGridStatus() {
   if (!gridStatus) return;
 
   const metrics = getAdaptiveGridMetrics();
+  const snapModeLabel = GRID_SNAP_MODES[state.settings.snapMode]?.label || GRID_SNAP_MODES.auto.label;
   const baseLabel = formatCompactLengthWithUnit(metrics.baseStep, state.settings.gridUnit);
   const viewLabel = formatCompactLengthWithUnit(metrics.visibleStep, state.settings.gridUnit);
   const usesAdaptiveView = Math.abs(metrics.visibleStep - metrics.baseStep) > 1e-9;
 
-  gridStatus.textContent = usesAdaptiveView ? `Grid ${baseLabel} | View ${viewLabel}` : `Grid ${baseLabel}`;
-  gridStatus.title = usesAdaptiveView ? `Base grid ${baseLabel}; zoomed view step ${viewLabel}` : `Base grid ${baseLabel}`;
+  gridStatus.textContent = usesAdaptiveView ? `Grid ${snapModeLabel} | Base ${baseLabel} | View ${viewLabel}` : `Grid ${snapModeLabel} | Base ${baseLabel}`;
+  gridStatus.title = usesAdaptiveView
+    ? `Grid snap mode ${snapModeLabel}. Base grid ${baseLabel}; zoomed view step ${viewLabel}.`
+    : `Grid snap mode ${snapModeLabel}. Base grid ${baseLabel}.`;
 }
 
 function formatWorkplaneValue(value) {
@@ -375,6 +393,12 @@ function syncSettingsMenu() {
 
   for (const button of settingsGridUnitButtons) {
     const active = button.dataset.settingsGridUnit === state.settingsDraft.gridUnit;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+
+  for (const button of settingsSnapModeButtons) {
+    const active = button.dataset.settingsSnapMode === state.settingsDraft.snapMode;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   }
@@ -1008,11 +1032,11 @@ function isStripShapeType(shapeType = state.shapeType) {
   return shapeType === "strip";
 }
 
-function snapValueToGrid(value, step = getGridCellSize()) {
+function snapValueToGrid(value, step = getEffectiveGridSnapStep()) {
   return Math.round(value / step) * step;
 }
 
-function snapValueToGridWithOffset(value, offset = 0, step = getGridCellSize()) {
+function snapValueToGridWithOffset(value, offset = 0, step = getEffectiveGridSnapStep()) {
   return snapValueToGrid(value - offset, step) + offset;
 }
 
@@ -1036,7 +1060,7 @@ function getStripWidthInDraftUnits(cellWidth = state.stripCellWidth) {
 }
 
 function getStripSnapOffset(cellWidth = state.stripCellWidth) {
-  return getStripCellWidth(cellWidth) % 2 === 0 ? 0 : getGridCellSize() / 2;
+  return getStripCellWidth(cellWidth) % 2 === 0 ? 0 : getEffectiveGridSnapStep() / 2;
 }
 
 function clearStripAxisLock() {
@@ -1098,7 +1122,7 @@ function getSquareBrushSizeInDraftUnits(cellWidth = state.drawSize) {
 }
 
 function getSquareBrushSnapOffset(cellWidth = state.drawSize) {
-  return getSquareBrushCellWidth(cellWidth) % 2 === 0 ? 0 : getGridCellSize() / 2;
+  return getSquareBrushCellWidth(cellWidth) % 2 === 0 ? 0 : getEffectiveGridSnapStep() / 2;
 }
 
 function snapDraftPointToSquareBrushCenter(point, cellWidth = state.drawSize) {
@@ -4076,6 +4100,14 @@ for (const button of settingsGridUnitButtons) {
   button.addEventListener("click", () => {
     if (!state.settingsDraft) return;
     state.settingsDraft.gridUnit = sanitizeMeasurementUnit(button.dataset.settingsGridUnit, state.settingsDraft.gridUnit);
+    syncSettingsMenu();
+  });
+}
+
+for (const button of settingsSnapModeButtons) {
+  button.addEventListener("click", () => {
+    if (!state.settingsDraft) return;
+    state.settingsDraft.snapMode = sanitizeGridSnapMode(button.dataset.settingsSnapMode, state.settingsDraft.snapMode);
     syncSettingsMenu();
   });
 }

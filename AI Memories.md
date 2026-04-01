@@ -48,10 +48,12 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - Display units are now a formatting layer with `mm`, `cm`, and `m` options.
 - Grid cell size is now derived from settings as an integer `Cell Size` plus a `Grid` unit family, then resolved internally into millimeters as the base authoring/snap step.
 - The rendered grid and rulers now derive a zoom-adaptive visible step from that base grid using a `1-2-5` ladder, so zooming far out promotes the visible spacing to coarser multiples instead of drawing every tiny base cell.
+- Grid snapping now has two modes: `Auto` snaps to the current adaptive visible step, while `Base` snaps to the underlying configured base grid regardless of zoom.
 - The default settings are:
   - `Display Unit = m`
   - `Grid = cm`
   - `Cell Size = 5`
+  - `Grid Snap = Auto`
 - This means the default live grid cell size is currently `50 mm`.
 
 ### Important Geometry Note
@@ -121,6 +123,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Changing `Display Unit` changes measurement formatting only; it does not rescale stored geometry.
 - Changing `Grid` and `Cell Size` changes the base grid spacing, snapping, rulers, and future cell-based draw widths without resizing existing geometry already stored in world space.
 - When zooming far out, the visible grid and ruler graduations automatically promote to coarser multiples of that base grid so the canvas stays legible instead of drawing every tiny base interval.
+- In `Grid Snap = Auto`, grid-based snapping follows that promoted visible step; in `Grid Snap = Base`, snapping stays on the underlying configured base grid even when the visible grid is coarser.
 - `Rectangle` and `Ellipse` snapping are active on the visible drafting grid: draw and right-click subtract snap both bounding-box corners to grid intersections, show a snap preview marker at the cursor, and produce bounds aligned exactly to cell multiples.
 - `Stroke Rect` width is expressed in whole grid cells, its generated strip width is always an exact multiple of one cell, and its centerline snapping is parity-aware: odd cell widths snap on half-cell centerline families while even cell widths snap on full grid intersections.
 - `Stroke Rect` can be drawn at arbitrary drafting angles while preserving its cell-multiple width and parity-aware snapping.
@@ -297,11 +300,13 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The app now uses millimeters as the canonical internal world unit.
 - The top bar `Settings` button now opens a centered settings modal shell styled from the reference modal language, but with app-specific content only.
 - The first settings group now exposes `Display Unit`, `Grid`, and `Cell Size`.
+- The settings modal now also exposes `Grid Snap` with `Auto` and `Base` choices.
 - The current supported display units are `mm`, `cm`, and `m`.
 - The current supported grid unit families are `mm`, `cm`, and `m`.
 - `Cell Size` now accepts integer values and combines with the selected `Grid` unit to derive the live cell size in millimeters.
-- The default settings are currently `Display Unit = m`, `Grid = cm`, and `Cell Size = 5`.
+- The default settings are currently `Display Unit = m`, `Grid = cm`, `Cell Size = 5`, and `Grid Snap = Auto`.
 - Cell-based tools still operate in whole cells rather than absolute unit inputs; their real world width now changes automatically when the live cell size changes.
 - Existing stored geometry is not rescaled when the user applies new display or grid settings.
 - Rulers and the workplane origin readout now format values using the active display unit.
 - The visible grid and ruler graduations now adapt to zoom with a `1-2-5` step ladder, so very small base grids stay usable when zoomed far out instead of turning into dense visual noise.
+- The toolbar grid status readout now shows the current snap mode (`Auto` or `Base`) together with the base grid and, when promoted, the current visible view step.

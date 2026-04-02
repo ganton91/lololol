@@ -3616,9 +3616,10 @@ function drawLayerPreview(shape, layer, operation = "add") {
   ctx.restore();
 }
 
-function drawLayerMerged(layer) {
+function drawLayerMerged(layer, options = {}) {
+  const { renderFill = true, renderOutline = true, renderCorners = true } = options;
   const layerShapes = state.shapes.filter((shape) => shape.layerId === layer.id);
-  if (!layerShapes.length) return;
+  if (!layerShapes.length || (!renderFill && !renderOutline && !renderCorners)) return;
 
   ctx.save();
   applyWorldCameraTransform(ctx);
@@ -3630,17 +3631,24 @@ function drawLayerMerged(layer) {
   const outlineColor = sanitizeColorValue(state.settings.outlineColor, DEFAULT_SETTINGS.outlineColor);
 
   for (const shape of layerShapes) {
-    ctx.beginPath();
-    traceGeometryPath(ctx, shape.geometry);
-    ctx.fillStyle = layer.fillColor;
-    ctx.fill("evenodd");
-    if (outlineEnabled) {
+    if (renderFill) {
+      ctx.beginPath();
+      traceGeometryPath(ctx, shape.geometry);
+      ctx.fillStyle = layer.fillColor;
+      ctx.fill("evenodd");
+    }
+
+    if (outlineEnabled && renderOutline) {
+      if (!renderFill) {
+        ctx.beginPath();
+        traceGeometryPath(ctx, shape.geometry);
+      }
       ctx.strokeStyle = outlineColor;
       ctx.lineWidth = 1 / state.camera.zoom;
       ctx.stroke();
     }
 
-    if (cornersEnabled) {
+    if (cornersEnabled && renderCorners) {
       ctx.beginPath();
       drawGeometryVertices(ctx, shape.geometry);
       ctx.fillStyle = outlineColor;
@@ -4303,6 +4311,10 @@ function render() {
   }
 
   const activeLayer = getActiveLayer();
+  if (state.tool === "draw" && isLayerActuallyVisible(activeLayer)) {
+    drawLayerMerged(activeLayer, { renderFill: false });
+  }
+
   if (state.dragging && state.tool === "draw" && isLayerAvailableForEditing(activeLayer)) {
     const draft = state.draftShape;
     if (draft && !draft.small) drawLayerPreview(draft, activeLayer, state.drawOperation);

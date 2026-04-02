@@ -2516,6 +2516,11 @@ function renderLayersPanel() {
       const card = document.createElement("div");
       card.className = "layer-card layer-stack-card" + (isActive ? " active" : "");
       if (!isActive) card.classList.add("inactive-collapsed");
+      card.addEventListener("click", () => {
+        setActiveDrawingById(drawing.id, { layerId: layer.id });
+        renderLayersPanel();
+        render();
+      });
 
       const grip = document.createElement("div");
       grip.className = "drag-handle";
@@ -2552,11 +2557,6 @@ function renderLayersPanel() {
 
       const main = document.createElement("div");
       main.className = "layer-main";
-      main.addEventListener("click", () => {
-        setActiveDrawingById(drawing.id, { layerId: layer.id });
-        renderLayersPanel();
-        render();
-      });
 
       const header = document.createElement("div");
       header.className = "card-header";
@@ -2651,19 +2651,18 @@ function renderLayersPanel() {
       main.appendChild(header);
 
       const meta = document.createElement("div");
-      meta.className = "layer-meta";
+      meta.className = "layer-meta layer-card-detail";
       meta.textContent = getLayerShapeCount(layer.id) + " objects";
-      main.appendChild(meta);
 
       if (layer.locked) {
         const secondaryMeta = document.createElement("div");
-        secondaryMeta.className = "layer-meta-secondary";
+        secondaryMeta.className = "layer-meta-secondary layer-card-detail";
         secondaryMeta.textContent = "Locked layer";
-        main.appendChild(secondaryMeta);
+        card.appendChild(secondaryMeta);
       }
 
       const opacityField = document.createElement("div");
-      opacityField.className = "field";
+      opacityField.className = "field layer-card-detail layer-card-opacity-field";
       opacityField.addEventListener("pointerdown", (event) => event.stopPropagation());
       opacityField.addEventListener("mousedown", (event) => event.stopPropagation());
 
@@ -2686,11 +2685,12 @@ function renderLayersPanel() {
 
       opacityField.appendChild(opacityLabel);
       opacityField.appendChild(opacitySlider);
-      main.appendChild(opacityField);
 
       card.appendChild(grip);
       card.appendChild(colorSwatch);
       card.appendChild(main);
+      card.appendChild(meta);
+      card.appendChild(opacityField);
       drawingLayersList.appendChild(card);
     }
 

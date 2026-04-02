@@ -329,3 +329,42 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The layer-card object count now refreshes immediately after committed draw/subtract operations and after committed geometry rebuilds caused by moving selected shapes.
 - The old bottom-left instructional hint panel inside the canvas shell has been removed completely, including its markup and styling.
 - The canvas background now uses a warmer off-white canvas tone, while the grid keeps the app's own line widths and transparency-style hierarchy using darker light-theme strokes derived from the same palette rather than a single opaque color.
+
+### Current Task 2: Renders Subsystem Planning
+
+- Task: design the application's new `Renders` subsystem from scratch, with `Render` / `Render Box` naming, global layer render properties, a `Main` tab plus per-render tabs, and a first rollout that focuses on UI before the deeper rendering engine.
+- Status: planning is active. No render subsystem has been implemented yet in the current app, and the next phase should start with UI structure and naming before the full render pipeline.
+
+#### Locked Decisions
+
+- In this app, use `Render` instead of `View`, and `Render Box` instead of `View Box`.
+- The current app has no existing live render subsystem; this work should be treated as a fresh architecture and UI build rather than as a refactor of an already-working render module.
+- Render-related layer properties should be global layer settings that apply to all render boxes, not per-render overrides.
+- The ordering of layers in the main canvas stack is separate from the ordering or grouping used when editing render-related layer properties.
+- Old per-view layer override behavior from the external example should not be carried over into this app.
+- Layer opacity should not be reintroduced as a render-layer control in the new system; if any old opacity logic is still present in the external example or dead code, it is not part of the intended render-properties model for this app.
+- The workspace direction is:
+  - one `Main` tab for authoring on the main canvas
+  - separate `Render` tabs (`Render 1`, `Render 2`, etc., or user-renamed equivalents) driven by the created render boxes
+- The initial rollout should prioritize UI structure, naming, tabs, and render-box management before the full final render engine behavior.
+- Future support for measurements and scenes is still expected, but they are not part of the first render-system rollout and should not block the initial `Renders` work.
+
+#### Planned Render Model Direction
+
+- A render should be defined primarily by its own stored render-box bounds and render-specific metadata such as name, visibility, and section-related settings.
+- Global layer render properties are expected to live on the layer records themselves rather than inside each render.
+- The main drawing canvas should remain the authoring surface, while renders should be presented through a separate render workspace/tab system.
+- The goal is to achieve the same user-facing outcome studied in the external example, but through app-native architecture and naming that fit this project's current geometry model.
+
+#### Task Rule
+
+- For this `Renders` task specifically, always write and agree on a clear step-by-step implementation plan before making any code changes.
+- Do not begin coding this subsystem from ad-hoc intuition; each substantial phase should first be broken into explicit steps so the implementation direction stays aligned.
+- For this `Renders` task specifically, the `Reference Only` folder should be treated as required research input before each substantial implementation step, even if the user does not restate that request each time.
+- That reference should be used only to study intended behavior, user flow, and useful UI/render-system patterns; any implementation carried into this app must be rewritten in app-native terms so it stays fully compatible with this project's own architecture, naming, and constraints.
+
+#### Immediate Focus
+
+- The first implementation step should be to document and lock the `Renders` data model v1 before any UI or rendering code is built, because that model is the foundation for the rest of the subsystem.
+- Break the render-system work into staged implementation steps instead of attempting the whole subsystem in one pass.
+- Start with the UI shell for `Main` / `Render` tabs, render cards, and render-box management before building the full pane rendering pipeline.

@@ -133,6 +133,7 @@ const gridMinorStrokeColor = "rgba(8, 12, 16, 0.12)";
 const gridMidStrokeColor = "rgba(8, 12, 16, 0.2)";
 const gridMajorStrokeColor = "rgba(8, 12, 16, 0.3)";
 const worldAxisStrokeColor = "rgba(180, 99, 78, 0.92)";
+const worldAxisStrokeColorDrawMode = "rgba(180, 99, 78, 0.48)";
 const gridAdaptiveStepFactors = Object.freeze([2, 2.5, 2]);
 const visibleGridMidInterval = 5;
 const visibleGridMajorInterval = 10;
@@ -3664,7 +3665,7 @@ function drawWorldAxes() {
   ctx.save();
   applyWorldCameraTransform(ctx);
   ctx.beginPath();
-  ctx.strokeStyle = worldAxisStrokeColor;
+  ctx.strokeStyle = state.tool === "draw" ? worldAxisStrokeColorDrawMode : worldAxisStrokeColor;
   ctx.lineWidth = 1 / state.camera.zoom;
   ctx.moveTo(-worldAxisHalfSpan, 0);
   ctx.lineTo(worldAxisHalfSpan, 0);
@@ -3750,7 +3751,7 @@ function drawDraftGridAndAxes() {
   drawHorizontalLines(majorStep, gridMajorStrokeColor, majorOpacity, isAxisCoordinate);
 
   ctx.beginPath();
-  ctx.strokeStyle = "#475569";
+  ctx.strokeStyle = previewStrokeColor;
   const originScreenX = draftToScreen({ x: 0, y: 0 }).x;
   const originScreenY = draftToScreen({ x: 0, y: 0 }).y;
   ctx.moveTo(originScreenX, 0);

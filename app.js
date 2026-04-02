@@ -3427,6 +3427,9 @@ function getResolvedDraftAlignTarget(
   pointerScreen = state.pointerScreen
 ) {
   if (!startSnap || !endSnap) return null;
+  if (endSnap.kind === "corner" || endSnap.kind === "edge") {
+    return cloneSnapTarget(endSnap);
+  }
 
   const referenceScreen =
     pointerScreen && Number.isFinite(pointerScreen.x) && Number.isFinite(pointerScreen.y)

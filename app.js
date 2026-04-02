@@ -316,6 +316,24 @@ function formatLengthWithUnit(valueMm, unitId = state.settings.displayUnit, maxF
   return `${formatLengthValue(valueMm, unitId, maxFractionDigits)} ${getMeasurementUnit(unitId).shortLabel}`;
 }
 
+function getAreaFractionDigits(unitId = state.settings.displayUnit) {
+  if (unitId === "m") return 6;
+  if (unitId === "cm") return 3;
+  return 1;
+}
+
+function formatAreaValue(valueMm2, unitId = state.settings.displayUnit, maxFractionDigits = null) {
+  const unit = getMeasurementUnit(unitId);
+  const displayValue = Number(valueMm2) / unit.toMm ** 2;
+  const resolvedFractionDigits = maxFractionDigits ?? getAreaFractionDigits(unitId);
+  const rounded = Math.abs(displayValue) <= 10 ** -(resolvedFractionDigits + 1) ? 0 : displayValue;
+  return rounded.toFixed(resolvedFractionDigits).replace(/\.?0+$/, "");
+}
+
+function formatAreaWithUnit(valueMm2, unitId = state.settings.displayUnit, maxFractionDigits = null) {
+  return `${formatAreaValue(valueMm2, unitId, maxFractionDigits)} ${getMeasurementUnit(unitId).shortLabel}²`;
+}
+
 function isSettingsMenuOpen() {
   return !!settingsMenu && !settingsMenu.classList.contains("hidden");
 }
@@ -659,6 +677,12 @@ function getRenderableLayersInPaintOrder() {
 
 function getLayerShapeCount(layerId) {
   return state.shapes.filter((shape) => shape.layerId === layerId).length;
+}
+
+function getLayerArea(layerId) {
+  return state.shapes
+    .filter((shape) => shape.layerId === layerId)
+    .reduce((total, shape) => total + getGeometryArea(shape.geometry), 0);
 }
 
 function cloneGeometry(geometry) {
@@ -1633,6 +1657,35 @@ function getGeometryBounds(geometry) {
   }
 
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+function getRingArea(ring) {
+  if (!Array.isArray(ring) || ring.length < 3) return 0;
+
+  let area = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const current = ring[i];
+    const next = ring[(i + 1) % ring.length];
+    area += current[0] * next[1] - next[0] * current[1];
+  }
+
+  return area / 2;
+}
+
+function getPolygonArea(polygon) {
+  if (!Array.isArray(polygon) || !polygon.length) return 0;
+
+  let area = Math.abs(getRingArea(polygon[0]));
+  for (let ringIndex = 1; ringIndex < polygon.length; ringIndex += 1) {
+    area -= Math.abs(getRingArea(polygon[ringIndex]));
+  }
+
+  return Math.max(0, area);
+}
+
+function getGeometryArea(geometry) {
+  if (!Array.isArray(geometry)) return 0;
+  return geometry.reduce((total, polygon) => total + getPolygonArea(polygon), 0);
 }
 
 function boundsTouch(a, b, pad = 0) {
@@ -2650,6 +2703,10 @@ function renderLayersPanel() {
       header.appendChild(inlineControls);
       main.appendChild(header);
 
+      const areaMeta = document.createElement("div");
+      areaMeta.className = "layer-meta layer-card-detail";
+      areaMeta.textContent = `Area ${formatAreaWithUnit(getLayerArea(layer.id), state.settings.displayUnit)}`;
+
       const meta = document.createElement("div");
       meta.className = "layer-meta layer-card-detail";
       meta.textContent = getLayerShapeCount(layer.id) + " objects";
@@ -2689,6 +2746,7 @@ function renderLayersPanel() {
       card.appendChild(grip);
       card.appendChild(colorSwatch);
       card.appendChild(main);
+      card.appendChild(areaMeta);
       card.appendChild(meta);
       card.appendChild(opacityField);
       drawingLayersList.appendChild(card);

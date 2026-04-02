@@ -1171,41 +1171,75 @@
 
       .render-workspace-shell {
         position: absolute;
-        inset: 0;
+        top: 28px;
+        left: 28px;
+        right: 28px;
+        bottom: 28px;
         display: none;
-        flex-direction: column;
+        padding: 14px;
+        background: #fcfcfb;
+        grid-template-rows: auto minmax(0, 1fr);
         gap: 12px;
-        padding: 16px 16px 92px;
-        background:
-          radial-gradient(circle at top, rgba(255, 255, 255, 0.32), transparent 34%),
-          linear-gradient(180deg, #f8f7f4, color-mix(in srgb, #f8f7f4 90%, black 4%));
-        overflow: auto;
       }
 
       .canvas-shell.render-workspace-mode .render-workspace-shell {
-        display: flex;
+        display: grid;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+      }
+
+      .render-output-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .render-output-grid.layout-1 {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+      }
+
+      .render-output-grid.layout-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: minmax(0, 1fr);
+      }
+
+      .render-output-grid.layout-4 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(0, 1fr));
       }
 
       .render-layout-toolbar {
         display: flex;
-        align-items: center;
         justify-content: space-between;
-        gap: 10px;
-        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
       }
 
-      .render-layout-group {
+      .render-layout-group,
+      .render-pane-selector {
         display: inline-flex;
         align-items: center;
-        gap: 5px;
-        padding: 4px;
+        gap: 4px;
+        padding: 3px;
         border: 1px solid rgba(20, 24, 28, 0.1);
         border-radius: 10px;
         background: #ffffff;
       }
 
-      .render-layout-button {
-        padding: 5px 7px;
+      .render-layout-group {
+        padding: 4px;
+        gap: 5px;
+      }
+
+      .render-layout-button,
+      .render-pane-selector-button {
+        padding: 4px 5px;
         border-radius: 7px;
         border: 1px solid transparent;
         background: transparent;
@@ -1216,44 +1250,42 @@
         transition:
           color 140ms ease,
           background 140ms ease,
-          border-color 140ms ease,
-          opacity 140ms ease;
+          border-color 140ms ease;
       }
 
-      .render-layout-button:hover:not(:disabled) {
+      .render-layout-button {
+        padding: 5px 7px;
+      }
+
+      .render-layout-button:hover:not(:disabled),
+      .render-pane-selector-button:hover:not(:disabled) {
         color: #161b21;
       }
 
-      .render-layout-button.active {
+      .render-layout-button.active,
+      .render-pane-selector-button.active {
         background: rgba(17, 24, 39, 0.08);
         border-color: rgba(20, 24, 28, 0.18);
         color: #161b21;
       }
 
-      .render-layout-button:disabled {
-        opacity: 0.6;
-        cursor: default;
-      }
-
-      .render-layout-caption {
-        padding: 7px 10px;
-        border: 1px solid rgba(20, 24, 28, 0.1);
+      .render-popout-notice {
+        margin: 6px 2px 8px;
+        padding: 10px 12px;
+        border: 1px dashed rgba(20, 24, 28, 0.1);
         border-radius: 10px;
         background: #ffffff;
         color: #67707a;
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.08);
-      }
-
-      .render-output-grid {
-        flex: 1;
-        min-height: 0;
-        display: grid;
+        letter-spacing: 0.01em;
+        min-height: 220px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
         gap: 12px;
-        grid-template-columns: minmax(0, 1fr);
+        text-align: center;
       }
 
       .render-pane {
@@ -1263,10 +1295,17 @@
         flex-direction: column;
         gap: 8px;
         padding: 12px;
-        border: 1px solid var(--ui-line);
+        border: 1px solid rgba(20, 24, 28, 0.1);
         border-radius: 10px;
-        background: color-mix(in srgb, var(--panel) 92%, transparent);
-        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
+        background: #ffffff;
+      }
+
+      .render-pane-title {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #67707a;
       }
 
       .render-pane-header {
@@ -1276,52 +1315,98 @@
         gap: 8px;
       }
 
-      .render-pane-title-wrap {
+      .render-pane-header-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
       }
 
-      .render-pane-title-label {
+      .render-pane-export-button {
+        padding: 4px 7px;
+        border-radius: 7px;
+        border: 1px solid rgba(20, 24, 28, 0.1);
+        background: rgba(255, 255, 255, 0.7);
+        color: #67707a;
         font-size: 11px;
         font-weight: 600;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--muted);
+        white-space: nowrap;
       }
 
-      .render-pane-title {
-        font-size: 16px;
-        font-weight: 600;
-        color: var(--ui-text);
+      .render-pane-export-button:hover:not(:disabled) {
+        color: #161b21;
+        border-color: rgba(20, 24, 28, 0.18);
+        background: rgba(255, 255, 255, 0.82);
       }
 
-      .render-pane-meta {
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.5;
+      #renderPopoutButton {
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+
+      .render-layout-group:has(#renderPopoutButton:hover:not(:disabled)) {
+        border-color: rgba(20, 24, 28, 0.18);
+        background: rgba(255, 255, 255, 0.82);
+      }
+
+      #renderPopoutButton:hover:not(:disabled) {
+        color: #161b21;
+      }
+
+      .render-pane-export-button:disabled {
+        opacity: 0.45;
+        cursor: default;
       }
 
       .render-pane-surface {
         flex: 1;
-        min-height: 220px;
+        min-height: 120px;
         display: grid;
         place-items: center;
         border-radius: 8px;
-        border: 1px dashed var(--ui-line);
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.76)),
-          var(--canvas-bg);
+        border: 1px dashed rgba(20, 24, 28, 0.1);
+        background: rgba(255, 255, 255, 0.7);
+        color: #67707a;
+        font-size: 12px;
+        text-align: center;
+      }
+
+      .render-pane-render-surface {
+        position: relative;
+        display: block;
+        overflow: hidden;
+      }
+
+      .render-pane-canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
       }
 
       .render-pane-empty {
-        max-width: 520px;
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
         padding: 16px;
-        color: var(--muted);
+        color: #67707a;
         font-size: 12px;
-        line-height: 1.6;
         text-align: center;
+      }
+
+      .render-pane-section-buttons {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .render-popout-notice.hidden,
+      .render-pane.hidden,
+      .render-pane-canvas.hidden {
+        display: none !important;
       }
 
       .workspace-switcher {
@@ -1473,27 +1558,104 @@
 
           <div class="render-workspace-shell" id="renderWorkspaceShell" aria-hidden="true">
             <div class="render-layout-toolbar">
-              <div class="render-layout-group" aria-hidden="true">
-                <button class="render-layout-button active" type="button" disabled>1 Side</button>
-                <button class="render-layout-button" type="button" disabled>2 Sides</button>
-                <button class="render-layout-button" type="button" disabled>4 Sides</button>
+              <div class="render-layout-group">
+                <button class="render-layout-button active" type="button" data-render-layout="1">1 Side</button>
+                <button class="render-layout-button" type="button" data-render-layout="2">2 Sides</button>
+                <button class="render-layout-button" type="button" data-render-layout="4">4 Sides</button>
               </div>
-              <div class="render-layout-caption">Render Workspace</div>
+              <div class="render-layout-group">
+                <button class="render-layout-button" type="button" id="renderPopoutButton">Open in New Window</button>
+              </div>
             </div>
 
-            <div class="render-output-grid" id="renderOutputGrid">
-              <section class="render-pane">
+            <div class="render-popout-notice hidden" id="renderPopoutNotice"></div>
+            <div class="render-output-grid layout-1" id="renderOutputGrid">
+              <section class="render-pane" data-render-slot="0">
                 <div class="render-pane-header">
-                  <div class="render-pane-title-wrap">
-                    <div class="render-pane-title-label">Rbox</div>
-                    <div class="render-pane-title" id="renderWorkspaceTitle">Rbox</div>
-                    <div class="render-pane-meta" id="renderWorkspaceMeta">Render box metadata will appear here.</div>
+                  <div class="render-pane-title" id="renderPaneTitle0">Top to Bottom</div>
+                  <div class="render-pane-header-actions">
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="0" data-render-export-format="png">PNG</button>
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="0" data-render-export-format="pdf">PDF</button>
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="0" data-render-export-format="dxf">DXF</button>
+                    <div class="render-pane-selector">
+                      <button class="render-pane-selector-button active" type="button" data-render-slot="0" data-render-direction="topToBottom">T-B</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="0" data-render-direction="bottomToTop">B-T</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="0" data-render-direction="leftToRight">L-R</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="0" data-render-direction="rightToLeft">R-L</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="0" data-render-direction="plan">PL</button>
+                      <div class="render-pane-section-buttons" id="renderPaneSectionButtons0"></div>
+                    </div>
                   </div>
                 </div>
-                <div class="render-pane-surface">
-                  <div class="render-pane-empty" id="renderWorkspaceEmpty">
-                    Render workspace shell ready. Render Box authoring happens in Main via Draw > Rbox. Live render output will be added in later steps.
+                <div class="render-pane-surface render-pane-render-surface" id="renderFrontSurface">
+                  <canvas class="render-pane-canvas hidden" id="renderFrontCanvas"></canvas>
+                  <div class="render-pane-empty" id="renderFrontEmpty">Top to Bottom render placeholder</div>
+                </div>
+              </section>
+              <section class="render-pane hidden" data-render-slot="1">
+                <div class="render-pane-header">
+                  <div class="render-pane-title" id="renderPaneTitle1">Bottom to Top</div>
+                  <div class="render-pane-header-actions">
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="1" data-render-export-format="png">PNG</button>
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="1" data-render-export-format="pdf">PDF</button>
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="1" data-render-export-format="dxf">DXF</button>
+                    <div class="render-pane-selector">
+                      <button class="render-pane-selector-button" type="button" data-render-slot="1" data-render-direction="topToBottom">T-B</button>
+                      <button class="render-pane-selector-button active" type="button" data-render-slot="1" data-render-direction="bottomToTop">B-T</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="1" data-render-direction="leftToRight">L-R</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="1" data-render-direction="rightToLeft">R-L</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="1" data-render-direction="plan">PL</button>
+                      <div class="render-pane-section-buttons" id="renderPaneSectionButtons1"></div>
+                    </div>
                   </div>
+                </div>
+                <div class="render-pane-surface render-pane-render-surface" id="renderBackSurface">
+                  <canvas class="render-pane-canvas hidden" id="renderBackCanvas"></canvas>
+                  <div class="render-pane-empty" id="renderBackEmpty">Bottom to Top render placeholder</div>
+                </div>
+              </section>
+              <section class="render-pane hidden" data-render-slot="2">
+                <div class="render-pane-header">
+                  <div class="render-pane-title" id="renderPaneTitle2">Left to Right</div>
+                  <div class="render-pane-header-actions">
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="2" data-render-export-format="png">PNG</button>
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="2" data-render-export-format="pdf">PDF</button>
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="2" data-render-export-format="dxf">DXF</button>
+                    <div class="render-pane-selector">
+                      <button class="render-pane-selector-button" type="button" data-render-slot="2" data-render-direction="topToBottom">T-B</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="2" data-render-direction="bottomToTop">B-T</button>
+                      <button class="render-pane-selector-button active" type="button" data-render-slot="2" data-render-direction="leftToRight">L-R</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="2" data-render-direction="rightToLeft">R-L</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="2" data-render-direction="plan">PL</button>
+                      <div class="render-pane-section-buttons" id="renderPaneSectionButtons2"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="render-pane-surface render-pane-render-surface" id="renderLeftSurface">
+                  <canvas class="render-pane-canvas hidden" id="renderLeftCanvas"></canvas>
+                  <div class="render-pane-empty" id="renderLeftEmpty">Left to Right render placeholder</div>
+                </div>
+              </section>
+              <section class="render-pane hidden" data-render-slot="3">
+                <div class="render-pane-header">
+                  <div class="render-pane-title" id="renderPaneTitle3">Right to Left</div>
+                  <div class="render-pane-header-actions">
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="3" data-render-export-format="png">PNG</button>
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="3" data-render-export-format="pdf">PDF</button>
+                    <button class="render-pane-export-button" type="button" data-render-export-slot="3" data-render-export-format="dxf">DXF</button>
+                    <div class="render-pane-selector">
+                      <button class="render-pane-selector-button" type="button" data-render-slot="3" data-render-direction="topToBottom">T-B</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="3" data-render-direction="bottomToTop">B-T</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="3" data-render-direction="leftToRight">L-R</button>
+                      <button class="render-pane-selector-button active" type="button" data-render-slot="3" data-render-direction="rightToLeft">R-L</button>
+                      <button class="render-pane-selector-button" type="button" data-render-slot="3" data-render-direction="plan">PL</button>
+                      <div class="render-pane-section-buttons" id="renderPaneSectionButtons3"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="render-pane-surface render-pane-render-surface" id="renderRightSurface">
+                  <canvas class="render-pane-canvas hidden" id="renderRightCanvas"></canvas>
+                  <div class="render-pane-empty" id="renderRightEmpty">Right to Left render placeholder</div>
                 </div>
               </section>
             </div>

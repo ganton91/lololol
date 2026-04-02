@@ -444,8 +444,9 @@ Layer order controls draw order. The active layer receives new geometry when the
   - a render workspace panel shell that opens when an `Rbox` tab becomes active
 - The bottom workspace switcher has now been tightened to use the external reference's light-theme visual language more literally, including its white surface, line color, muted/text values, active fill, and floating shadow.
 - The current render workspace shell is intentionally placeholder-only:
-  - it uses the reference-inspired visual structure and controls language
-  - it shows the active render's name and derived metadata from its stored `Render Box` geometry
+  - it now uses the external reference's `View` workspace interface much more literally as the base shell, including the layout controls, popout button, pane export buttons, and per-pane direction selector clusters
+  - the `1 Side`, `2 Sides`, and `4 Sides` layout controls should already work at the shell level so the pane count/grid layout matches the external reference even before real render content exists
+  - those shell controls are currently allowed to stay visually present but behaviorless until the later render-engine steps wire them up
   - it does not yet display real render outputs
   - it does not yet display final render-engine output
 - The left panel now includes a dedicated `Renders` section with:

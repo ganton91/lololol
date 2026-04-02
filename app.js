@@ -48,9 +48,9 @@ const layerFillInput = document.getElementById("layer-fill");
 const projectImportInput = document.getElementById("projectImportInput");
 const workspaceSwitcher = document.getElementById("workspaceSwitcher");
 const renderWorkspaceShell = document.getElementById("renderWorkspaceShell");
-const renderWorkspaceTitle = document.getElementById("renderWorkspaceTitle");
-const renderWorkspaceMeta = document.getElementById("renderWorkspaceMeta");
-const renderWorkspaceEmpty = document.getElementById("renderWorkspaceEmpty");
+const renderLayoutButtons = Array.from(document.querySelectorAll("[data-render-layout]"));
+const renderOutputGrid = document.getElementById("renderOutputGrid");
+const renderPaneSlots = Array.from(document.querySelectorAll(".render-pane[data-render-slot]"));
 const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
 const settingsCellUnitButtons = Array.from(document.querySelectorAll("[data-settings-cell-unit]"));
 const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-settings-snap-mode]"));
@@ -105,6 +105,7 @@ const state = {
   activeRenderId: null,
   renderTransformDrag: null,
   activeWorkspaceTab: { ...DEFAULT_ACTIVE_WORKSPACE_TAB },
+  renderLayoutPreset: 1,
   nextDrawingId: 2,
   editingDrawingId: null,
   editingDrawingNameDraft: "",
@@ -975,18 +976,19 @@ function syncRenderWorkspaceShell() {
   if (renderWorkspaceShell) {
     renderWorkspaceShell.setAttribute("aria-hidden", String(!activeRender));
   }
-  if (!activeRender) return;
 
-  if (renderWorkspaceTitle) {
-    renderWorkspaceTitle.textContent = getRenderTabLabel(activeRender);
+  const visiblePaneCount = state.renderLayoutPreset === 2 ? 2 : state.renderLayoutPreset === 4 ? 4 : 1;
+  for (const button of renderLayoutButtons) {
+    button.classList.toggle("active", Number(button.dataset.renderLayout) === visiblePaneCount);
   }
-  if (renderWorkspaceMeta) {
-    renderWorkspaceMeta.textContent = describeRenderBounds(activeRender);
+  if (renderOutputGrid) {
+    renderOutputGrid.classList.toggle("layout-1", visiblePaneCount === 1);
+    renderOutputGrid.classList.toggle("layout-2", visiblePaneCount === 2);
+    renderOutputGrid.classList.toggle("layout-4", visiblePaneCount === 4);
   }
-  if (renderWorkspaceEmpty) {
-    renderWorkspaceEmpty.textContent =
-      `${getRenderTabLabel(activeRender)} workspace shell ready. Render Box authoring happens in Main via Draw > Rbox. Live render output will be added in later steps.`;
-  }
+  renderPaneSlots.forEach((pane, index) => {
+    pane.classList.toggle("hidden", index >= visiblePaneCount);
+  });
 }
 
 function renderWorkspaceUi() {
@@ -6565,6 +6567,16 @@ if (addRenderBtn) {
   addRenderBtn.addEventListener("click", () => {
     state.renderSectionCollapsed = false;
     addRender();
+  });
+}
+
+for (const button of renderLayoutButtons) {
+  button.addEventListener("click", () => {
+    const nextPreset = Number(button.dataset.renderLayout);
+    if (nextPreset !== 1 && nextPreset !== 2 && nextPreset !== 4) return;
+    if (state.renderLayoutPreset === nextPreset) return;
+    state.renderLayoutPreset = nextPreset;
+    renderWorkspaceUi();
   });
 }
 

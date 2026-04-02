@@ -132,6 +132,7 @@ const squareBrushAxisDecisionBiasPx = 5;
 const gridMinorStrokeColor = "rgba(8, 12, 16, 0.12)";
 const gridMidStrokeColor = "rgba(8, 12, 16, 0.2)";
 const gridMajorStrokeColor = "rgba(8, 12, 16, 0.3)";
+const worldAxisStrokeColor = "rgba(180, 99, 78, 0.92)";
 const gridAdaptiveStepFactors = Object.freeze([2, 2.5, 2]);
 const visibleGridMidInterval = 5;
 const visibleGridMajorInterval = 10;
@@ -3646,7 +3647,34 @@ function drawLayerMerged(layer) {
   ctx.restore();
 }
 
-function drawGrid() {
+function drawWorldAxes() {
+  const { width, height } = getCanvasViewportSize();
+  const worldCorners = [
+    screenToWorld({ x: 0, y: 0 }),
+    screenToWorld({ x: width, y: 0 }),
+    screenToWorld({ x: width, y: height }),
+    screenToWorld({ x: 0, y: height }),
+  ];
+  const worldAxisHalfSpan =
+    Math.max(
+      1,
+      ...worldCorners.map((point) => Math.max(Math.abs(point.x), Math.abs(point.y)))
+    ) + 512;
+
+  ctx.save();
+  applyWorldCameraTransform(ctx);
+  ctx.beginPath();
+  ctx.strokeStyle = worldAxisStrokeColor;
+  ctx.lineWidth = 1 / state.camera.zoom;
+  ctx.moveTo(-worldAxisHalfSpan, 0);
+  ctx.lineTo(worldAxisHalfSpan, 0);
+  ctx.moveTo(0, -worldAxisHalfSpan);
+  ctx.lineTo(0, worldAxisHalfSpan);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawDraftGridAndAxes() {
   const metrics = getVisibleGridMetrics();
   const zoom = state.camera.zoom;
   const { width, height } = getCanvasViewportSize();
@@ -4259,11 +4287,15 @@ function drawSnapPreview() {
 function render() {
   const { width, height } = getCanvasViewportSize();
   ctx.clearRect(0, 0, width, height);
-  drawGrid();
+  drawWorldAxes();
 
   for (const layer of getRenderableLayersInPaintOrder()) {
     if (!isLayerActuallyVisible(layer)) continue;
     drawLayerMerged(layer);
+  }
+
+  if (state.tool === "draw") {
+    drawDraftGridAndAxes();
   }
 
   const activeLayer = getActiveLayer();

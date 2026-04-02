@@ -137,6 +137,8 @@ const gridMajorStrokeColor = "rgba(8, 12, 16, 0.3)";
 const worldAxisStrokeColor = "rgba(180, 99, 78, 0.92)";
 const worldAxisStrokeColorDrawMode = "rgba(180, 99, 78, 0.48)";
 const inactiveLayerDrawModeOpacityFactor = 0.38;
+const draftAlignActiveAxisSnapThresholdPx = 6;
+const draftAlignActiveAxisSnapMinDragPx = 12;
 const gridAdaptiveStepFactors = Object.freeze([2, 2.5, 2]);
 const visibleGridMidInterval = 5;
 const visibleGridMajorInterval = 10;
@@ -3384,9 +3386,53 @@ function cancelDraftAlignDrag() {
   state.draftAlignCurrentSnap = null;
 }
 
+function getResolvedDraftAlignTarget(
+  startSnap = state.draftAlignStartSnap,
+  endSnap = state.draftAlignCurrentSnap,
+  pointerScreen = state.pointerScreen
+) {
+  if (!startSnap || !endSnap) return null;
+
+  const referenceScreen =
+    pointerScreen && Number.isFinite(pointerScreen.x) && Number.isFinite(pointerScreen.y)
+      ? pointerScreen
+      : worldToScreen(endSnap.world);
+  const startScreen = worldToScreen(startSnap.world);
+  const dragDxPx = referenceScreen.x - startScreen.x;
+  const dragDyPx = referenceScreen.y - startScreen.y;
+  const dragDistancePx = Math.hypot(dragDxPx, dragDyPx);
+  if (dragDistancePx <= draftAlignActiveAxisSnapMinDragPx) {
+    return cloneSnapTarget(endSnap);
+  }
+
+  const distanceToHorizontalAxisPx = Math.abs(dragDyPx);
+  const distanceToVerticalAxisPx = Math.abs(dragDxPx);
+  if (
+    distanceToHorizontalAxisPx > draftAlignActiveAxisSnapThresholdPx &&
+    distanceToVerticalAxisPx > draftAlignActiveAxisSnapThresholdPx
+  ) {
+    return cloneSnapTarget(endSnap);
+  }
+
+  const startDraft = worldToDraft(startSnap.world);
+  const endDraft = worldToDraft(endSnap.world);
+  const snapAxis = distanceToHorizontalAxisPx <= distanceToVerticalAxisPx ? "x" : "y";
+  const snappedDraft =
+    snapAxis === "x"
+      ? { x: endDraft.x, y: startDraft.y }
+      : { x: startDraft.x, y: endDraft.y };
+
+  return {
+    kind: "free",
+    world: draftToWorld(snappedDraft),
+    distance: endSnap.distance,
+    magnetic: true,
+  };
+}
+
 function applyDraftAlignFromDrag() {
   const startSnap = state.draftAlignStartSnap;
-  const endSnap = state.draftAlignCurrentSnap;
+  const endSnap = getResolvedDraftAlignTarget(startSnap, state.draftAlignCurrentSnap);
   if (!startSnap || !endSnap) return false;
   if (distanceBetweenPoints(startSnap.world, endSnap.world) <= 1e-6) return false;
 
@@ -4238,10 +4284,10 @@ function drawInfiniteDraftAlignCross(originWorld, targetWorld) {
 function drawDraftTransformPreview() {
   if (!state.spacePressed || !state.pointerInCanvas || state.panning || state.draggingDraftOrigin) return;
 
-  const hoverSnap = state.draggingDraftAlign
-    ? state.draftAlignCurrentSnap
-    : getDraftTransformSnapTarget(state.current, undefined, { allowEdge: false });
   const startSnap = state.draggingDraftAlign ? state.draftAlignStartSnap : null;
+  const hoverSnap = state.draggingDraftAlign
+    ? getResolvedDraftAlignTarget(startSnap, state.draftAlignCurrentSnap)
+    : getDraftTransformSnapTarget(state.current, undefined, { allowEdge: false });
 
   if (!hoverSnap && !startSnap) return;
 

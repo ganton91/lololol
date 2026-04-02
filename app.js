@@ -134,6 +134,7 @@ const gridMidStrokeColor = "rgba(8, 12, 16, 0.2)";
 const gridMajorStrokeColor = "rgba(8, 12, 16, 0.3)";
 const worldAxisStrokeColor = "rgba(180, 99, 78, 0.92)";
 const worldAxisStrokeColorDrawMode = "rgba(180, 99, 78, 0.48)";
+const inactiveLayerDrawModeOpacityFactor = 0.38;
 const gridAdaptiveStepFactors = Object.freeze([2, 2.5, 2]);
 const visibleGridMidInterval = 5;
 const visibleGridMajorInterval = 10;
@@ -3621,7 +3622,9 @@ function drawLayerMerged(layer) {
 
   ctx.save();
   applyWorldCameraTransform(ctx);
-  ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(layer.opacity) ? layer.opacity : 1));
+  const layerOpacity = Math.max(0, Math.min(1, Number.isFinite(layer.opacity) ? layer.opacity : 1));
+  const drawModeOpacityFactor = state.tool === "draw" && layer.id !== state.activeLayerId ? inactiveLayerDrawModeOpacityFactor : 1;
+  ctx.globalAlpha = layerOpacity * drawModeOpacityFactor;
   const outlineEnabled = !!state.settings.outlineEnabled;
   const cornersEnabled = outlineEnabled && !!state.settings.cornersEnabled;
   const outlineColor = sanitizeColorValue(state.settings.outlineColor, DEFAULT_SETTINGS.outlineColor);

@@ -3634,6 +3634,8 @@ function drawLayerMerged(layer, options = {}) {
   const cornersEnabled = outlineEnabled && !!state.settings.cornersEnabled;
   const outlineColor = sanitizeColorValue(state.settings.outlineColor, DEFAULT_SETTINGS.outlineColor);
   const effectiveOutlineColor = isActiveLayerInDrawMode ? previewStrokeColor : outlineColor;
+  const shouldRenderOutline = renderOutline && (outlineEnabled || isActiveLayerInDrawMode);
+  const shouldRenderCorners = renderCorners && (cornersEnabled || isActiveLayerInDrawMode);
   const outlineWidth =
     (isActiveLayerInDrawMode ? activeLayerOutlineWidthFactor : 1) / state.camera.zoom;
   const vertexRadius =
@@ -3648,7 +3650,7 @@ function drawLayerMerged(layer, options = {}) {
       ctx.fill("evenodd");
     }
 
-    if (outlineEnabled && renderOutline) {
+    if (shouldRenderOutline) {
       if (!renderFill) {
         ctx.beginPath();
         traceGeometryPath(ctx, shape.geometry);
@@ -3658,7 +3660,7 @@ function drawLayerMerged(layer, options = {}) {
       ctx.stroke();
     }
 
-    if (cornersEnabled && renderCorners) {
+    if (shouldRenderCorners) {
       ctx.beginPath();
       drawGeometryVertices(ctx, shape.geometry, vertexRadius);
       ctx.fillStyle = effectiveOutlineColor;

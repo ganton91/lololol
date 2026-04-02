@@ -80,6 +80,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - When `Outline` is enabled, each visible layer shape is stroked with the configured outline color.
 - When `Corners` is enabled, each stored polygon vertex is rendered as a marker using that same outline color.
 - `Corners` is functionally dependent on `Outline`: when `Outline` is off, corner markers do not render.
+- In `Draw`, the active layer is a deliberate exception: its outline and corner markers always render with the preview blue emphasis even if the general `Outline` or `Corners` settings are off.
 - Selection highlighting is drawn by tracing the selected shape geometries.
 
 ### Draft Angle Model

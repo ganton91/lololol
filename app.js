@@ -790,12 +790,44 @@ function getDrawingCardElements() {
   return Array.from(layersList.querySelectorAll(".drawing-card"));
 }
 
+function getDrawingCardElement(drawingId) {
+  return layersList.querySelector(`.drawing-card[data-drawing-id="${drawingId}"]`);
+}
+
+function isClientPointInsideRect(clientX, clientY, rect) {
+  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+}
+
+function getLayerTransferTargetDrawingId(clientX, clientY, sourceDrawingId) {
+  for (const card of getDrawingCardElements()) {
+    const drawingId = card.dataset.drawingId;
+    if (!drawingId || drawingId === sourceDrawingId) continue;
+    if (isClientPointInsideRect(clientX, clientY, card.getBoundingClientRect())) return drawingId;
+  }
+
+  return null;
+}
+
 function clearLeftPanelDropIndicatorClasses(listEl = null) {
   const root = listEl || layersList;
   root.querySelectorAll(".drag-insert-before, .drag-insert-after").forEach((element) => {
     element.classList.remove("drag-insert-before");
     element.classList.remove("drag-insert-after");
   });
+}
+
+function clearLayerTransferTargetClasses(root = layersList) {
+  root.querySelectorAll(".layer-drop-target").forEach((element) => {
+    element.classList.remove("layer-drop-target");
+  });
+}
+
+function updateLayerTransferTargetIndicator(targetDrawingId) {
+  clearLayerTransferTargetClasses(layersList);
+  if (!state.leftPanelPointerDrag || !targetDrawingId) return;
+
+  const card = getDrawingCardElement(targetDrawingId);
+  if (card) card.classList.add("layer-drop-target");
 }
 
 function reorderDrawingsFromVisualOrder(visualDrawingIds) {
@@ -923,9 +955,18 @@ function clearLeftPanelPointerDrag(commit = true) {
   } else {
     clearLeftPanelDropIndicatorClasses(getLayerListElementForDrawing(drag.drawingId));
   }
+  clearLayerTransferTargetClasses(layersList);
   if (layersPanel) layersPanel.classList.remove("drag-reordering");
 
   state.leftPanelPointerDrag = null;
+
+  if (commit && drag.type === "layer" && drag.targetMode === "drawing" && drag.targetDrawingId) {
+    if (moveLayerToDrawingTop(drag.layerId, drag.targetDrawingId)) {
+      renderLayersPanel();
+      render();
+      return;
+    }
+  }
 
   if (commit && drag.fromIndex !== -1 && drag.dropIndex !== -1 && drag.dropIndex !== drag.fromIndex) {
     if (drag.type === "drawing") {
@@ -987,6 +1028,8 @@ function beginLayerPointerDrag(event, card, drawingId, layerId) {
     pointerId: event.pointerId,
     drawingId,
     layerId,
+    targetDrawingId: null,
+    targetMode: "reorder",
     sourceCard: card,
     dropIndex: drop.toIndex,
     rawIndex: drop.rawIndex,
@@ -2408,6 +2451,7 @@ function renderLayersPanel() {
     const isExpanded = state.activeDrawingId === drawing.id;
     const drawingCard = document.createElement("div");
     drawingCard.className = "drawing-card" + (isExpanded ? " active-drawing" : " inactive-drawing");
+    drawingCard.dataset.drawingId = drawing.id;
 
     const drawingGrip = document.createElement("div");
     drawingGrip.className = "drag-handle";
@@ -2971,6 +3015,50 @@ function duplicateLayer(layerId) {
   clearSelection();
   renderLayersPanel();
   render();
+}
+
+function getLayerTopInsertionIndexForDrawing(drawingId) {
+  let lastMatchIndex = -1;
+
+  for (let index = 0; index < state.layers.length; index += 1) {
+    if (getLayerDrawingId(state.layers[index]) === drawingId) lastMatchIndex = index;
+  }
+
+  return lastMatchIndex === -1 ? state.layers.length : lastMatchIndex + 1;
+}
+
+function ensureDrawingHasFallbackLayer(drawingId) {
+  const existingLayer = getDrawingLayerFallback(drawingId);
+  if (existingLayer) return existingLayer;
+
+  const fallbackLayer = createLayerRecord(drawingId);
+  state.layers.splice(getLayerTopInsertionIndexForDrawing(drawingId), 0, fallbackLayer);
+  return fallbackLayer;
+}
+
+function moveLayerToDrawingTop(layerId, targetDrawingId) {
+  const index = state.layers.findIndex((layer) => layer.id === layerId);
+  if (index < 0) return false;
+
+  const movedLayer = state.layers[index];
+  const sourceDrawingId = getLayerDrawingId(movedLayer);
+  if (!targetDrawingId || sourceDrawingId === targetDrawingId) return false;
+
+  const sourceDrawingLayerCount = getLayersForDrawingInStorageOrder(sourceDrawingId).length;
+  const sourceNeedsFallback = sourceDrawingLayerCount <= 1;
+
+  state.layers.splice(index, 1);
+  movedLayer.drawingId = targetDrawingId;
+  state.layers.splice(getLayerTopInsertionIndexForDrawing(targetDrawingId), 0, movedLayer);
+
+  if (sourceNeedsFallback) ensureDrawingHasFallbackLayer(sourceDrawingId);
+
+  const targetDrawing = getDrawingUiById(targetDrawingId);
+  if (targetDrawing) targetDrawing.layersSectionCollapsed = false;
+
+  clearSelection();
+  setActiveDrawingById(targetDrawingId, { layerId: movedLayer.id });
+  return true;
 }
 
 function addLayer(drawingId = getPrimaryDrawingUi().id) {
@@ -4520,17 +4608,46 @@ window.addEventListener("pointermove", (event) => {
   const drag = state.leftPanelPointerDrag;
   if (!drag || event.pointerId !== drag.pointerId) return;
 
-  const drop =
-    drag.type === "drawing"
-      ? drawingDropPositionFromClientY(event.clientY, drag.drawingId)
-      : layerDropPositionFromClientY(drag.drawingId, event.clientY, drag.layerId);
-  drag.dropIndex = drop.toIndex;
-  drag.rawIndex = drop.rawIndex;
-  drag.fromIndex = drop.fromIndex;
   if (drag.type === "drawing") {
+    const drop = drawingDropPositionFromClientY(event.clientY, drag.drawingId);
+    drag.dropIndex = drop.toIndex;
+    drag.rawIndex = drop.rawIndex;
+    drag.fromIndex = drop.fromIndex;
     updateDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
   } else {
-    updateLayerDropIndicator(drag.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
+    const targetDrawingId = getLayerTransferTargetDrawingId(event.clientX, event.clientY, drag.drawingId);
+    if (targetDrawingId) {
+      drag.targetMode = "drawing";
+      drag.targetDrawingId = targetDrawingId;
+      drag.dropIndex = -1;
+      drag.rawIndex = -1;
+      updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
+      updateLayerTransferTargetIndicator(targetDrawingId);
+      return;
+    }
+
+    const sourceDrawingCard = getDrawingCardElement(drag.drawingId);
+    const isInsideSourceDrawing =
+      !!sourceDrawingCard && isClientPointInsideRect(event.clientX, event.clientY, sourceDrawingCard.getBoundingClientRect());
+
+    if (isInsideSourceDrawing) {
+      const drop = layerDropPositionFromClientY(drag.drawingId, event.clientY, drag.layerId);
+      drag.targetMode = "reorder";
+      drag.targetDrawingId = null;
+      drag.dropIndex = drop.toIndex;
+      drag.rawIndex = drop.rawIndex;
+      drag.fromIndex = drop.fromIndex;
+      updateLayerTransferTargetIndicator(null);
+      updateLayerDropIndicator(drag.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
+      return;
+    }
+
+    drag.targetMode = "none";
+    drag.targetDrawingId = null;
+    drag.dropIndex = -1;
+    drag.rawIndex = -1;
+    updateLayerTransferTargetIndicator(null);
+    updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
   }
 });
 

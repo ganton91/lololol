@@ -258,6 +258,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Layer cards now show inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
 - Each layer card now shows a small clickable circular fill-color swatch between the drag handle and the layer name, and that swatch remains visible even when the layer card is collapsed.
 - The layer object-count and opacity rows now span the full layer-card width, starting from the drag-handle edge instead of the name column.
+- Layer drag can now move a layer into a different drawing by dropping it onto another drawing card; the moved layer becomes the top layer in the target drawing, and if the source drawing would become empty it automatically keeps a fallback empty layer.
 - Each layer card now shows a total area row above the object count, and that area is formatted in the active `Display Unit` squared (`mm²`, `cm²`, or `m²`).
 - The panel now follows an active-drawing model: only one drawing is active/expanded at a time, and the app keeps a single active layer inside that active drawing.
 - The main `Drawings` add button now creates a real new drawing with a default layer inside it and makes that drawing/layer active.

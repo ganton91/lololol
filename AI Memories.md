@@ -46,6 +46,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - The app now treats `1 world unit = 1 mm`.
 - Stored geometry remains in that single canonical internal unit regardless of what the user chooses for display formatting.
 - Display units are now a formatting layer with `mm`, `cm`, and `m` options.
+- The real-dimensions / units model is now treated as established application behavior rather than an active in-progress task.
 - `Cell Size` is now the user-facing size control for the drafting cell, with an integer value plus inline `mm`, `cm`, or `m` unit buttons.
 - `Grid Snap` now has two user-facing modes:
   - `Adaptive`: the effective minimum cell is fixed to `1 mm`, the rendered grid and rulers both promote from that minimum through the zoom-adaptive `1-2-5` ladder, and the `Cell Size` controls are shown as locked to `1 mm`.
@@ -212,11 +213,11 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 ### 1. Non-Orthogonal Draft-Plane Re-Align / Diagonal Canonicalization Bug
 
-- Status: open. Investigating fix via `clipperSimplifyCollinearEpsilon = 2` (currently testing).
+- Status: open. The `clipperSimplifyCollinearEpsilon = 2` test was completed and did not solve the issue, so that is not considered a viable fix path.
 - Symptom: when the user aligns the workplane onto a diagonal shape that was not originally drawn inside that family, new geometry drawn in the resulting family is not perfectly orthonormal with the original diagonal shape. This causes small misalignment artifacts and spurious vertices when the two interact in boolean operations.
 - Root cause (identified 2026-04-01): the `cos/sin` coefficients stored in draft-angle family lookup entries are quantized to 8 decimal places via `quantizeAngleValue`. This introduces an error of ~5e-9 per unit, which at the Clipper scale of 1e8 accumulates to ~50 Clipper units for a 100-unit shape. The resulting edge directions are slightly off from the true aligned direction, so edges that should be exactly parallel or collinear are not.
 - Principled fix (not yet implemented): in `buildDraftAngleEntry` in `draft-angle.js`, store full IEEE 754 precision `cos/sin` for geometry use and keep quantized values only for the signature lookup. This eliminates the quantization error at the source.
-- Current test: checking whether raising `clipperSimplifyCollinearEpsilon` from 1 to 2 is sufficient to absorb the angular mismatch artifacts in practice, before committing to the more invasive draft-angle change.
+- Test result: raising `clipperSimplifyCollinearEpsilon` from `1` to `2` did not absorb the angular mismatch artifacts in practice, so increasing that epsilon does not resolve this bug.
 
 ### 2. Clipper Integer Rounding Creates Spurious Vertices At Non-Orthogonal Intersections
 
@@ -229,7 +230,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 ### Current Task 1: Interface Implementation
 
 - Task: continue building and polishing the application's interface around the current `millimétré` shell, drawings panel, canvas shell, and interaction patterns already implemented in the app.
-- Status: interface implementation remains active. The previous `Renders`-workspace task is no longer the current tracked task here.
+- Status: interface implementation remains active. We are closer to the target shell now, but there is still meaningful work left before this track is complete. The previous `Renders`-workspace task is no longer the current tracked task here.
 
 #### Source Of Truth
 
@@ -259,6 +260,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 #### Progress
 
 - The active task has been reset from the old `Renders` planning track to interface implementation.
+- The real dimensions / units task is no longer an active tracked task; its accepted outcome now lives in the permanent sections above.
 - The current app shell now includes the `millimétré` top bar with the current button order, brand styling, separator, translucent surface treatment, and hover behavior.
 - The `Settings` button in the top bar is now wired to a real modal; the remaining top bar buttons are still visual-only placeholders.
 - The settings modal now uses a single `Settings` heading with extra breathing room before the rows.
@@ -293,48 +295,17 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The old bottom-left instructional hint panel inside the canvas shell has been removed completely, including its markup and styling.
 - The canvas background now uses a warmer off-white canvas tone, while the grid keeps the app's own line widths and transparency-style hierarchy using darker light-theme strokes derived from the same palette rather than a single opaque color.
 
-### Current Task 2: Real Dimensions And Units Model
+### Current Task 2: Export / Import
 
-- Task: give the editor real dimensions so drawing happens in physical units, and prepare the app for unit-aware measurements, object readouts, and configurable grid spacing.
-- Status: implementation is now in progress. The current model uses `1 world unit = 1 mm` and keeps display units separate from stored geometry.
+- Task: design and implement project export/import for the editor so a full working document can be saved and restored reliably.
+- Status: planning before implementation. The next step is to lock the file format, validation rules, and import behavior before wiring the UI buttons.
 
-#### Scope
+#### Direction
 
-- Make the drawing space represent real physical size rather than arbitrary abstract units.
-- Preserve a single canonical storage unit internally even when the user later changes display units.
-- Allow future UI readouts to display values in `mm`, `cm`, or `m` without changing stored geometry.
-- Allow the grid system to expose a user-configured cell size together with adaptive or locked snapping behavior.
-
-#### Direction Under Discussion
-
-- The internal geometry model now stores everything in millimeters, with `1 world unit = 1 mm`.
-- Display units should be a formatting layer only, not a geometry/storage layer.
-- Grid spacing should also resolve into millimeters internally, even if the user configures it in `cm` or `m`.
-- This task should eventually affect:
-  - measurement formatting
-  - object/property readouts
-  - ruler labels
-  - grid spacing controls
-  - future dimensioning tools
-- Existing world geometry, booleans, and draft-plane math should stay in the same coordinate system; the main change should be semantic meaning plus unit-aware formatting and controls.
-
-#### Progress
-
-- A second active task has now been opened specifically for real dimensions and units.
-- The app now uses millimeters as the canonical internal world unit.
-- The top bar `Settings` button now opens a centered settings modal shell styled from the reference modal language, but with app-specific content only.
-- The first settings group now exposes `Display Unit`, `Grid Snap`, `Cell Size`, `Align Snap`, `Outline`, and `Corners`.
-- The separate `Grid` selector has been removed; the `Cell Size` row now includes inline `mm`, `cm`, and `m` unit buttons next to the numeric field.
-- The settings modal now exposes `Grid Snap` with `Adaptive` and `Locked` choices.
-- The current supported display units are `mm`, `cm`, and `m`.
-- `Cell Size` now accepts integer values and combines with the selected inline `mm` / `cm` / `m` unit to derive the locked cell size in millimeters.
-- In `Adaptive`, the `Cell Size` field displays the effective minimum `1 mm` cell and the unit buttons are disabled; the previous locked value is preserved and reappears when switching back to `Locked`.
-- The default settings are currently `Display Unit = m`, `Grid Snap = Adaptive`, `Align Snap = 90deg`, and a stored locked `Cell Size = 5 cm`.
-- The outline defaults are currently `Outline = On`, `Corners = On`, and `Outline Color = #0f172a`.
-- Cell-based tools still operate in whole cells rather than absolute unit inputs; their real world width now follows the current effective cell, which is adaptive in `Adaptive` mode and user-configured in `Locked` mode.
-- Existing stored geometry is not rescaled when the user applies new display or grid settings.
-- Rulers and the workplane origin readout now format values using the active display unit.
-- In `Adaptive`, the visible grid and rulers adapt to zoom with a `1-2-5` step ladder, so very small cells stay usable when zoomed far out instead of turning into dense visual noise.
-- In `Locked`, the rendered grid stays fixed to the configured cell while the rulers still use adaptive `1-2-5` graduations.
-- The top-bar grid status readout now shows only the current snap mode (`Adaptive` or `Locked`) together with the current effective cell.
-- The top-bar `Cell` value is always formatted in the active `Display Unit`; in `Adaptive`, it reflects the current effective adaptive view cell, and in `Locked`, it reflects the user's configured fixed cell.
+- Export/import should be based on the app's real project state, not on a lossy visual snapshot.
+- The saved format should preserve drawings, layers, shapes, settings, workplane state, and draft-angle family data needed to reopen the project faithfully.
+- The first implementation should prioritize a stable app-native project file over external CAD interchange formats.
+- Import does not need backward or cross-version compatibility for older app file formats. If the file version or schema is not exactly supported, the app should reject it and show a clear unsupported-file / unsupported-version message instead of attempting a migration.
+- Export should keep using the current project filename as its default suggested save name.
+- If the user imports a project file, that imported filename becomes the current project's default export filename.
+- If the user exports the project under a chosen filename, later exports should keep suggesting that same filename until another import or explicit export rename replaces it.

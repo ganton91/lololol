@@ -124,6 +124,8 @@ const selectionStrokeColor = "#0ea5e9";
 const previewStrokeColor = "#0284c7";
 const previewStrokeWidth = 1.5;
 const vertexMarkerRadiusPx = 2.5;
+const activeLayerOutlineWidthFactor = 1.64;
+const activeLayerVertexRadiusFactor = 1.28;
 const minZoom = 0.02;
 const maxZoom = 50;
 const ellipseSegments = 96;
@@ -3623,12 +3625,20 @@ function drawLayerMerged(layer, options = {}) {
 
   ctx.save();
   applyWorldCameraTransform(ctx);
+  const isActiveLayer = layer.id === state.activeLayerId;
+  const isActiveLayerInDrawMode = state.tool === "draw" && isActiveLayer;
   const layerOpacity = Math.max(0, Math.min(1, Number.isFinite(layer.opacity) ? layer.opacity : 1));
-  const drawModeOpacityFactor = state.tool === "draw" && layer.id !== state.activeLayerId ? inactiveLayerDrawModeOpacityFactor : 1;
+  const drawModeOpacityFactor = state.tool === "draw" && !isActiveLayer ? inactiveLayerDrawModeOpacityFactor : 1;
   ctx.globalAlpha = layerOpacity * drawModeOpacityFactor;
   const outlineEnabled = !!state.settings.outlineEnabled;
   const cornersEnabled = outlineEnabled && !!state.settings.cornersEnabled;
   const outlineColor = sanitizeColorValue(state.settings.outlineColor, DEFAULT_SETTINGS.outlineColor);
+  const effectiveOutlineColor = isActiveLayerInDrawMode ? previewStrokeColor : outlineColor;
+  const outlineWidth =
+    (isActiveLayerInDrawMode ? activeLayerOutlineWidthFactor : 1) / state.camera.zoom;
+  const vertexRadius =
+    ((isActiveLayerInDrawMode ? activeLayerVertexRadiusFactor : 1) * vertexMarkerRadiusPx) /
+    state.camera.zoom;
 
   for (const shape of layerShapes) {
     if (renderFill) {
@@ -3643,15 +3653,15 @@ function drawLayerMerged(layer, options = {}) {
         ctx.beginPath();
         traceGeometryPath(ctx, shape.geometry);
       }
-      ctx.strokeStyle = outlineColor;
-      ctx.lineWidth = 1 / state.camera.zoom;
+      ctx.strokeStyle = effectiveOutlineColor;
+      ctx.lineWidth = outlineWidth;
       ctx.stroke();
     }
 
     if (cornersEnabled && renderCorners) {
       ctx.beginPath();
-      drawGeometryVertices(ctx, shape.geometry);
-      ctx.fillStyle = outlineColor;
+      drawGeometryVertices(ctx, shape.geometry, vertexRadius);
+      ctx.fillStyle = effectiveOutlineColor;
       ctx.fill();
     }
   }

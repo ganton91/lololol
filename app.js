@@ -2,6 +2,8 @@ import { ClipType, FillRule, PolyTree64, booleanOpWithPolyTree, isPositive, simp
 import {
   createDraftAngleStore,
   DEFAULT_DRAFT_ANGLE_FAMILY_ID,
+  normalizeDegrees360,
+  normalizeDraftAngleStep,
 } from "./draft-angle.js";
 
 const canvas = document.getElementById("cad-canvas");
@@ -381,6 +383,23 @@ function getActiveDraftAngleStepCount() {
 
 function getActiveDraftAngleRotation() {
   return draftAngleStore.getActiveRotation();
+}
+
+function getActiveDraftAngleFamilyContext() {
+  const snapshot = draftAngleStore.getSnapshot();
+  const activeState = snapshot?.activeState || null;
+  if (activeState?.mode !== "family" || !activeState.familyId) return null;
+
+  const familyRecord = Array.isArray(snapshot?.familyRecords)
+    ? snapshot.familyRecords.find((record) => record.id === activeState.familyId) || null
+    : null;
+  if (!familyRecord) return null;
+
+  return {
+    activeState,
+    activeRotation: snapshot?.activeRotation || getActiveDraftAngleRotation(),
+    familyRecord,
+  };
 }
 
 function setActiveDraftAngleFamily(familyId, stepIndex = 0) {
@@ -3422,7 +3441,8 @@ function getResolvedDraftAlignTarget(
   }
 
   const alignSnapStepDeg = sanitizeAlignSnapValue(state.settings.alignSnap, DEFAULT_SETTINGS.alignSnap);
-  if (alignSnapStepDeg === "off") {
+  const activeFamilyContext = getActiveDraftAngleFamilyContext();
+  if (alignSnapStepDeg === "off" || !activeFamilyContext) {
     return cloneSnapTarget(endSnap);
   }
 
@@ -3454,11 +3474,21 @@ function getResolvedDraftAlignTarget(
     return cloneSnapTarget(endSnap);
   }
 
+  const magneticAngleDeg = normalizeDegrees360(
+    (Math.atan2(
+      bestSnap.snappedDraft.y - startDraft.y,
+      bestSnap.snappedDraft.x - startDraft.x
+    ) *
+      180) /
+      Math.PI
+  );
+
   return {
     kind: "free",
     world: draftToWorld(bestSnap.snappedDraft),
     distance: endSnap.distance,
     magnetic: true,
+    magneticAngleDeg,
   };
 }
 
@@ -3481,7 +3511,31 @@ function applyDraftAlignFromDrag() {
   console.log('Align Raw Input To Draft Angle (DX, DY):', dx.toFixed(15), dy.toFixed(15));
 
   state.draftOrigin = cloneDraftPoint(startSnap.world);
-  setDraftAngleFromAlignedDirection(dx, dy);
+  if (endSnap.magnetic) {
+    const activeFamilyContext = getActiveDraftAngleFamilyContext();
+    const familyId = activeFamilyContext?.activeState?.familyId || null;
+    const familyStepDegrees = Number(activeFamilyContext?.familyRecord?.stepDegrees);
+    const familyStepCount = Number(activeFamilyContext?.familyRecord?.stepCount);
+    const activeStepIndex =
+      activeFamilyContext?.activeState?.stepIndex ?? activeFamilyContext?.activeRotation?.stepIndex ?? 0;
+
+    if (
+      familyId &&
+      Number.isFinite(familyStepDegrees) &&
+      familyStepDegrees > 0 &&
+      Number.isFinite(familyStepCount) &&
+      familyStepCount > 0 &&
+      Number.isFinite(endSnap.magneticAngleDeg)
+    ) {
+      const stepOffset = Math.round(endSnap.magneticAngleDeg / familyStepDegrees);
+      const targetStepIndex = normalizeDraftAngleStep(activeStepIndex + stepOffset, familyStepCount);
+      setActiveDraftAngleFamily(familyId, targetStepIndex);
+    } else {
+      setDraftAngleFromAlignedDirection(dx, dy);
+    }
+  } else {
+    setDraftAngleFromAlignedDirection(dx, dy);
+  }
   logActiveDraftAngleTable("Align Active Draft Angle Table");
   updateWorkplaneStatus();
   return true;

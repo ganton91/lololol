@@ -926,6 +926,17 @@
         border-top: 1px solid var(--ui-line);
       }
 
+      .modal-copy {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .modal-copy + .modal-copy {
+        margin-top: 10px;
+      }
+
       .modal-action-button {
         transition:
           background 140ms ease,
@@ -1286,6 +1297,26 @@
       <div class="calibration-actions settings-actions">
         <button class="ghost-button modal-action-button" id="settingsCloseButton" type="button">Close</button>
         <button class="ghost-button modal-action-button" id="settingsApplyButton" type="button">Apply</button>
+      </div>
+    </div>
+
+    <div
+      class="menu-panel modal-panel hidden"
+      id="exportFallbackMenu"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="exportFallbackMenuHeading"
+    >
+      <div class="tool-heading" id="exportFallbackMenuHeading">Export Download</div>
+      <p class="modal-copy">
+        This browser does not support saving directly into a folder you choose from inside the app.
+      </p>
+      <p class="modal-copy">
+        The project was downloaded using the browser's normal download flow. If you want direct save-to-folder support,
+        use Chrome or another browser with a compatible save picker.
+      </p>
+      <div class="calibration-actions">
+        <button class="ghost-button modal-action-button" id="exportFallbackCloseButton" type="button">Close</button>
       </div>
     </div>
 

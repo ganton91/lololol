@@ -298,7 +298,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 ### Current Task 2: Export / Import
 
 - Task: design and implement project export/import for the editor so a full working document can be saved and restored reliably.
-- Status: planning before implementation. The next step is to lock the file format, validation rules, and import behavior before wiring the UI buttons.
+- Status: implementation is active. Core project I/O now exists, and the current follow-up is polishing/export compatibility behavior across browsers before this task is moved into the permanent sections.
 
 #### Direction
 
@@ -312,7 +312,9 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Export should keep using the current project filename as its default suggested save name.
 - If the user imports a project file, that imported filename becomes the current project's default export filename.
 - If the user exports the project under a chosen filename, later exports should keep suggesting that same filename until another import or explicit export rename replaces it.
-- The first implementation should stay as simple as possible and may rely on the browser save picker instead of adding a separate download fallback path for browsers without that capability.
+- When the browser supports `showSaveFilePicker`, export should use it so the user can choose the destination folder directly.
+- When the browser does not support `showSaveFilePicker`, export should still proceed through the browser's normal download flow instead of failing.
+- That fallback export path should also show a small informational modal explaining that folder-targeted save is unavailable in the current browser and that Chrome or another compatible browser is better for direct save-to-folder behavior.
 
 #### Schema V1
 
@@ -376,3 +378,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Import now rejects unsupported file versions, malformed JSON, and broken cross-references instead of attempting compatibility or migration logic.
 - The import flow now restores the draft-angle store from serialized snapshot data and reapplies the restored workspace/view state to the live UI.
 - The export suggested filename is now remembered in runtime state; importing a file adopts that file's name as the next export suggestion, and saving through the picker updates the remembered export name.
+- Browsers without `showSaveFilePicker` now fall back to a normal JSON download using the remembered project filename as the suggested download name.
+- That fallback path now opens a dedicated modal explaining that the current browser downloaded the file through its standard download flow because direct save-to-folder support is unavailable there.
+- The fallback export notice is now session-scoped: it appears only the first time that fallback download path is used during the current page session, and later fallback exports continue silently.

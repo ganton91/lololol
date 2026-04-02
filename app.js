@@ -21,8 +21,10 @@ const settingsButton = document.getElementById("settingsButton");
 const exportButton = document.getElementById("exportButton");
 const importButton = document.getElementById("importButton");
 const settingsMenu = document.getElementById("settingsMenu");
+const exportFallbackMenu = document.getElementById("exportFallbackMenu");
 const settingsCloseButton = document.getElementById("settingsCloseButton");
 const settingsApplyButton = document.getElementById("settingsApplyButton");
+const exportFallbackCloseButton = document.getElementById("exportFallbackCloseButton");
 const settingsCellSizeInput = document.getElementById("settingsCellSizeInput");
 const settingsOutlineColorInput = document.getElementById("settingsOutlineColorInput");
 const settingsOutlineSwatch = document.getElementById("settingsOutlineSwatch");
@@ -115,6 +117,7 @@ const state = {
   settings: { ...DEFAULT_SETTINGS },
   settingsDraft: null,
   projectFileName: DEFAULT_PROJECT_FILE_NAME,
+  exportFallbackNoticeShown: false,
   camera: { x: 0, y: 0, zoom: 1 },
   selection: {
     shapeIds: [],
@@ -914,6 +917,7 @@ function replaceDraftAngleStoreFromSnapshot(snapshot) {
 function resetProjectInteractionState() {
   cancelDrawInteraction();
   cancelSelectionInteraction();
+  closeExportFallbackMenu();
   state.panning = false;
   state.draggingDraftOrigin = false;
   cancelDraftAlignDrag();
@@ -986,7 +990,23 @@ function applyImportedProject(normalizedProject, importedFileName = DEFAULT_PROJ
 
 async function exportProjectToFile() {
   if (typeof window.showSaveFilePicker !== "function") {
-    window.alert("Export is not supported in this browser.");
+    const downloadUrl = URL.createObjectURL(
+      new Blob([serializeProjectFile()], {
+        type: "application/json",
+      })
+    );
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = sanitizeProjectFileName(state.projectFileName, DEFAULT_PROJECT_FILE_NAME);
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(downloadUrl);
+    if (!state.exportFallbackNoticeShown) {
+      state.exportFallbackNoticeShown = true;
+      openExportFallbackMenu();
+    }
     return;
   }
 
@@ -1035,21 +1055,47 @@ async function handleProjectImportFile(file) {
   }
 }
 
-function openSettingsMenu() {
-  if (!settingsMenu || !modalBackdrop) return;
+function isAnyModalOpen() {
+  return (
+    (!!settingsMenu && !settingsMenu.classList.contains("hidden")) ||
+    (!!exportFallbackMenu && !exportFallbackMenu.classList.contains("hidden"))
+  );
+}
 
+function syncModalBackdropVisibility() {
+  if (!modalBackdrop) return;
+  modalBackdrop.classList.toggle("hidden", !isAnyModalOpen());
+}
+
+function openSettingsMenu() {
+  if (!settingsMenu) return;
+
+  closeExportFallbackMenu();
   state.settingsDraft = cloneSettings(state.settings);
   syncSettingsMenu();
   settingsMenu.classList.remove("hidden");
-  modalBackdrop.classList.remove("hidden");
+  syncModalBackdropVisibility();
 }
 
 function closeSettingsMenu() {
-  if (!settingsMenu || !modalBackdrop) return;
+  if (!settingsMenu) return;
 
   settingsMenu.classList.add("hidden");
-  modalBackdrop.classList.add("hidden");
   state.settingsDraft = null;
+  syncModalBackdropVisibility();
+}
+
+function openExportFallbackMenu() {
+  if (!exportFallbackMenu) return;
+  closeSettingsMenu();
+  exportFallbackMenu.classList.remove("hidden");
+  syncModalBackdropVisibility();
+}
+
+function closeExportFallbackMenu() {
+  if (!exportFallbackMenu) return;
+  exportFallbackMenu.classList.add("hidden");
+  syncModalBackdropVisibility();
 }
 
 function applySettingsDraft() {
@@ -5350,9 +5396,16 @@ if (settingsApplyButton) {
   });
 }
 
+if (exportFallbackCloseButton) {
+  exportFallbackCloseButton.addEventListener("click", () => {
+    closeExportFallbackMenu();
+  });
+}
+
 if (modalBackdrop) {
   modalBackdrop.addEventListener("click", () => {
     closeSettingsMenu();
+    closeExportFallbackMenu();
   });
 }
 

@@ -160,13 +160,14 @@ Layer order controls draw order. The active layer receives new geometry when the
 - During `Space + Left Drag`, if there is no nearby geometry, the preview and resulting alignment still use the free pointer position instead of forcing a snap.
 - During an active `Space + Left Drag`, the align preview now draws a faint infinite dashed cross through the chosen start/origin point, with one axis parallel to the current align direction and the other perpendicular to it.
 - During `Space + Left Drag`, snapping affects only the chosen start/end points; the resulting alignment direction is always derived from the raw point-to-point `end - start` vector of those resolved endpoints.
-- During `Space + Left Drag`, the raw pointer now magnetizes to a narrow fixed-width screen-space corridor around the current active workplane's orthogonal axes, which makes it possible to move the draft origin without accidentally leaving the current family regime.
+- During `Space + Left Drag`, the raw pointer now magnetizes to a narrow fixed-width screen-space corridor around configurable angular increments of the current active workplane; the `Align Snap` setting currently supports `Off`, `15deg`, `30deg`, `45deg`, and `90deg`.
 - If an aligned direction matches a known family signature, the workplane re-enters that family; otherwise it activates or reuses a temporary unresolved candidate family for that direction regime.
 - The first committed draw or subtract operation while a candidate family is active materializes it into a persistent dynamic family; resetting the plane or leaving that regime without a commit discards the temporary candidate.
 - Pressing `R` while `Space` is held resets the current workplane to the world-aligned plane, cancels any in-progress draft transform drag, and leaves drafting-transforms mode active as long as `Space` remains held.
 - Releasing `Space` during a pending workplane alignment cancels that alignment and returns control to the underlying tool.
 - The top bar now shows a live workplane status readout with the current plane mode (`default` when the workplane is unmodified, otherwise `custom`), rotation in degrees formatted to up to `2` decimal places, and origin coordinates formatted in the active display unit.
 - The settings modal now exposes `Outline` and `Corners` toggles; `Outline` also includes a color swatch, while `Corners` inherits that same outline color and is disabled whenever `Outline` is off.
+- The settings modal now also exposes `Align Snap` with `Off`, `15deg`, `30deg`, `45deg`, and `90deg` options for workplane align-drag magnetic snapping.
 - In `Select`, the draft canvas (`Grid` + draft-plane axes) is hidden while the `World` axes remain visible underneath the scene.
 - In `Draw`, both the `World` axes and the draft canvas are visible; the `World` axes render underneath the layer geometry, the draft canvas renders above the regular layer geometry, and the active layer's emphasized outline/corners are then re-drawn on top of the draft canvas.
 - `Select` supports marquee selection in draft/screen space: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed by or intersect the box.
@@ -320,13 +321,13 @@ Layer order controls draw order. The active layer receives new geometry when the
 - A second active task has now been opened specifically for real dimensions and units.
 - The app now uses millimeters as the canonical internal world unit.
 - The top bar `Settings` button now opens a centered settings modal shell styled from the reference modal language, but with app-specific content only.
-- The first settings group now exposes `Display Unit`, `Grid Snap`, `Cell Size`, `Outline`, and `Corners`.
+- The first settings group now exposes `Display Unit`, `Grid Snap`, `Cell Size`, `Align Snap`, `Outline`, and `Corners`.
 - The separate `Grid` selector has been removed; the `Cell Size` row now includes inline `mm`, `cm`, and `m` unit buttons next to the numeric field.
 - The settings modal now exposes `Grid Snap` with `Adaptive` and `Locked` choices.
 - The current supported display units are `mm`, `cm`, and `m`.
 - `Cell Size` now accepts integer values and combines with the selected inline `mm` / `cm` / `m` unit to derive the locked cell size in millimeters.
 - In `Adaptive`, the `Cell Size` field displays the effective minimum `1 mm` cell and the unit buttons are disabled; the previous locked value is preserved and reappears when switching back to `Locked`.
-- The default settings are currently `Display Unit = m`, `Grid Snap = Adaptive`, and a stored locked `Cell Size = 5 cm`.
+- The default settings are currently `Display Unit = m`, `Grid Snap = Adaptive`, `Align Snap = 90deg`, and a stored locked `Cell Size = 5 cm`.
 - The outline defaults are currently `Outline = On`, `Corners = On`, and `Outline Color = #0f172a`.
 - Cell-based tools still operate in whole cells rather than absolute unit inputs; their real world width now follows the current effective cell, which is adaptive in `Adaptive` mode and user-configured in `Locked` mode.
 - Existing stored geometry is not rescaled when the user applies new display or grid settings.

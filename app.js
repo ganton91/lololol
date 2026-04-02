@@ -37,6 +37,7 @@ const layerFillInput = document.getElementById("layer-fill");
 const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
 const settingsCellUnitButtons = Array.from(document.querySelectorAll("[data-settings-cell-unit]"));
 const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-settings-snap-mode]"));
+const settingsAlignSnapButtons = Array.from(document.querySelectorAll("[data-settings-align-snap]"));
 const settingsOutlineButtons = Array.from(document.querySelectorAll("[data-settings-outline-enabled]"));
 const settingsCornersButtons = Array.from(document.querySelectorAll("[data-settings-corners-enabled]"));
 
@@ -46,6 +47,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   cellUnit: "cm",
   cellSize: 5,
   snapMode: "adaptive",
+  alignSnap: 90,
   outlineEnabled: true,
   outlineColor: defaultOutlineStrokeColor,
   cornersEnabled: true,
@@ -137,7 +139,7 @@ const gridMajorStrokeColor = "rgba(8, 12, 16, 0.3)";
 const worldAxisStrokeColor = "rgba(180, 99, 78, 0.92)";
 const worldAxisStrokeColorDrawMode = "rgba(180, 99, 78, 0.48)";
 const inactiveLayerDrawModeOpacityFactor = 0.38;
-const draftAlignActiveAxisSnapThresholdPx = 6;
+const draftAlignActiveAxisSnapThresholdPx = 15;
 const draftAlignActiveAxisSnapMinDragPx = 12;
 const gridAdaptiveStepFactors = Object.freeze([2, 2.5, 2]);
 const visibleGridMidInterval = 5;
@@ -222,12 +224,19 @@ function sanitizeColorValue(value, fallback = DEFAULT_SETTINGS.outlineColor) {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
 }
 
+function sanitizeAlignSnapValue(value, fallback = DEFAULT_SETTINGS.alignSnap) {
+  if (value === "off" || value === null || value === false) return "off";
+  const numericValue = Number(value);
+  return numericValue === 15 || numericValue === 30 || numericValue === 45 || numericValue === 90 ? numericValue : fallback;
+}
+
 function cloneSettings(settings = state.settings) {
   return {
     displayUnit: sanitizeMeasurementUnit(settings?.displayUnit, DEFAULT_SETTINGS.displayUnit),
     cellUnit: sanitizeMeasurementUnit(settings?.cellUnit, DEFAULT_SETTINGS.cellUnit),
     cellSize: sanitizeCellSize(settings?.cellSize, DEFAULT_SETTINGS.cellSize),
     snapMode: sanitizeGridSnapMode(settings?.snapMode, DEFAULT_SETTINGS.snapMode),
+    alignSnap: sanitizeAlignSnapValue(settings?.alignSnap, DEFAULT_SETTINGS.alignSnap),
     outlineEnabled: sanitizeSettingsToggle(settings?.outlineEnabled, DEFAULT_SETTINGS.outlineEnabled),
     outlineColor: sanitizeColorValue(settings?.outlineColor, DEFAULT_SETTINGS.outlineColor),
     cornersEnabled: sanitizeSettingsToggle(settings?.cornersEnabled, DEFAULT_SETTINGS.cornersEnabled),
@@ -482,6 +491,13 @@ function syncSettingsMenu() {
 
   for (const button of settingsSnapModeButtons) {
     const active = button.dataset.settingsSnapMode === state.settingsDraft.snapMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+
+  for (const button of settingsAlignSnapButtons) {
+    const buttonValue = button.dataset.settingsAlignSnap === "off" ? "off" : Number(button.dataset.settingsAlignSnap);
+    const active = buttonValue === state.settingsDraft.alignSnap;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   }
@@ -3405,26 +3421,42 @@ function getResolvedDraftAlignTarget(
     return cloneSnapTarget(endSnap);
   }
 
-  const distanceToHorizontalAxisPx = Math.abs(dragDyPx);
-  const distanceToVerticalAxisPx = Math.abs(dragDxPx);
-  if (
-    distanceToHorizontalAxisPx > draftAlignActiveAxisSnapThresholdPx &&
-    distanceToVerticalAxisPx > draftAlignActiveAxisSnapThresholdPx
-  ) {
+  const alignSnapStepDeg = sanitizeAlignSnapValue(state.settings.alignSnap, DEFAULT_SETTINGS.alignSnap);
+  if (alignSnapStepDeg === "off") {
     return cloneSnapTarget(endSnap);
   }
 
   const startDraft = worldToDraft(startSnap.world);
   const endDraft = worldToDraft(endSnap.world);
-  const snapAxis = distanceToHorizontalAxisPx <= distanceToVerticalAxisPx ? "x" : "y";
-  const snappedDraft =
-    snapAxis === "x"
-      ? { x: endDraft.x, y: startDraft.y }
-      : { x: startDraft.x, y: endDraft.y };
+  let bestSnap = null;
+  for (let angleDeg = 0; angleDeg < 180; angleDeg += alignSnapStepDeg) {
+    const angleRad = (angleDeg * Math.PI) / 180;
+    const ux = Math.cos(angleRad);
+    const uy = Math.sin(angleRad);
+    const perpendicularDistancePx = Math.abs(dragDxPx * uy - dragDyPx * ux);
+    if (perpendicularDistancePx > draftAlignActiveAxisSnapThresholdPx) continue;
+
+    const projectionDraft = (endDraft.x - startDraft.x) * ux + (endDraft.y - startDraft.y) * uy;
+    const snappedDraft = {
+      x: startDraft.x + ux * projectionDraft,
+      y: startDraft.y + uy * projectionDraft,
+    };
+
+    if (!bestSnap || perpendicularDistancePx < bestSnap.perpendicularDistancePx) {
+      bestSnap = {
+        perpendicularDistancePx,
+        snappedDraft,
+      };
+    }
+  }
+
+  if (!bestSnap) {
+    return cloneSnapTarget(endSnap);
+  }
 
   return {
     kind: "free",
-    world: draftToWorld(snappedDraft),
+    world: draftToWorld(bestSnap.snappedDraft),
     distance: endSnap.distance,
     magnetic: true,
   };
@@ -4773,6 +4805,17 @@ for (const button of settingsSnapModeButtons) {
   button.addEventListener("click", () => {
     if (!state.settingsDraft) return;
     state.settingsDraft.snapMode = sanitizeGridSnapMode(button.dataset.settingsSnapMode, state.settingsDraft.snapMode);
+    syncSettingsMenu();
+  });
+}
+
+for (const button of settingsAlignSnapButtons) {
+  button.addEventListener("click", () => {
+    if (!state.settingsDraft) return;
+    state.settingsDraft.alignSnap = sanitizeAlignSnapValue(
+      button.dataset.settingsAlignSnap,
+      state.settingsDraft.alignSnap
+    );
     syncSettingsMenu();
   });
 }

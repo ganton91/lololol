@@ -22,6 +22,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 
 - `index.html` contains the canvas, toolbar, zoom controls, live workplane status readout, hint area, and layers panel.
 - `index.html` now also contains a centered settings modal shell with a backdrop for unit, snapping, and canvas edge/corner display configuration.
+- `index.html` now also contains an export-download notice modal that shares the same centered modal language and shared backdrop behavior.
 - `app.js` reads those DOM elements and drives the whole interaction loop.
 - The app still runs as a plain browser project without a bundler.
 - The preferred project direction is to remain compatible with plain browser deployment through native ES modules and static hosting (for example GitHub Pages or similar simple web hosting) without requiring a build step just to run the app.
@@ -97,6 +98,38 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - A temporary candidate becomes a persistent dynamic family only when the user commits a real draw or subtract operation under that regime; otherwise it is discarded when the plane is reset or switched back into a known or already-persistent family.
 - The browser console exposes the draft-angle store and a live registry view for persistent draft-angle families for debugging.
 
+### Project Persistence Model
+
+- The app now supports project export and import through a strict app-native JSON project file format with `app = millimetre` and a single supported `version = 1`.
+- Export/import is based on the app's real project state, not on a lossy visual snapshot.
+- Export preserves the stable reopenable project state, including:
+  - `drawingsUi`
+  - `layers`
+  - `shapes`
+  - `activeDrawingId`
+  - `activeLayerId`
+  - `nextDrawingId`
+  - `nextLayerId`
+  - `nextShapeId`
+  - current `tool`
+  - current `shapeType`
+  - current size controls (`drawSize` and `stripCellWidth`)
+  - `layerSectionCollapsed`
+  - `settings`
+  - `draftOrigin`
+  - `camera`
+  - stable selection membership via `selection.shapeIds`
+  - draft-angle snapshot state (`nextFamilyId`, `familyRecords`, `candidateRecord`, `activeState`)
+- Shape `bounds` are treated as derived data and are recomputed on import instead of being trusted from the file.
+- Import is strict and does not attempt backward compatibility or migration for unsupported versions or schemas.
+- Import replaces the current project only after an explicit confirmation step.
+- The app remembers the current project filename in runtime state:
+  - importing a file adopts that imported filename as the next export suggestion
+  - exporting through the save picker updates the remembered export filename to the chosen save name
+- When the browser supports `showSaveFilePicker`, export uses it so the user can choose the destination folder directly.
+- When the browser does not support `showSaveFilePicker`, export falls back to the browser's normal JSON download flow using the remembered filename as the suggested download name.
+- That fallback path shows a dedicated informational modal only the first time it is used in the current page session, explaining that direct save-to-folder support is unavailable in the current browser.
+
 ### Layer Model
 
 Each layer currently has:
@@ -171,6 +204,8 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The top bar now shows a live workplane status readout with the current plane mode (`default` when the workplane is unmodified, otherwise `custom`), rotation in degrees formatted to up to `2` decimal places, and origin coordinates formatted in the active display unit.
 - The settings modal now exposes `Outline` and `Corners` toggles; `Outline` also includes a color swatch, while `Corners` inherits that same outline color and is disabled whenever `Outline` is off.
 - The settings modal now also exposes `Align Snap` with `Off`, `15deg`, `30deg`, `45deg`, and `90deg` options for workplane align-drag magnetic snapping.
+- The top bar `Export` button now exports the current project state through either the browser save picker or the browser's normal download flow, depending on browser capability.
+- The top bar `Import` button now imports a project file and replaces the current project after confirmation if the file passes strict validation.
 - In `Select`, the draft canvas (`Grid` + draft-plane axes) is hidden while the `World` axes remain visible underneath the scene.
 - In `Draw`, both the `World` axes and the draft canvas are visible; the `World` axes render underneath the layer geometry, the draft canvas renders above the regular layer geometry, and the active layer's emphasized outline/corners are then re-drawn on top of the draft canvas.
 - `Select` supports marquee selection in draft/screen space: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed by or intersect the box.
@@ -262,7 +297,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The active task has been reset from the old `Renders` planning track to interface implementation.
 - The real dimensions / units task is no longer an active tracked task; its accepted outcome now lives in the permanent sections above.
 - The current app shell now includes the `millimétré` top bar with the current button order, brand styling, separator, translucent surface treatment, and hover behavior.
-- The `Settings` button in the top bar is now wired to a real modal; the remaining top bar buttons are still visual-only placeholders.
+- The `Settings`, `Export`, and `Import` buttons in the top bar are now wired to real behavior; `Undo` and `Redo` remain visual-only placeholders.
 - The settings modal now uses a single `Settings` heading with extra breathing room before the rows.
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
 - The canvas shell now includes four-sided drafting rulers around the live canvas viewport plus all four corner blocks, with the inner drawing viewport inset inside that frame.
@@ -294,90 +329,3 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The layer-card object count now refreshes immediately after committed draw/subtract operations and after committed geometry rebuilds caused by moving selected shapes.
 - The old bottom-left instructional hint panel inside the canvas shell has been removed completely, including its markup and styling.
 - The canvas background now uses a warmer off-white canvas tone, while the grid keeps the app's own line widths and transparency-style hierarchy using darker light-theme strokes derived from the same palette rather than a single opaque color.
-
-### Current Task 2: Export / Import
-
-- Task: design and implement project export/import for the editor so a full working document can be saved and restored reliably.
-- Status: implementation is active. Core project I/O now exists, and the current follow-up is polishing/export compatibility behavior across browsers before this task is moved into the permanent sections.
-
-#### Direction
-
-- Export/import should be based on the app's real project state, not on a lossy visual snapshot.
-- The saved format should preserve drawings, layers, shapes, settings, workplane state, and draft-angle family data needed to reopen the project faithfully.
-- Export should preserve the full current project state at the moment of save, not just the document geometry.
-- The only intentional exclusions are incomplete transient interactions that are currently in progress and cannot be resumed cleanly, such as a half-finished tool gesture, drag, or similar mid-operation state.
-- All other stable reopenable state at the moment of export should round-trip through export/import.
-- The first implementation should prioritize a stable app-native project file over external CAD interchange formats.
-- Import does not need backward or cross-version compatibility for older app file formats. If the file version or schema is not exactly supported, the app should reject it and show a clear unsupported-file / unsupported-version message instead of attempting a migration.
-- Export should keep using the current project filename as its default suggested save name.
-- If the user imports a project file, that imported filename becomes the current project's default export filename.
-- If the user exports the project under a chosen filename, later exports should keep suggesting that same filename until another import or explicit export rename replaces it.
-- When the browser supports `showSaveFilePicker`, export should use it so the user can choose the destination folder directly.
-- When the browser does not support `showSaveFilePicker`, export should still proceed through the browser's normal download flow instead of failing.
-- That fallback export path should also show a small informational modal explaining that folder-targeted save is unavailable in the current browser and that Chrome or another compatible browser is better for direct save-to-folder behavior.
-
-#### Schema V1
-
-- The first file format should be a strict app-native JSON project file with a single supported `version`.
-- The top-level export payload should include:
-  - app/format metadata
-  - file format `version`
-  - document state
-  - workspace/view state
-  - draft-angle snapshot state
-- The document state should include:
-  - `drawingsUi`
-  - `layers`
-  - `shapes`
-  - `activeDrawingId`
-  - `activeLayerId`
-  - `nextDrawingId`
-  - `nextLayerId`
-  - `nextShapeId`
-- The workspace/view state should include:
-  - current `tool`
-  - current `shapeType`
-  - current size controls (`drawSize` and `stripCellWidth`)
-  - `layerSectionCollapsed`
-  - `settings`
-  - `draftOrigin`
-  - `camera`
-  - stable selection membership via `selection.shapeIds`
-- The draft-angle state should be exported from the store snapshot and should include:
-  - `nextFamilyId`
-  - `familyRecords`
-  - `candidateRecord`
-  - `activeState`
-- Shape geometry should be saved from the canonical vector geometry model.
-- Shape `bounds` are treated as derived data and should be recomputed on import rather than trusted from the file.
-- The import validator should reject files whose top-level shape does not match the exact supported schema version.
-
-#### Explicit Exclusions
-
-- The export file should not include transient interaction state that is only meaningful mid-gesture, including:
-  - pointer position fields
-  - drag flags
-  - pan-in-progress state
-  - draft-align drag state
-  - in-progress brush memory points
-  - unfinished preview geometry
-  - keyboard-held state such as active `Space` or `Shift`
-- The export file should not include temporary editing/UI draft state that should reset cleanly on reopen, including:
-  - rename-in-progress fields
-  - settings modal draft state
-  - pending selection drag snapshots
-  - any other helper/cache field that is recalculated during normal runtime
-
-#### Progress
-
-- The top-bar `Export` and `Import` buttons are now wired to real project I/O flows instead of remaining visual-only placeholders.
-- Export now writes a strict app-native JSON project file with `app = millimetre` and a single supported `version = 1`.
-- Export now includes the stable reopenable project state, including drawings, layers, shapes, active drawing/layer, counters, tool state, size controls, settings, camera, workplane origin, stable selection membership, and draft-angle snapshot state.
-- Export intentionally omits transient mid-gesture state and recomputes shape `bounds` on import instead of trusting them from the file.
-- Import now replaces the current project only after an explicit confirmation step.
-- Import now rejects unsupported file versions, malformed JSON, and broken cross-references instead of attempting compatibility or migration logic.
-- The import flow now restores the draft-angle store from serialized snapshot data and reapplies the restored workspace/view state to the live UI.
-- The export suggested filename is now remembered in runtime state; importing a file adopts that file's name as the next export suggestion, and saving through the picker updates the remembered export name.
-- Browsers without `showSaveFilePicker` now fall back to a normal JSON download using the remembered project filename as the suggested download name.
-- That fallback path now opens a dedicated modal explaining that the current browser downloaded the file through its standard download flow because direct save-to-folder support is unavailable there.
-- The fallback export notice is now session-scoped: it appears only the first time that fallback download path is used during the current page session, and later fallback exports continue silently.

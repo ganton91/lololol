@@ -177,7 +177,8 @@
         gap: 8px;
       }
 
-      .panel-section.collapsed .layer-list {
+      .panel-section.collapsed .layer-list,
+      .panel-section.collapsed .render-list {
         display: none;
       }
 
@@ -279,7 +280,8 @@
         padding-right: 2px;
       }
 
-      .drawing-card {
+      .drawing-card,
+      .render-card {
         display: grid;
         grid-template-columns: 16px minmax(0, 1fr);
         align-items: start;
@@ -291,13 +293,15 @@
         position: relative;
       }
 
-      .drawing-card.inactive-drawing {
+      .drawing-card.inactive-drawing,
+      .render-card.inactive-render {
         align-items: center;
         padding-top: 8px;
         padding-bottom: 8px;
       }
 
-      .drawing-card.active-drawing {
+      .drawing-card.active-drawing,
+      .render-card.active-render {
         background: rgba(17, 24, 39, 0.08);
         border-color: var(--ui-line-strong);
       }
@@ -308,16 +312,20 @@
         box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-text) 6%, transparent);
       }
 
-      .drawing-card.inactive-drawing .drawing-children {
+      .drawing-card.inactive-drawing .drawing-children,
+      .render-card.inactive-render .render-children {
         display: none;
       }
 
-      .drawing-card.dragging {
+      .drawing-card.dragging,
+      .render-card.dragging {
         opacity: 0.55;
       }
 
       .drawing-card.drag-insert-before::before,
-      .drawing-card.drag-insert-after::after {
+      .drawing-card.drag-insert-after::after,
+      .render-card.drag-insert-before::before,
+      .render-card.drag-insert-after::after {
         content: "";
         position: absolute;
         left: 8px;
@@ -328,26 +336,53 @@
         pointer-events: none;
       }
 
-      .drawing-card.drag-insert-before::before {
+      .drawing-card.drag-insert-before::before,
+      .render-card.drag-insert-before::before {
         top: -6px;
       }
 
-      .drawing-card.drag-insert-after::after {
+      .drawing-card.drag-insert-after::after,
+      .render-card.drag-insert-after::after {
         bottom: -6px;
       }
 
-      .drawing-main {
+      .drawing-main,
+      .render-main {
         display: flex;
         flex-direction: column;
         gap: 8px;
         min-width: 0;
       }
 
-      .drawing-children {
+      .drawing-children,
+      .render-children {
         grid-column: 1 / -1;
         display: flex;
         flex-direction: column;
         gap: 6px;
+      }
+
+      .render-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-right: 2px;
+      }
+
+      .render-empty-state {
+        padding: 2px 0 4px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .render-card-meta {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .render-card-meta-secondary {
+        font-size: 11px;
+        color: var(--muted);
       }
 
       .drawing-subsection {
@@ -957,6 +992,11 @@
         overflow: hidden;
       }
 
+      .canvas-shell.render-workspace-mode .canvas-stage,
+      .canvas-shell.render-workspace-mode .toolbar {
+        display: none;
+      }
+
       .canvas-stage {
         position: absolute;
         inset: 0;
@@ -1129,6 +1169,200 @@
         color: #0c4a6e;
       }
 
+      .render-workspace-shell {
+        position: absolute;
+        inset: 0;
+        display: none;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px 16px 92px;
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.32), transparent 34%),
+          linear-gradient(180deg, #f8f7f4, color-mix(in srgb, #f8f7f4 90%, black 4%));
+        overflow: auto;
+      }
+
+      .canvas-shell.render-workspace-mode .render-workspace-shell {
+        display: flex;
+      }
+
+      .render-layout-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .render-layout-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px;
+        border: 1px solid rgba(20, 24, 28, 0.1);
+        border-radius: 10px;
+        background: #ffffff;
+      }
+
+      .render-layout-button {
+        padding: 5px 7px;
+        border-radius: 7px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: #67707a;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        transition:
+          color 140ms ease,
+          background 140ms ease,
+          border-color 140ms ease,
+          opacity 140ms ease;
+      }
+
+      .render-layout-button:hover:not(:disabled) {
+        color: #161b21;
+      }
+
+      .render-layout-button.active {
+        background: rgba(17, 24, 39, 0.08);
+        border-color: rgba(20, 24, 28, 0.18);
+        color: #161b21;
+      }
+
+      .render-layout-button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      .render-layout-caption {
+        padding: 7px 10px;
+        border: 1px solid rgba(20, 24, 28, 0.1);
+        border-radius: 10px;
+        background: #ffffff;
+        color: #67707a;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.08);
+      }
+
+      .render-output-grid {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        gap: 12px;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .render-pane {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid var(--ui-line);
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--panel) 92%, transparent);
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
+      }
+
+      .render-pane-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .render-pane-title-wrap {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .render-pane-title-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .render-pane-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--ui-text);
+      }
+
+      .render-pane-meta {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .render-pane-surface {
+        flex: 1;
+        min-height: 220px;
+        display: grid;
+        place-items: center;
+        border-radius: 8px;
+        border: 1px dashed var(--ui-line);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.76)),
+          var(--canvas-bg);
+      }
+
+      .render-pane-empty {
+        max-width: 520px;
+        padding: 16px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+        text-align: center;
+      }
+
+      .workspace-switcher {
+        position: absolute;
+        left: 50%;
+        bottom: 38px;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid rgba(20, 24, 28, 0.1);
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.08);
+        transform: translateX(-50%);
+        z-index: 11;
+      }
+
+      .workspace-switcher-button {
+        padding: 7px 11px;
+        border: 0;
+        border-radius: 12px;
+        background: transparent;
+        box-shadow: none;
+        color: #67707a;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: 140ms ease;
+      }
+
+      .workspace-switcher-button:hover {
+        background: rgba(255, 255, 255, 0.95);
+        color: #161b21;
+      }
+
+      .workspace-switcher-button.active {
+        background: rgba(17, 24, 39, 0.08);
+        color: #161b21;
+      }
+
       .workplane-status {
         font-size: 11px;
         color: var(--muted);
@@ -1178,6 +1412,19 @@
               </div>
               <div id="layers-list" class="layer-list"></div>
             </div>
+
+            <div class="panel-section" id="renderSection">
+              <div class="section-header">
+                <div class="section-header-left">
+                  <button class="section-toggle" id="renderSectionToggle" type="button" aria-expanded="true">
+                    <span class="section-toggle-arrow" aria-hidden="true"></span>
+                    <span class="section-header-title">Renders</span>
+                  </button>
+                </div>
+                <button class="section-header-action" id="addRenderButton" type="button" aria-label="Add render"></button>
+              </div>
+              <div id="renders-list" class="render-list"></div>
+            </div>
           </div>
           <input id="layer-fill" class="layer-color-picker-input" type="color" value="#93c5fd" tabindex="-1" aria-hidden="true" />
         </aside>
@@ -1203,6 +1450,7 @@
 
             <select id="shape-select" class="shape-select" aria-label="Shape">
               <option value="rect">Rectangle</option>
+              <option value="rbox">Rbox</option>
               <option value="ellipse">Ellipse</option>
               <option value="strip">Stroke Rect</option>
               <option value="square-brush">Square Brush</option>
@@ -1222,6 +1470,36 @@
             <button id="zoom-in" class="tool-btn" type="button" aria-label="Zoom in">+</button>
             <span id="zoom-level" style="font-size: 12px; color: #334155; min-width: 52px">100%</span>
           </div>
+
+          <div class="render-workspace-shell" id="renderWorkspaceShell" aria-hidden="true">
+            <div class="render-layout-toolbar">
+              <div class="render-layout-group" aria-hidden="true">
+                <button class="render-layout-button active" type="button" disabled>1 Side</button>
+                <button class="render-layout-button" type="button" disabled>2 Sides</button>
+                <button class="render-layout-button" type="button" disabled>4 Sides</button>
+              </div>
+              <div class="render-layout-caption">Render Workspace</div>
+            </div>
+
+            <div class="render-output-grid" id="renderOutputGrid">
+              <section class="render-pane">
+                <div class="render-pane-header">
+                  <div class="render-pane-title-wrap">
+                    <div class="render-pane-title-label">Rbox</div>
+                    <div class="render-pane-title" id="renderWorkspaceTitle">Rbox</div>
+                    <div class="render-pane-meta" id="renderWorkspaceMeta">Render box metadata will appear here.</div>
+                  </div>
+                </div>
+                <div class="render-pane-surface">
+                  <div class="render-pane-empty" id="renderWorkspaceEmpty">
+                    Render workspace shell ready. Render Box authoring happens in Main via Draw > Rbox. Live render output will be added in later steps.
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div class="workspace-switcher" id="workspaceSwitcher"></div>
         </div>
       </div>
     </div>

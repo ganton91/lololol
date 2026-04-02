@@ -34,13 +34,23 @@ const draftRulerLeft = document.getElementById("draft-ruler-left");
 const draftRulerBottom = document.getElementById("draft-ruler-bottom");
 const draftRulerRight = document.getElementById("draft-ruler-right");
 const layersPanel = document.getElementById("layersPanel");
+const canvasShell = document.querySelector(".canvas-shell");
 const layerSection = document.getElementById("layerSection");
 const layerSectionToggle = document.getElementById("layerSectionToggle");
 const layersList = document.getElementById("layers-list");
+const renderSection = document.getElementById("renderSection");
+const renderSectionToggle = document.getElementById("renderSectionToggle");
+const rendersList = document.getElementById("renders-list");
 const layerAddBtn = document.getElementById("addLayerButton");
 const addDrawingBtn = document.getElementById("addDrawingButton");
+const addRenderBtn = document.getElementById("addRenderButton");
 const layerFillInput = document.getElementById("layer-fill");
 const projectImportInput = document.getElementById("projectImportInput");
+const workspaceSwitcher = document.getElementById("workspaceSwitcher");
+const renderWorkspaceShell = document.getElementById("renderWorkspaceShell");
+const renderWorkspaceTitle = document.getElementById("renderWorkspaceTitle");
+const renderWorkspaceMeta = document.getElementById("renderWorkspaceMeta");
+const renderWorkspaceEmpty = document.getElementById("renderWorkspaceEmpty");
 const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
 const settingsCellUnitButtons = Array.from(document.querySelectorAll("[data-settings-cell-unit]"));
 const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-settings-snap-mode]"));
@@ -76,6 +86,7 @@ const state = {
   shapes: [],
   drawingsUi: [{ id: "drawing-1", name: "Drawing 1", expanded: true, visible: true, layersSectionCollapsed: false }],
   layerSectionCollapsed: false,
+  renderSectionCollapsed: false,
   layers: [
     {
       id: "layer-1",
@@ -91,6 +102,8 @@ const state = {
   renders: [],
   activeDrawingId: "drawing-1",
   activeLayerId: "layer-1",
+  activeRenderId: null,
+  renderTransformDrag: null,
   activeWorkspaceTab: { ...DEFAULT_ACTIVE_WORKSPACE_TAB },
   nextDrawingId: 2,
   editingDrawingId: null,
@@ -101,6 +114,7 @@ const state = {
   editingLayerInitialName: "",
   editingRenderId: null,
   editingRenderNameDraft: "",
+  editingRenderInitialName: "",
   nextLayerId: 2,
   nextShapeId: 1,
   nextRenderId: 1,
@@ -160,6 +174,9 @@ const state = {
 
 const selectionStrokeColor = "#0ea5e9";
 const previewStrokeColor = "#0284c7";
+const renderBoxStrokeColor = "#f97316";
+const renderBoxStrokeColorSoft = "rgba(249, 115, 22, 0.96)";
+const renderBoxLabelFont = "600 11px IBM Plex Sans, Segoe UI, sans-serif";
 const previewStrokeWidth = 1.5;
 const vertexMarkerRadiusPx = 2.5;
 const activeLayerOutlineWidthFactor = 1.64;
@@ -611,7 +628,7 @@ function sanitizeProjectTool(tool, fallback = state.tool) {
 }
 
 function sanitizeProjectShapeType(shapeType, fallback = state.shapeType) {
-  return shapeType === "rect" || shapeType === "ellipse" || shapeType === "strip" || shapeType === "square-brush"
+  return shapeType === "rect" || shapeType === "rbox" || shapeType === "ellipse" || shapeType === "strip" || shapeType === "square-brush"
     ? shapeType
     : fallback;
 }
@@ -714,14 +731,267 @@ function cloneActiveWorkspaceTab(workspaceTab = DEFAULT_ACTIVE_WORKSPACE_TAB, re
   return { kind: "main" };
 }
 
+function sanitizeRenderBoxGeometry(boxGeometry = null) {
+  if (!Array.isArray(boxGeometry)) return [];
+
+  const nextPoints = [];
+  for (const point of boxGeometry) {
+    if (!isPlainObject(point)) return [];
+    const x = Number(point.x);
+    const y = Number(point.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
+    nextPoints.push(quantizePoint({ x, y }));
+  }
+
+  return nextPoints.length === 4 ? nextPoints : [];
+}
+
+function cloneRenderBoxGeometry(boxGeometry = null) {
+  return sanitizeRenderBoxGeometry(boxGeometry).map((point) => ({ ...point }));
+}
+
+function getRenderBoxMetrics(render) {
+  const boxGeometry = sanitizeRenderBoxGeometry(render?.boxGeometry);
+  if (boxGeometry.length !== 4) {
+    return {
+      boxGeometry: [],
+      width: 0,
+      height: 0,
+      anchor: null,
+      center: null,
+      isValid: false,
+    };
+  }
+
+  const width = quantizeCoordinate(distanceBetweenPoints(boxGeometry[0], boxGeometry[1]));
+  const height = quantizeCoordinate(distanceBetweenPoints(boxGeometry[1], boxGeometry[2]));
+  const anchor = { ...boxGeometry[0] };
+  const center = quantizePoint({
+    x: boxGeometry.reduce((sum, point) => sum + point.x, 0) / boxGeometry.length,
+    y: boxGeometry.reduce((sum, point) => sum + point.y, 0) / boxGeometry.length,
+  });
+
+  return {
+    boxGeometry,
+    width,
+    height,
+    anchor,
+    center,
+    isValid: width > 1e-6 && height > 1e-6,
+  };
+}
+
+function getRenderBoxGeometryFromDraftRect(startDraft, currentDraft) {
+  const rect = getSelectionBoxRect(startDraft, currentDraft);
+  if (!rect || rect.w <= 1e-6 || rect.h <= 1e-6) return [];
+  return getSelectionBoxCorners(rect).map((point) => draftToWorld(point));
+}
+
 function cloneRenderRecord(render) {
   return {
     id: render.id,
     name: render.name,
     visible: render.visible !== false,
-    boxBounds: sanitizeProjectBounds(render.boxBounds, { x: 0, y: 0, w: 0, h: 0 }, true),
+    boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
     sectionSettings: cloneRenderSectionSettings(render.sectionSettings),
   };
+}
+
+function getRenderTabLabel(render, index = state.renders.findIndex((entry) => entry.id === render?.id)) {
+  const fallbackIndex = index >= 0 ? index + 1 : 1;
+  const trimmedName = typeof render?.name === "string" ? render.name.trim() : "";
+  return trimmedName || `Rbox ${fallbackIndex}`;
+}
+
+function getRenderBoxSummary(render) {
+  const metrics = getRenderBoxMetrics(render);
+  if (!metrics.isValid) return "No Render Box Yet";
+  return `Box ${formatLengthWithUnit(metrics.width)} × ${formatLengthWithUnit(metrics.height)}`;
+}
+
+function getRenderSectionSummary(render) {
+  const sections = cloneRenderSectionSettings(render?.sectionSettings);
+  return `Sections Z ${sections.z.length} | X ${sections.x.length} | Y ${sections.y.length}`;
+}
+
+function getActiveRenderRecord() {
+  if (state.activeWorkspaceTab?.kind !== "render") return null;
+  return state.renders.find((render) => render.id === state.activeWorkspaceTab.renderId) || null;
+}
+
+function getSelectedRenderRecord() {
+  return getRenderById(state.activeRenderId);
+}
+
+function getRenderBoxShape(render) {
+  const metrics = getRenderBoxMetrics(render);
+  if (!metrics.isValid || metrics.boxGeometry.length !== 4) return null;
+
+  const geometry = [[metrics.boxGeometry.map((point) => [point.x, point.y])]];
+  return {
+    geometry,
+    bounds: getGeometryBounds(geometry),
+  };
+}
+
+function getRenderTransformHit(render, worldPoint, radius = 8 / state.camera.zoom) {
+  if (!render || !worldPoint) return null;
+  const shape = getRenderBoxShape(render);
+  if (!shape) return null;
+  if (!boundsTouch(shape.bounds, { x: worldPoint.x, y: worldPoint.y, w: 0, h: 0 }, radius)) return null;
+  if (pointInShapeFill(shape, worldPoint.x, worldPoint.y)) return { type: "move" };
+  return distanceToShapeBoundary(shape, worldPoint.x, worldPoint.y) <= radius ? { type: "move" } : null;
+}
+
+function moveRenderBoxBy(render, dx, dy) {
+  if (!render) return;
+  render.boxGeometry = cloneRenderBoxGeometry(render.boxGeometry).map((point) =>
+    quantizePoint({
+      x: point.x + dx,
+      y: point.y + dy,
+    })
+  );
+}
+
+function deactivateActiveRenderBox() {
+  state.renderTransformDrag = null;
+  state.dragging = false;
+  state.activeRenderId = null;
+  updateCursor();
+  renderLayersPanel();
+  render();
+}
+
+function activateRenderBox(renderId) {
+  const renderRecord = getRenderById(renderId);
+  if (!renderRecord) return false;
+  if (state.activeRenderId === renderId) {
+    deactivateActiveRenderBox();
+    return false;
+  }
+
+  cancelDrawInteraction();
+  cancelSelectionInteraction();
+  cancelDraftAlignDrag();
+  state.panning = false;
+  state.draggingDraftOrigin = false;
+  state.draftOriginDragRotation = null;
+  clearSelection();
+  state.activeWorkspaceTab = { kind: "main" };
+  state.activeRenderId = renderId;
+  updateCursor();
+  renderLayersPanel();
+  render();
+  return true;
+}
+
+function isMainWorkspaceActive() {
+  return !getActiveRenderRecord();
+}
+
+function describeRenderBounds(render) {
+  const metrics = getRenderBoxMetrics(render);
+  if (!metrics.isValid || !metrics.anchor || !metrics.center) {
+    return "No Render Box Yet";
+  }
+  return [
+    `Box ${formatLengthWithUnit(metrics.width)} × ${formatLengthWithUnit(metrics.height)}`,
+    `World anchor ${formatLengthWithUnit(metrics.anchor.x)}, ${formatLengthWithUnit(metrics.anchor.y)}`,
+    `Center ${formatLengthWithUnit(metrics.center.x)}, ${formatLengthWithUnit(metrics.center.y)}`,
+  ].join("  |  ");
+}
+
+function setActiveWorkspaceTab(workspaceTab) {
+  const validRenderIds = new Set(state.renders.map((render) => render.id));
+  const nextTab = cloneActiveWorkspaceTab(workspaceTab, validRenderIds);
+  const currentTab = cloneActiveWorkspaceTab(state.activeWorkspaceTab, validRenderIds);
+  const stateNeedsNormalization =
+    state.activeWorkspaceTab?.kind !== currentTab.kind || state.activeWorkspaceTab?.renderId !== currentTab.renderId;
+  const unchanged = currentTab.kind === nextTab.kind && currentTab.renderId === nextTab.renderId;
+  if (unchanged && !stateNeedsNormalization) return false;
+
+  if (state.editingRenderId) {
+    const editingRender = getRenderById(state.editingRenderId);
+    if (!editingRender || nextTab.kind !== "render" || nextTab.renderId !== state.editingRenderId) {
+      const nextName = String(state.editingRenderNameDraft || "").trim();
+      if (editingRender) {
+        editingRender.name = nextName || state.editingRenderInitialName || editingRender.name;
+      }
+      state.editingRenderId = null;
+      state.editingRenderNameDraft = "";
+      state.editingRenderInitialName = "";
+    }
+  }
+
+  cancelDrawInteraction();
+  cancelSelectionInteraction();
+  cancelDraftAlignDrag();
+  state.panning = false;
+  state.draggingDraftOrigin = false;
+  state.draftOriginDragRotation = null;
+  state.activeWorkspaceTab = nextTab;
+  if (nextTab.kind === "render") state.activeRenderId = null;
+  state.pointerInCanvas = false;
+  updateCursor();
+  renderLayersPanel();
+  render();
+  return true;
+}
+
+function renderWorkspaceSwitcher() {
+  if (!workspaceSwitcher) return;
+  workspaceSwitcher.innerHTML = "";
+
+  const mainButton = document.createElement("button");
+  mainButton.type = "button";
+  mainButton.className = "workspace-switcher-button" + (isMainWorkspaceActive() ? " active" : "");
+  mainButton.textContent = "Main";
+  mainButton.addEventListener("click", () => {
+    setActiveWorkspaceTab({ kind: "main" });
+  });
+  workspaceSwitcher.appendChild(mainButton);
+
+  state.renders.forEach((renderRecord, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    const active = state.activeWorkspaceTab?.kind === "render" && state.activeWorkspaceTab.renderId === renderRecord.id;
+    button.className = "workspace-switcher-button" + (active ? " active" : "");
+    button.textContent = getRenderTabLabel(renderRecord, index);
+    button.addEventListener("click", () => {
+      setActiveWorkspaceTab({ kind: "render", renderId: renderRecord.id });
+    });
+    workspaceSwitcher.appendChild(button);
+  });
+}
+
+function syncRenderWorkspaceShell() {
+  const validRenderIds = new Set(state.renders.map((render) => render.id));
+  state.activeWorkspaceTab = cloneActiveWorkspaceTab(state.activeWorkspaceTab, validRenderIds);
+
+  const activeRender = getActiveRenderRecord();
+  if (canvasShell) {
+    canvasShell.classList.toggle("render-workspace-mode", !!activeRender);
+  }
+  if (renderWorkspaceShell) {
+    renderWorkspaceShell.setAttribute("aria-hidden", String(!activeRender));
+  }
+  if (!activeRender) return;
+
+  if (renderWorkspaceTitle) {
+    renderWorkspaceTitle.textContent = getRenderTabLabel(activeRender);
+  }
+  if (renderWorkspaceMeta) {
+    renderWorkspaceMeta.textContent = describeRenderBounds(activeRender);
+  }
+  if (renderWorkspaceEmpty) {
+    renderWorkspaceEmpty.textContent =
+      `${getRenderTabLabel(activeRender)} workspace shell ready. Render Box authoring happens in Main via Draw > Rbox. Live render output will be added in later steps.`;
+  }
+}
+
+function renderWorkspaceUi() {
+  renderWorkspaceSwitcher();
+  syncRenderWorkspaceShell();
 }
 
 function createProjectFilePayload() {
@@ -875,8 +1145,8 @@ function normalizeImportedRenderRecords(renders) {
     if (!id || seenIds.has(id)) {
       throw createProjectImportError("Unsupported project file: render ids must be unique.");
     }
-    if (!isPlainObject(render.boxBounds)) {
-      throw createProjectImportError("Unsupported project file: render bounds are invalid.");
+    if (!Array.isArray(render.boxGeometry)) {
+      throw createProjectImportError("Unsupported project file: render box geometry is invalid.");
     }
     seenIds.add(id);
 
@@ -885,9 +1155,9 @@ function normalizeImportedRenderRecords(renders) {
       name:
         typeof render.name === "string" && render.name.trim()
           ? render.name.trim()
-          : `Render ${index + 1}`,
+          : `Rbox ${index + 1}`,
       visible: render.visible !== false,
-      boxBounds: sanitizeProjectBounds(render.boxBounds, { x: 0, y: 0, w: 0, h: 0 }, true),
+      boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
       sectionSettings: cloneRenderSectionSettings(render.sectionSettings),
     };
   });
@@ -1084,6 +1354,7 @@ function resetProjectInteractionState() {
   state.draftAlignCurrentSnap = null;
   state.squareBrushMemoryPoint = null;
   state.settingsDraft = null;
+  state.renderSectionCollapsed = false;
   state.editingDrawingId = null;
   state.editingDrawingNameDraft = "";
   state.editingDrawingInitialName = "";
@@ -1092,6 +1363,9 @@ function resetProjectInteractionState() {
   state.editingLayerInitialName = "";
   state.editingRenderId = null;
   state.editingRenderNameDraft = "";
+  state.editingRenderInitialName = "";
+  state.activeRenderId = null;
+  state.renderTransformDrag = null;
   state.pendingRenderBox = null;
   state.spacePressed = false;
   state.shiftPressed = false;
@@ -1118,6 +1392,7 @@ function applyImportedProject(normalizedProject, importedFileName = DEFAULT_PROJ
   state.nextShapeId = normalizedProject.document.nextShapeId;
   state.nextRenderId = normalizedProject.document.nextRenderId;
   state.activeWorkspaceTab = cloneActiveWorkspaceTab(normalizedProject.workspace.activeWorkspaceTab, new Set(state.renders.map((render) => render.id)));
+  state.activeRenderId = null;
   state.settings = cloneSettings(normalizedProject.workspace.settings);
   state.projectFileName = sanitizeProjectFileName(importedFileName, state.projectFileName);
   state.draftOrigin = { ...normalizedProject.workspace.draftOrigin };
@@ -1271,6 +1546,18 @@ function applySettingsDraft() {
 }
 
 function updateCursor() {
+  if (state.renderTransformDrag) {
+    canvas.style.cursor = "move";
+    return;
+  }
+
+  if (state.activeRenderId) {
+    const activeRender = getSelectedRenderRecord();
+    const hit = activeRender ? getRenderTransformHit(activeRender, state.current) : null;
+    canvas.style.cursor = hit ? "move" : "default";
+    return;
+  }
+
   if (state.draggingDraftAlign) {
     canvas.style.cursor = "crosshair";
     return;
@@ -1344,6 +1631,23 @@ function createDrawingWithDefaultLayer(name = "Drawing " + state.nextDrawingId) 
   const drawing = createDrawingUiRecord(name);
   const layer = createLayerRecord(drawing.id);
   return { drawing, layer };
+}
+
+function getRenderById(id) {
+  return state.renders.find((render) => render.id === id) || null;
+}
+
+function createRenderRecord(options = {}) {
+  const id = "render-" + state.nextRenderId;
+  const fallbackName = "Rbox " + state.nextRenderId;
+  state.nextRenderId += 1;
+  return {
+    id,
+    name: typeof options.name === "string" && options.name.trim() ? options.name.trim() : fallbackName,
+    visible: options.visible !== false,
+    boxGeometry: cloneRenderBoxGeometry(options.boxGeometry),
+    sectionSettings: cloneRenderSectionSettings(options.sectionSettings),
+  };
 }
 
 function getPrimaryDrawingUi() {
@@ -1576,6 +1880,14 @@ function getLayerCardElement(layerId) {
   return layersList.querySelector(`.layer-card[data-layer-id="${layerId}"]`);
 }
 
+function getRenderCardElements() {
+  return rendersList ? Array.from(rendersList.querySelectorAll(".render-card")) : [];
+}
+
+function getRenderCardElement(renderId) {
+  return rendersList ? rendersList.querySelector(`.render-card[data-render-id="${renderId}"]`) : null;
+}
+
 function isClientPointInsideRect(clientX, clientY, rect) {
   return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
 }
@@ -1655,6 +1967,12 @@ function reorderDrawingsFromVisualOrder(visualDrawingIds) {
   state.drawingsUi = reordered;
 }
 
+function reorderRendersFromVisualOrder(visualRenderIds) {
+  const reordered = visualRenderIds.map((renderId) => getRenderById(renderId)).filter(Boolean);
+  if (reordered.length !== state.renders.length) return;
+  state.renders = reordered;
+}
+
 function reorderLayersForDrawingFromVisualOrder(drawingId, visualLayerIds) {
   const drawingLayers = getLayersForDrawingInStorageOrder(drawingId);
   if (!drawingLayers.length) return;
@@ -1680,6 +1998,35 @@ function drawingDropPositionFromClientY(clientY, sourceDrawingId) {
   if (fromIndex === -1) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
 
   const cards = getDrawingCardElements();
+  if (!cards.length) return { rawIndex: fromIndex, toIndex: fromIndex, fromIndex };
+
+  let rawIndex = cards.length;
+  for (let index = 0; index < cards.length; index += 1) {
+    const rect = cards[index].getBoundingClientRect();
+    if (clientY < rect.top + rect.height * 0.5) {
+      rawIndex = index;
+      break;
+    }
+  }
+
+  let toIndex = rawIndex;
+  if (toIndex > fromIndex) toIndex -= 1;
+
+  return {
+    rawIndex,
+    toIndex: Math.max(0, Math.min(items.length - 1, toIndex)),
+    fromIndex,
+  };
+}
+
+function renderDropPositionFromClientY(clientY, sourceRenderId) {
+  const items = state.renders;
+  if (!items.length) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const fromIndex = items.findIndex((render) => render.id === sourceRenderId);
+  if (fromIndex === -1) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const cards = getRenderCardElements();
   if (!cards.length) return { rawIndex: fromIndex, toIndex: fromIndex, fromIndex };
 
   let rawIndex = cards.length;
@@ -1747,6 +2094,22 @@ function updateDrawingDropIndicator(rawIndex, toIndex, fromIndex) {
   cards[Math.max(0, rawIndex)].classList.add("drag-insert-before");
 }
 
+function updateRenderDropIndicator(rawIndex, toIndex, fromIndex) {
+  clearLeftPanelDropIndicatorClasses(rendersList);
+
+  if (!state.leftPanelPointerDrag || toIndex === -1 || fromIndex === -1 || toIndex === fromIndex) return;
+
+  const cards = getRenderCardElements();
+  if (!cards.length) return;
+
+  if (rawIndex >= cards.length) {
+    cards[cards.length - 1].classList.add("drag-insert-after");
+    return;
+  }
+
+  cards[Math.max(0, rawIndex)].classList.add("drag-insert-before");
+}
+
 function updateLayerDropIndicator(drawingId, rawIndex, toIndex, fromIndex) {
   const list = getLayerListElementForDrawing(drawingId);
   clearLeftPanelDropIndicatorClasses(list);
@@ -1771,6 +2134,8 @@ function clearLeftPanelPointerDrag(commit = true) {
   if (drag.sourceCard) drag.sourceCard.classList.remove("dragging");
   if (drag.type === "drawing") {
     clearLeftPanelDropIndicatorClasses(layersList);
+  } else if (drag.type === "render") {
+    clearLeftPanelDropIndicatorClasses(rendersList);
   } else {
     clearLeftPanelDropIndicatorClasses(getLayerListElementForDrawing(drag.drawingId));
   }
@@ -1801,6 +2166,10 @@ function clearLeftPanelPointerDrag(commit = true) {
       const currentVisualDrawings = state.drawingsUi.map((drawing) => drawing.id);
       const nextVisualDrawings = moveArrayItem(currentVisualDrawings, drag.fromIndex, drag.dropIndex);
       reorderDrawingsFromVisualOrder(nextVisualDrawings);
+    } else if (drag.type === "render") {
+      const currentVisualRenders = state.renders.map((render) => render.id);
+      const nextVisualRenders = moveArrayItem(currentVisualRenders, drag.fromIndex, drag.dropIndex);
+      reorderRendersFromVisualOrder(nextVisualRenders);
     } else {
       const currentVisualLayers = getLayersForDrawing(drag.drawingId).map((layer) => layer.id);
       const nextVisualLayers = moveArrayItem(currentVisualLayers, drag.fromIndex, drag.dropIndex);
@@ -1837,6 +2206,31 @@ function beginDrawingPointerDrag(event, card, drawingId) {
   };
 
   updateDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
+}
+
+function beginRenderPointerDrag(event, card, renderId) {
+  if (!card || !renderId || !rendersList) return;
+  if (event.button !== 0) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  clearLeftPanelPointerDrag(false);
+
+  card.classList.add("dragging");
+  if (layersPanel) layersPanel.classList.add("drag-reordering");
+
+  const drop = renderDropPositionFromClientY(event.clientY, renderId);
+  state.leftPanelPointerDrag = {
+    type: "render",
+    pointerId: event.pointerId,
+    renderId,
+    sourceCard: card,
+    dropIndex: drop.toIndex,
+    rawIndex: drop.rawIndex,
+    fromIndex: drop.fromIndex,
+  };
+
+  updateRenderDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
 }
 
 function beginLayerPointerDrag(event, card, drawingId, layerId) {
@@ -1937,6 +2331,29 @@ function endRenameLayer(commit = true) {
   renderLayersPanel();
 }
 
+function beginRenameRender(renderId) {
+  const renderRecord = getRenderById(renderId);
+  if (!renderRecord) return;
+  state.editingRenderId = renderId;
+  state.editingRenderInitialName = renderRecord.name;
+  state.editingRenderNameDraft = renderRecord.name;
+  renderLayersPanel();
+}
+
+function endRenameRender(commit = true) {
+  const renderRecord = getRenderById(state.editingRenderId);
+  if (commit && renderRecord) {
+    const nextName = String(state.editingRenderNameDraft || "").trim();
+    renderRecord.name = nextName || state.editingRenderInitialName || renderRecord.name;
+  }
+
+  state.editingRenderId = null;
+  state.editingRenderNameDraft = "";
+  state.editingRenderInitialName = "";
+  renderLayersPanel();
+  renderWorkspaceUi();
+}
+
 function syncDrawSizeInput() {
   if (isStripShapeType()) {
     drawSizeInput.disabled = false;
@@ -1969,12 +2386,16 @@ function isRectangleShapeType(shapeType = state.shapeType) {
   return shapeType === "rect";
 }
 
+function isRenderBoxShapeType(shapeType = state.shapeType) {
+  return shapeType === "rbox";
+}
+
 function isEllipseShapeType(shapeType = state.shapeType) {
   return shapeType === "ellipse";
 }
 
 function isBoxSnapShapeType(shapeType = state.shapeType) {
-  return isRectangleShapeType(shapeType) || isEllipseShapeType(shapeType);
+  return isRectangleShapeType(shapeType) || isRenderBoxShapeType(shapeType) || isEllipseShapeType(shapeType);
 }
 
 function isStripShapeType(shapeType = state.shapeType) {
@@ -2791,6 +3212,7 @@ function setDraftShapeFromGeometry(geometry) {
 
 function resetDrawSession() {
   state.draftShape = null;
+  state.pendingRenderBox = null;
   state.brushLastPoint = null;
   state.brushPoints = [];
   clearStripAxisLock();
@@ -3266,6 +3688,7 @@ function subtractGeometryFromLayer(layerId, subtractionGeometry) {
 
 function renderLayersPanel() {
   layersList.innerHTML = "";
+  if (rendersList) rendersList.innerHTML = "";
   const primaryDrawing = getPrimaryDrawingUi();
   if (primaryDrawing && !state.activeDrawingId) {
     setActiveDrawingById(primaryDrawing.id);
@@ -3274,6 +3697,11 @@ function renderLayersPanel() {
   if (layerSection && layerSectionToggle) {
     layerSection.classList.toggle("collapsed", state.layerSectionCollapsed);
     layerSectionToggle.setAttribute("aria-expanded", String(!state.layerSectionCollapsed));
+  }
+
+  if (renderSection && renderSectionToggle) {
+    renderSection.classList.toggle("collapsed", state.renderSectionCollapsed);
+    renderSectionToggle.setAttribute("aria-expanded", String(!state.renderSectionCollapsed));
   }
 
   for (const drawing of state.drawingsUi) {
@@ -3634,6 +4062,147 @@ function renderLayersPanel() {
     layersList.appendChild(drawingCard);
   }
 
+  if (rendersList) {
+    if (!state.renders.length) {
+      const emptyState = document.createElement("div");
+      emptyState.className = "render-empty-state";
+      emptyState.textContent = "No Rboxes yet.";
+      rendersList.appendChild(emptyState);
+    } else {
+      state.renders.forEach((renderRecord, index) => {
+        const isActive = state.activeRenderId === renderRecord.id;
+        const card = document.createElement("div");
+        card.className = "render-card" + (isActive ? " active-render" : " inactive-render");
+        card.dataset.renderId = renderRecord.id;
+        card.addEventListener("click", () => {
+          activateRenderBox(renderRecord.id);
+        });
+
+        const grip = document.createElement("div");
+        grip.className = "drag-handle";
+        grip.textContent = "⋮⋮";
+        grip.title = "Render handle";
+        grip.addEventListener("click", (event) => event.stopPropagation());
+        grip.addEventListener("pointerdown", (event) => {
+          beginRenderPointerDrag(event, card, renderRecord.id);
+        });
+
+        const main = document.createElement("div");
+        main.className = "render-main";
+
+        const header = document.createElement("div");
+        header.className = "card-header";
+
+        const titleWrap = document.createElement("div");
+        titleWrap.className = "card-header-title";
+
+        let nameField;
+        if (state.editingRenderId === renderRecord.id) {
+          const input = document.createElement("input");
+          input.className = "layer-name";
+          input.value = state.editingRenderNameDraft || renderRecord.name;
+          input.size = Math.max(1, input.value.length);
+          input.addEventListener("click", (event) => event.stopPropagation());
+          input.addEventListener("pointerdown", (event) => event.stopPropagation());
+          input.addEventListener("input", () => {
+            state.editingRenderNameDraft = input.value;
+            input.size = Math.max(1, input.value.length);
+          });
+          input.addEventListener("blur", endRenameRender);
+          input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.stopPropagation();
+              input.blur();
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              endRenameRender(false);
+            }
+          });
+          queueMicrotask(() => {
+            input.focus();
+            input.select();
+          });
+          nameField = input;
+        } else {
+          const label = document.createElement("div");
+          label.className = "layer-name-label";
+          label.textContent = getRenderTabLabel(renderRecord, index);
+          label.addEventListener("click", (event) => {
+            if (!isActive) return;
+            event.stopPropagation();
+            beginRenameRender(renderRecord.id);
+          });
+          nameField = label;
+        }
+        titleWrap.appendChild(nameField);
+
+        const inlineControls = document.createElement("div");
+        inlineControls.className = "inline-controls";
+
+        const duplicateInline = document.createElement("button");
+        duplicateInline.className = "inline-icon";
+        duplicateInline.type = "button";
+        duplicateInline.title = "Duplicate render";
+        duplicateInline.appendChild(createInlineIcon("duplicate"));
+        duplicateInline.addEventListener("click", (event) => {
+          event.stopPropagation();
+          duplicateRender(renderRecord.id);
+        });
+        inlineControls.appendChild(duplicateInline);
+
+        const visibilityInline = document.createElement("button");
+        visibilityInline.className = "inline-icon visibility-dot";
+        visibilityInline.type = "button";
+        visibilityInline.title = renderRecord.visible === false ? "Show render box" : "Hide render box";
+        visibilityInline.appendChild(createInlineIcon("visibility", { filled: renderRecord.visible !== false }));
+        visibilityInline.addEventListener("click", (event) => {
+          event.stopPropagation();
+          toggleRenderVisibility(renderRecord.id);
+        });
+        inlineControls.appendChild(visibilityInline);
+
+        const removeInline = document.createElement("button");
+        removeInline.className = "inline-icon delete-mark";
+        removeInline.type = "button";
+        removeInline.title = "Delete render";
+        removeInline.appendChild(createInlineIcon("delete"));
+        removeInline.addEventListener("click", (event) => {
+          event.stopPropagation();
+          deleteRenderById(renderRecord.id);
+        });
+        inlineControls.appendChild(removeInline);
+
+        header.appendChild(titleWrap);
+        header.appendChild(inlineControls);
+        main.appendChild(header);
+
+        const children = document.createElement("div");
+        children.className = "render-children";
+        children.addEventListener("click", (event) => event.stopPropagation());
+
+        const meta = document.createElement("div");
+        meta.className = "render-card-meta";
+        meta.textContent = getRenderBoxSummary(renderRecord);
+
+        const secondaryMeta = document.createElement("div");
+        secondaryMeta.className = "render-card-meta-secondary";
+        secondaryMeta.textContent = getRenderSectionSummary(renderRecord);
+
+        children.appendChild(meta);
+        children.appendChild(secondaryMeta);
+
+        card.appendChild(grip);
+        card.appendChild(main);
+        card.appendChild(children);
+        rendersList.appendChild(card);
+      });
+    }
+  }
+
   syncActiveLayerControls();
 }
 
@@ -3723,6 +4292,11 @@ function addDrawing() {
   render();
 }
 
+function addRender() {
+  state.renderSectionCollapsed = false;
+  activateRenderBoxTool();
+}
+
 function duplicateDrawing(drawingId) {
   const drawing = getDrawingUiById(drawingId);
   if (!drawing) return;
@@ -3767,10 +4341,34 @@ function duplicateDrawing(drawingId) {
   render();
 }
 
+function duplicateRender(renderId) {
+  const sourceRender = getRenderById(renderId);
+  if (!sourceRender) return;
+
+  const duplicate = createRenderRecord({
+    name: `${getRenderTabLabel(sourceRender)} copy`,
+    visible: sourceRender.visible !== false,
+    boxGeometry: sourceRender.boxGeometry,
+    sectionSettings: sourceRender.sectionSettings,
+  });
+
+  const sourceIndex = state.renders.findIndex((render) => render.id === renderId);
+  state.renders.splice(Math.max(0, sourceIndex), 0, duplicate);
+  activateRenderBox(duplicate.id);
+}
+
 function toggleDrawingVisibility(drawingId) {
   const drawing = getDrawingUiById(drawingId);
   if (!drawing) return;
   drawing.visible = drawing.visible === false;
+  renderLayersPanel();
+  render();
+}
+
+function toggleRenderVisibility(renderId) {
+  const renderRecord = getRenderById(renderId);
+  if (!renderRecord) return;
+  renderRecord.visible = renderRecord.visible === false;
   renderLayersPanel();
   render();
 }
@@ -3812,6 +4410,31 @@ function deleteDrawingById(drawingId) {
   }
 
   clearSelection();
+  renderLayersPanel();
+  render();
+}
+
+function deleteRenderById(renderId) {
+  const index = state.renders.findIndex((render) => render.id === renderId);
+  if (index < 0) return;
+
+  state.renders.splice(index, 1);
+
+  if (state.editingRenderId === renderId) {
+    state.editingRenderId = null;
+    state.editingRenderNameDraft = "";
+    state.editingRenderInitialName = "";
+  }
+  if (state.activeRenderId === renderId) {
+    state.activeRenderId = null;
+    state.renderTransformDrag = null;
+  }
+
+  if (state.activeWorkspaceTab?.kind === "render" && state.activeWorkspaceTab.renderId === renderId) {
+    setActiveWorkspaceTab({ kind: "main" });
+    return;
+  }
+
   renderLayersPanel();
   render();
 }
@@ -3991,6 +4614,27 @@ function moveActiveLayer(direction) {
 function syncToolControls() {
   selectBtn.classList.toggle("active", state.tool === "select");
   drawBtn.classList.toggle("active", state.tool === "draw");
+}
+
+function activateRenderBoxTool() {
+  cancelDraftAlignDrag();
+  cancelSelectionInteraction();
+  cancelDrawInteraction();
+  state.panning = false;
+  state.draggingDraftOrigin = false;
+  state.draftOriginDragRotation = null;
+  clearSelection();
+  state.activeWorkspaceTab = { kind: "main" };
+  state.activeRenderId = null;
+  state.renderTransformDrag = null;
+  state.tool = "draw";
+  state.shapeType = "rbox";
+  syncToolControls();
+  if (shapeSelect) shapeSelect.value = state.shapeType;
+  syncDrawSizeInput();
+  updateCursor();
+  renderLayersPanel();
+  render();
 }
 
 function setTool(tool) {
@@ -4429,6 +5073,102 @@ function renderSelectionBoxOverlay() {
   ctx.restore();
 }
 
+function traceRenderBoxPath(targetCtx, boxGeometry) {
+  const points = sanitizeRenderBoxGeometry(boxGeometry);
+  if (points.length !== 4) return false;
+
+  targetCtx.beginPath();
+  targetCtx.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    targetCtx.lineTo(points[index].x, points[index].y);
+  }
+  targetCtx.closePath();
+  return true;
+}
+
+function getNormalizedScreenDirection(fromPoint, toPoint, fallback = { x: 1, y: 0 }) {
+  const dx = Number(toPoint?.x) - Number(fromPoint?.x);
+  const dy = Number(toPoint?.y) - Number(fromPoint?.y);
+  const length = Math.hypot(dx, dy);
+  if (length <= 1e-6) return { ...fallback };
+  return {
+    x: dx / length,
+    y: dy / length,
+  };
+}
+
+function drawRenderBoxOverlay(renderRecord, options = {}) {
+  const metrics = getRenderBoxMetrics(renderRecord);
+  if (!metrics.isValid || !metrics.boxGeometry.length) return;
+
+  const isActive = options.isActive === true;
+  const screenPoints = metrics.boxGeometry.map((point) => worldToScreen(point));
+  const screenTopLeft = screenPoints[0];
+  const screenTopRight = screenPoints[1];
+  const screenBottomLeft = screenPoints[3];
+  const topEdgeDirection = getNormalizedScreenDirection(screenTopLeft, screenTopRight, { x: 1, y: 0 });
+  const leftEdgeDirection = getNormalizedScreenDirection(screenTopLeft, screenBottomLeft, { x: 0, y: 1 });
+  const labelOffsetAlongTopPx = 6;
+  const labelOffsetOutwardPx = 6;
+  const labelAnchor = {
+    x: screenTopLeft.x + topEdgeDirection.x * labelOffsetAlongTopPx - leftEdgeDirection.x * labelOffsetOutwardPx,
+    y: screenTopLeft.y + topEdgeDirection.y * labelOffsetAlongTopPx - leftEdgeDirection.y * labelOffsetOutwardPx,
+  };
+  const labelAngle = Math.atan2(topEdgeDirection.y, topEdgeDirection.x);
+
+  ctx.save();
+  applyWorldCameraTransform(ctx);
+  if (!traceRenderBoxPath(ctx, metrics.boxGeometry)) {
+    ctx.restore();
+    return;
+  }
+  ctx.strokeStyle = renderBoxStrokeColorSoft;
+  ctx.lineWidth = (isActive ? 1.5 : 1) / state.camera.zoom;
+  ctx.setLineDash(isActive ? [8 / state.camera.zoom, 4 / state.camera.zoom] : [5 / state.camera.zoom, 4 / state.camera.zoom]);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = renderBoxLabelFont;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  ctx.fillStyle = renderBoxStrokeColor;
+  ctx.translate(labelAnchor.x, labelAnchor.y);
+  ctx.rotate(labelAngle);
+  ctx.fillText(getRenderTabLabel(renderRecord), 0, 0);
+  ctx.restore();
+}
+
+function renderRenderBoxOverlays() {
+  const inactiveRenders = state.renders.filter((renderRecord) => renderRecord.visible !== false && renderRecord.id !== state.activeRenderId);
+  for (const renderRecord of inactiveRenders) {
+    if (renderRecord.visible === false) continue;
+    drawRenderBoxOverlay(renderRecord, { isActive: false });
+  }
+
+  const activeRender = getSelectedRenderRecord();
+  if (activeRender && activeRender.visible !== false) {
+    drawRenderBoxOverlay(activeRender, { isActive: true });
+  }
+}
+
+function drawPendingRenderBoxPreview() {
+  const previewGeometry = sanitizeRenderBoxGeometry(state.pendingRenderBox?.boxGeometry);
+  if (previewGeometry.length !== 4) return;
+
+  ctx.save();
+  applyWorldCameraTransform(ctx);
+  if (!traceRenderBoxPath(ctx, previewGeometry)) {
+    ctx.restore();
+    return;
+  }
+  ctx.strokeStyle = renderBoxStrokeColor;
+  ctx.lineWidth = 2 / state.camera.zoom;
+  ctx.setLineDash([10 / state.camera.zoom, 6 / state.camera.zoom]);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawLayerPreview(shape, layer, operation = "add") {
   const isSubtract = operation === "subtract";
 
@@ -4680,6 +5420,7 @@ function drawVerticalDraftRulerMark(context, y, major, mid, invert, labelText, t
 
 function getActiveDrawPreviewState() {
   if (!state.pointerInCanvas || state.panning || state.draggingDraftOrigin || state.spacePressed) return null;
+  if (state.activeRenderId) return null;
   if (state.tool !== "draw") return null;
 
   const activeLayer = getActiveLayer();
@@ -4735,13 +5476,13 @@ function getActiveDrawRulerIndicatorBounds(previewState = getActiveDrawPreviewSt
   };
 }
 
-function getRulerPreviewIndicatorColors(isSubtract = false) {
+function getRulerPreviewIndicatorColors(isSubtract = false, shapeType = state.shapeType) {
   return isSubtract
     ? {
         fill: "#dc2626",
       }
     : {
-        fill: previewStrokeColor,
+        fill: isRenderBoxShapeType(shapeType) ? renderBoxStrokeColor : previewStrokeColor,
       };
 }
 
@@ -5097,6 +5838,7 @@ function drawSnapPreview() {
 
   const { snapPoint, isSubtract } = previewState;
   const screenPoint = draftToScreen(snapPoint);
+  const drawPreviewColor = isRenderBoxShapeType() ? renderBoxStrokeColor : previewStrokeColor;
 
   if (isSquareBrushShapeType()) {
     const brushSize = getSquareBrushSizeInDraftUnits();
@@ -5106,7 +5848,7 @@ function drawSnapPreview() {
 
     ctx.save();
     ctx.fillStyle = isSubtract ? "rgba(239, 68, 68, 0.14)" : "rgba(14, 165, 233, 0.14)";
-    ctx.strokeStyle = isSubtract ? "#dc2626" : previewStrokeColor;
+    ctx.strokeStyle = isSubtract ? "#dc2626" : drawPreviewColor;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([6, 4]);
     ctx.beginPath();
@@ -5114,7 +5856,7 @@ function drawSnapPreview() {
     ctx.fill();
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = isSubtract ? "#dc2626" : previewStrokeColor;
+    ctx.fillStyle = isSubtract ? "#dc2626" : drawPreviewColor;
     ctx.strokeStyle = "#ffffff";
     ctx.beginPath();
     ctx.rect(screenPoint.x - snapPreviewSize / 2, screenPoint.y - snapPreviewSize / 2, snapPreviewSize, snapPreviewSize);
@@ -5127,7 +5869,7 @@ function drawSnapPreview() {
   const size = snapPreviewSize;
 
   ctx.save();
-  ctx.fillStyle = isSubtract ? "#dc2626" : previewStrokeColor;
+  ctx.fillStyle = isSubtract ? "#dc2626" : drawPreviewColor;
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -5138,8 +5880,10 @@ function drawSnapPreview() {
 }
 
 function render() {
+  renderWorkspaceUi();
   const { width, height } = getCanvasViewportSize();
   ctx.clearRect(0, 0, width, height);
+  if (!isMainWorkspaceActive()) return;
   drawWorldAxes();
 
   for (const layer of getRenderableLayersInPaintOrder()) {
@@ -5156,7 +5900,11 @@ function render() {
     drawLayerMerged(activeLayer, { renderFill: false });
   }
 
-  if (state.dragging && state.tool === "draw" && isLayerAvailableForEditing(activeLayer)) {
+  renderRenderBoxOverlays();
+
+  if (state.dragging && state.tool === "draw" && isRenderBoxShapeType()) {
+    drawPendingRenderBoxPreview();
+  } else if (state.dragging && state.tool === "draw" && isLayerAvailableForEditing(activeLayer)) {
     const draft = state.draftShape;
     if (draft && !draft.small) drawLayerPreview(draft, activeLayer, state.drawOperation);
   }
@@ -5219,6 +5967,28 @@ canvas.addEventListener("pointerdown", (e) => {
 
   if (e.button !== 0 && e.button !== 2) return;
 
+  const activeRender = getSelectedRenderRecord();
+  if (activeRender) {
+    if (e.button !== 0) return;
+    const hit = getRenderTransformHit(activeRender, world);
+    if (!hit) {
+      updateCursor();
+      render();
+      return;
+    }
+
+    state.dragging = true;
+    state.renderTransformDrag = {
+      renderId: activeRender.id,
+      startWorld: { ...world },
+      startBoxGeometry: cloneRenderBoxGeometry(activeRender.boxGeometry),
+    };
+    updateCursor();
+    canvas.setPointerCapture(e.pointerId);
+    render();
+    return;
+  }
+
   if (state.tool === "select") {
     if (e.button !== 0) return;
 
@@ -5252,6 +6022,25 @@ canvas.addEventListener("pointerdown", (e) => {
 
     startSelectionMove(world);
     state.dragging = true;
+    canvas.setPointerCapture(e.pointerId);
+    render();
+    return;
+  }
+
+  if (state.tool === "draw" && isRenderBoxShapeType()) {
+    if (e.button !== 0) return;
+
+    state.dragging = true;
+    state.start = world;
+    state.draftStart = draft;
+    state.drawOperation = "add";
+    resetDrawSession();
+    state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
+    state.pendingRenderBox = {
+      startDraft: cloneDraftPoint(state.draftStart),
+      currentDraft: cloneDraftPoint(state.draftCurrent),
+      boxGeometry: getRenderBoxGeometryFromDraftRect(state.draftStart, state.draftCurrent),
+    };
     canvas.setPointerCapture(e.pointerId);
     render();
     return;
@@ -5308,11 +6097,31 @@ canvas.addEventListener("pointermove", (e) => {
   if (state.draggingDraftOrigin) {
     updateDraftOriginFromDrag(screen);
     state.current = draftToWorld(state.draftCurrent);
+    updateCursor();
+    render();
+    return;
+  }
+
+  if (state.renderTransformDrag) {
+    const drag = state.renderTransformDrag;
+    const renderRecord = getRenderById(drag.renderId);
+    if (renderRecord) {
+      const dx = state.current.x - drag.startWorld.x;
+      const dy = state.current.y - drag.startWorld.y;
+      renderRecord.boxGeometry = drag.startBoxGeometry.map((point) =>
+        quantizePoint({
+          x: point.x + dx,
+          y: point.y + dy,
+        })
+      );
+    }
+    updateCursor();
     render();
     return;
   }
 
   if (!state.dragging) {
+    updateCursor();
     render();
     return;
   }
@@ -5354,7 +6163,14 @@ canvas.addEventListener("pointermove", (e) => {
   }
 
   if (state.tool === "draw") {
-    if (isSquareBrushShapeType()) {
+    if (isRenderBoxShapeType()) {
+      state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
+      state.pendingRenderBox = {
+        startDraft: cloneDraftPoint(state.draftStart),
+        currentDraft: cloneDraftPoint(state.draftCurrent),
+        boxGeometry: getRenderBoxGeometryFromDraftRect(state.draftStart, state.draftCurrent),
+      };
+    } else if (isSquareBrushShapeType()) {
       extendSquareBrushStroke(state.draftCurrent);
     } else {
       state.draftShape = makeDraftShape(state.draftStart, state.draftCurrent);
@@ -5406,6 +6222,14 @@ function finishDrag(e) {
 
   if (!state.dragging) return;
 
+  if (state.renderTransformDrag) {
+    state.renderTransformDrag = null;
+    state.dragging = false;
+    updateCursor();
+    render();
+    return;
+  }
+
   if (state.tool === "select") {
     if (state.selection.mode === "toggle-pending") {
       setSelectedShapeIds(
@@ -5445,7 +6269,19 @@ function finishDrag(e) {
   }
 
   if (state.tool === "draw") {
-    if (state.draftShape && !state.draftShape.small) {
+    if (isRenderBoxShapeType()) {
+      const previewGeometry = cloneRenderBoxGeometry(state.pendingRenderBox?.boxGeometry);
+      if (state.draftShape && !state.draftShape.small && previewGeometry.length === 4) {
+        materializeActiveDraftAngleCandidateOnCommit();
+        const renderRecord = createRenderRecord({
+          boxGeometry: previewGeometry,
+        });
+        state.renders.unshift(renderRecord);
+        state.renderSectionCollapsed = false;
+        state.activeRenderId = renderRecord.id;
+        renderLayersPanel();
+      }
+    } else if (state.draftShape && !state.draftShape.small) {
       materializeActiveDraftAngleCandidateOnCommit();
       if (state.drawOperation === "subtract") {
         subtractGeometryFromLayer(state.activeLayerId, state.draftShape.geometry);
@@ -5467,6 +6303,7 @@ canvas.addEventListener("pointerup", finishDrag);
 canvas.addEventListener("pointerleave", finishDrag);
 canvas.addEventListener("pointerleave", () => {
   state.pointerInCanvas = false;
+  updateCursor();
   render();
 });
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -5643,7 +6480,12 @@ if (settingsOutlineColorInput) {
 }
 
 shapeSelect.addEventListener("change", (e) => {
-  state.shapeType = e.target.value;
+  state.shapeType = sanitizeProjectShapeType(e.target.value, state.shapeType);
+  if (isRenderBoxShapeType()) {
+    state.activeWorkspaceTab = { kind: "main" };
+    state.activeRenderId = null;
+    renderLayersPanel();
+  }
   syncDrawSizeInput();
   render();
 });
@@ -5701,6 +6543,13 @@ if (layerSectionToggle) {
   });
 }
 
+if (renderSectionToggle) {
+  renderSectionToggle.addEventListener("click", () => {
+    state.renderSectionCollapsed = !state.renderSectionCollapsed;
+    renderLayersPanel();
+  });
+}
+
 if (layerAddBtn) {
   layerAddBtn.addEventListener("click", () => addLayer(getPrimaryDrawingUi().id));
 }
@@ -5709,6 +6558,13 @@ if (addDrawingBtn) {
   addDrawingBtn.addEventListener("click", () => {
     state.layerSectionCollapsed = false;
     addDrawing();
+  });
+}
+
+if (addRenderBtn) {
+  addRenderBtn.addEventListener("click", () => {
+    state.renderSectionCollapsed = false;
+    addRender();
   });
 }
 
@@ -5722,6 +6578,12 @@ window.addEventListener("pointermove", (event) => {
     drag.rawIndex = drop.rawIndex;
     drag.fromIndex = drop.fromIndex;
     updateDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
+  } else if (drag.type === "render") {
+    const drop = renderDropPositionFromClientY(event.clientY, drag.renderId);
+    drag.dropIndex = drop.toIndex;
+    drag.rawIndex = drop.rawIndex;
+    drag.fromIndex = drop.fromIndex;
+    updateRenderDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
   } else {
     const targetLayerId = getLayerMergeTargetLayerId(event.clientX, event.clientY, drag.layerId);
     if (targetLayerId) {
@@ -5805,6 +6667,12 @@ window.addEventListener("keydown", (e) => {
 
   if (e.key === "Escape" && state.leftPanelPointerDrag) {
     clearLeftPanelPointerDrag(false);
+    return;
+  }
+
+  if (e.key === "Escape" && state.activeRenderId) {
+    e.preventDefault();
+    deactivateActiveRenderBox();
     return;
   }
 

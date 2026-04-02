@@ -336,7 +336,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 ### Current Task 2: Renders Subsystem Planning
 
 - Task: design the application's new `Renders` subsystem from scratch, with `Render` / `Render Box` naming, global layer render properties, a `Main` tab plus per-render tabs, and a first rollout that focuses on UI before the deeper rendering engine.
-- Status: planning and early implementation are active. The non-visual state/persistence scaffolding for `Renders` is now implemented, but no visible render workspace UI exists yet and the next phase should build the `Main` / `Render` tab shell.
+- Status: planning and early implementation are active. The non-visual state/persistence scaffolding, the first visible `Main` / `Rbox` workspace shell, and the first `Render Box` authoring flow on the `Main` canvas are now implemented, but real render output behavior still does not exist yet.
 
 #### Locked Decisions
 
@@ -348,7 +348,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Layer opacity should not be reintroduced as a render-layer control in the new system; if any old opacity logic is still present in the external example or dead code, it is not part of the intended render-properties model for this app.
 - The workspace direction is:
   - one `Main` tab for authoring on the main canvas
-  - separate `Render` tabs (`Render 1`, `Render 2`, etc., or user-renamed equivalents) driven by the created render boxes
+  - separate `Rbox` tabs (`Rbox 1`, `Rbox 2`, etc., or user-renamed equivalents) driven by the created render boxes
 - The initial rollout should prioritize UI structure, naming, tabs, and render-box management before the full final render engine behavior.
 - Future support for measurements and scenes is still expected, but they are not part of the first render-system rollout and should not block the initial `Renders` work.
 
@@ -390,6 +390,8 @@ Layer order controls draw order. The active layer receives new geometry when the
     - `nextRenderId`
     - `activeWorkspaceTab`: either `{ kind: "main" }` or `{ kind: "render", renderId }`
   - top-level runtime-only UI state should add:
+    - `activeRenderId`
+    - `renderTransformDrag`
     - `pendingRenderBox`
     - `editingRenderId`
     - `editingRenderNameDraft`
@@ -397,10 +399,13 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `id`
   - `name`
   - `visible`
-  - `boxBounds`: `{ x, y, w, h }` stored as axis-aligned canonical world-space millimeter bounds
+  - `boxGeometry`: ordered world-space corner points for the committed `Render Box`, stored in quantized millimeter coordinates so Draft Plane orientation is preserved after commit
   - `sectionSettings`: `{ z: [], x: [], y: [] }` reserved for future render-local section definitions
-- `Render` tabs should be driven one-to-one by committed render records. Unfinished drag state should stay in `pendingRenderBox` instead of creating half-finished render records.
-- Render-box geometry should be stored in world coordinates, not draft-space coordinates, so it stays stable when the workplane origin or angle changes.
+- `Render` tabs should be driven one-to-one by committed render records.
+- `Render Box` authoring now happens through a dedicated `Rbox` draw tool inside the existing `Draw` tool family.
+- `Add Rbox` should not create an empty render record immediately; instead it should arm `Draw > Rbox` on the `Main` canvas, and the committed drag should create the new render record/card.
+- Unfinished drag state should stay in `pendingRenderBox` instead of creating half-finished render records.
+- Render-box geometry should be stored in world coordinates, not draft-space coordinates, so it stays stable when the workplane origin or angle changes while still preserving the Draft Plane-oriented rectangle the user drew.
 - Global layer render properties are now defined as layer-owned data rather than render-owned overrides. Each layer should gain a `render` object with:
   - `enabled`
   - `baseElevationMm`
@@ -417,7 +422,7 @@ Layer order controls draw order. The active layer receives new geometry when the
   - no measurements or scenes integration in the first rollout
   - no multi-pane or pop-out render workspace in the first rollout
 - The app state and project-file scaffolding now include:
-  - top-level runtime state for `renders`, `nextRenderId`, `activeWorkspaceTab`, `pendingRenderBox`, `editingRenderId`, and `editingRenderNameDraft`
+  - top-level runtime state for `renders`, `nextRenderId`, `activeWorkspaceTab`, `activeRenderId`, `renderTransformDrag`, `pendingRenderBox`, `editingRenderId`, and `editingRenderNameDraft`
   - layer-owned `render` settings stored directly on each layer record
   - project export/import persistence for `document.renders`, `document.nextRenderId`, `workspace.activeWorkspaceTab`, and per-layer `render` settings
 - New layer records now default their render settings to:
@@ -429,7 +434,41 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `id`
   - `name`
   - `visible`
-  - quantized world-space `boxBounds`
+  - quantized world-space `boxGeometry`
   - `sectionSettings`
 - The render scaffolding now participates in the current export/import round-trip for the current schema, without adding any backward-compatibility commitment for older pre-render project files.
-- With the non-visual scaffolding now in place, the next implementation step should be to build the visible `Main` / `Render` tab UI shell before adding render-box authoring interactions.
+- The app now includes a first visible render-workspace shell:
+  - a bottom workspace switcher styled from the external reference pattern
+  - one always-visible `Main` tab
+  - dynamic `Rbox` tabs driven by `state.renders`
+  - a render workspace panel shell that opens when an `Rbox` tab becomes active
+- The bottom workspace switcher has now been tightened to use the external reference's light-theme visual language more literally, including its white surface, line color, muted/text values, active fill, and floating shadow.
+- The current render workspace shell is intentionally placeholder-only:
+  - it uses the reference-inspired visual structure and controls language
+  - it shows the active render's name and derived metadata from its stored `Render Box` geometry
+  - it does not yet display real render outputs
+  - it does not yet display final render-engine output
+- The left panel now includes a dedicated `Renders` section with:
+  - a `Renders` section header that matches the app's own `Drawings` section pattern
+  - `Rbox` cards styled from the same top-level card system as `Drawings`
+  - basic rename / duplicate / hide / delete / reorder management for committed render records
+  - card activation now targets `Main`-canvas `Rbox` transform mode instead of directly switching the bottom render-workspace tabs
+  - clicking the already-active `Rbox` card deactivates all `Rbox` cards again
+  - drag reordering for `Rbox` card order, which also controls bottom tab order
+  - newly added and duplicated `Rbox` records insert at the top of the list/tab order so they match the app's existing panel behavior
+- `Render Box` authoring is now available on the `Main` canvas through `Draw > Rbox`:
+  - it follows the same Draft Plane input rules as other draw shapes
+  - it previews as a dashed no-fill rectangle/parallelogram outline
+  - while drawing, its ruler preview should use the same strong-orange render-box color rather than the default blue draw-preview color
+  - its pointer/snap preview should also use that same strong-orange render-box color rather than the default blue draw-preview color
+  - on commit it creates a new `Rbox` card/render record at the top of the list
+  - `Add Rbox` now acts as a shortcut that arms `Draw > Rbox` and returns focus to the `Main` workspace instead of creating an empty render immediately
+- Committed `Rboxes` now render on `Main` as strong-orange overlays with a small top-left name label inspired by the external reference.
+- That `Rbox` name label should anchor from the committed box's own draft-top-left corner with a small local offset and rotate parallel to the committed top edge, rather than using the screen-space bounding envelope, so rotated workplanes keep the label in the correct place.
+- When an `Rbox` card is active:
+  - its transform controls open on `Main` independently of whether the underlying app tool is `Draw` or `Select`
+  - the current layer drawing/selection interactions are suspended without changing the underlying tool choice
+  - draw-only pointer previews and ruler previews should stay hidden while `Rbox` transform mode is active
+  - the active `Rbox` is currently move-only
+  - pressing `Escape` deactivates the active `Rbox` and closes the transform mode without rewriting the user's underlying base tool choice
+- The next implementation step should be to make the render workspace itself consume those committed `Render Box` records for initial placeholder outputs and deeper render behavior.

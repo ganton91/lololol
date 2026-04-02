@@ -20,6 +20,8 @@ const settingsMenu = document.getElementById("settingsMenu");
 const settingsCloseButton = document.getElementById("settingsCloseButton");
 const settingsApplyButton = document.getElementById("settingsApplyButton");
 const settingsCellSizeInput = document.getElementById("settingsCellSizeInput");
+const settingsOutlineColorInput = document.getElementById("settingsOutlineColorInput");
+const settingsOutlineSwatch = document.getElementById("settingsOutlineSwatch");
 const modalBackdrop = document.getElementById("modalBackdrop");
 const draftRulerTop = document.getElementById("draft-ruler-top");
 const draftRulerLeft = document.getElementById("draft-ruler-left");
@@ -35,12 +37,18 @@ const layerFillInput = document.getElementById("layer-fill");
 const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
 const settingsCellUnitButtons = Array.from(document.querySelectorAll("[data-settings-cell-unit]"));
 const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-settings-snap-mode]"));
+const settingsOutlineButtons = Array.from(document.querySelectorAll("[data-settings-outline-enabled]"));
+const settingsCornersButtons = Array.from(document.querySelectorAll("[data-settings-corners-enabled]"));
 
+const defaultOutlineStrokeColor = "#0f172a";
 const DEFAULT_SETTINGS = Object.freeze({
   displayUnit: "m",
   cellUnit: "cm",
   cellSize: 5,
   snapMode: "adaptive",
+  outlineEnabled: true,
+  outlineColor: defaultOutlineStrokeColor,
+  cornersEnabled: true,
 });
 
 const state = {
@@ -112,7 +120,6 @@ const state = {
   },
 };
 
-const outlineStrokeColor = "#0f172a";
 const selectionStrokeColor = "#0ea5e9";
 const previewStrokeColor = "#0284c7";
 const previewStrokeWidth = 1.5;
@@ -197,12 +204,26 @@ function sanitizeCellSize(value, fallback = DEFAULT_SETTINGS.cellSize) {
   return Math.max(1, Math.min(100000, rounded));
 }
 
+function sanitizeSettingsToggle(value, fallback = true) {
+  if (typeof value === "boolean") return value;
+  if (value === "on" || value === "true" || value === 1 || value === "1") return true;
+  if (value === "off" || value === "false" || value === 0 || value === "0") return false;
+  return fallback;
+}
+
+function sanitizeColorValue(value, fallback = DEFAULT_SETTINGS.outlineColor) {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
 function cloneSettings(settings = state.settings) {
   return {
     displayUnit: sanitizeMeasurementUnit(settings?.displayUnit, DEFAULT_SETTINGS.displayUnit),
     cellUnit: sanitizeMeasurementUnit(settings?.cellUnit, DEFAULT_SETTINGS.cellUnit),
     cellSize: sanitizeCellSize(settings?.cellSize, DEFAULT_SETTINGS.cellSize),
     snapMode: sanitizeGridSnapMode(settings?.snapMode, DEFAULT_SETTINGS.snapMode),
+    outlineEnabled: sanitizeSettingsToggle(settings?.outlineEnabled, DEFAULT_SETTINGS.outlineEnabled),
+    outlineColor: sanitizeColorValue(settings?.outlineColor, DEFAULT_SETTINGS.outlineColor),
+    cornersEnabled: sanitizeSettingsToggle(settings?.cornersEnabled, DEFAULT_SETTINGS.cornersEnabled),
   };
 }
 
@@ -458,9 +479,32 @@ function syncSettingsMenu() {
     button.setAttribute("aria-pressed", String(active));
   }
 
+  for (const button of settingsOutlineButtons) {
+    const active = button.dataset.settingsOutlineEnabled === (state.settingsDraft.outlineEnabled ? "on" : "off");
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+
+  const cornersControlsEnabled = !!state.settingsDraft.outlineEnabled;
+  const effectiveCornersEnabled = cornersControlsEnabled && !!state.settingsDraft.cornersEnabled;
+  for (const button of settingsCornersButtons) {
+    const active = button.dataset.settingsCornersEnabled === (effectiveCornersEnabled ? "on" : "off");
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.disabled = !cornersControlsEnabled;
+  }
+
   if (settingsCellSizeInput) {
     settingsCellSizeInput.value = adaptiveModeActive ? "1" : String(state.settingsDraft.cellSize);
     settingsCellSizeInput.disabled = adaptiveModeActive;
+  }
+
+  if (settingsOutlineColorInput) {
+    settingsOutlineColorInput.value = sanitizeColorValue(state.settingsDraft.outlineColor, DEFAULT_SETTINGS.outlineColor);
+  }
+
+  if (settingsOutlineSwatch) {
+    settingsOutlineSwatch.style.setProperty("--settings-swatch-color", sanitizeColorValue(state.settingsDraft.outlineColor, DEFAULT_SETTINGS.outlineColor));
   }
 }
 
@@ -3576,20 +3620,27 @@ function drawLayerMerged(layer) {
   ctx.save();
   applyWorldCameraTransform(ctx);
   ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(layer.opacity) ? layer.opacity : 1));
+  const outlineEnabled = !!state.settings.outlineEnabled;
+  const cornersEnabled = outlineEnabled && !!state.settings.cornersEnabled;
+  const outlineColor = sanitizeColorValue(state.settings.outlineColor, DEFAULT_SETTINGS.outlineColor);
 
   for (const shape of layerShapes) {
     ctx.beginPath();
     traceGeometryPath(ctx, shape.geometry);
     ctx.fillStyle = layer.fillColor;
     ctx.fill("evenodd");
-    ctx.strokeStyle = outlineStrokeColor;
-    ctx.lineWidth = 1 / state.camera.zoom;
-    ctx.stroke();
+    if (outlineEnabled) {
+      ctx.strokeStyle = outlineColor;
+      ctx.lineWidth = 1 / state.camera.zoom;
+      ctx.stroke();
+    }
 
-    ctx.beginPath();
-    drawGeometryVertices(ctx, shape.geometry);
-    ctx.fillStyle = outlineStrokeColor;
-    ctx.fill();
+    if (cornersEnabled) {
+      ctx.beginPath();
+      drawGeometryVertices(ctx, shape.geometry);
+      ctx.fillStyle = outlineColor;
+      ctx.fill();
+    }
   }
 
   ctx.restore();
@@ -4620,11 +4671,41 @@ for (const button of settingsSnapModeButtons) {
   });
 }
 
+for (const button of settingsOutlineButtons) {
+  button.addEventListener("click", () => {
+    if (!state.settingsDraft) return;
+    state.settingsDraft.outlineEnabled = sanitizeSettingsToggle(
+      button.dataset.settingsOutlineEnabled,
+      state.settingsDraft.outlineEnabled
+    );
+    syncSettingsMenu();
+  });
+}
+
+for (const button of settingsCornersButtons) {
+  button.addEventListener("click", () => {
+    if (!state.settingsDraft || !state.settingsDraft.outlineEnabled) return;
+    state.settingsDraft.cornersEnabled = sanitizeSettingsToggle(
+      button.dataset.settingsCornersEnabled,
+      state.settingsDraft.cornersEnabled
+    );
+    syncSettingsMenu();
+  });
+}
+
 if (settingsCellSizeInput) {
   settingsCellSizeInput.addEventListener("input", () => {
     if (!state.settingsDraft) return;
     if (settingsCellSizeInput.value.trim() === "") return;
     state.settingsDraft.cellSize = sanitizeCellSize(settingsCellSizeInput.value, state.settingsDraft.cellSize);
+  });
+}
+
+if (settingsOutlineColorInput) {
+  settingsOutlineColorInput.addEventListener("input", (event) => {
+    if (!state.settingsDraft) return;
+    state.settingsDraft.outlineColor = sanitizeColorValue(event.target.value, state.settingsDraft.outlineColor);
+    syncSettingsMenu();
   });
 }
 

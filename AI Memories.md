@@ -248,6 +248,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The active task has been reset from the old `Renders` planning track to interface implementation.
 - The current app shell now includes the `millimétré` top bar with the current button order, brand styling, separator, translucent surface treatment, and hover behavior.
 - The `Settings` button in the top bar is now wired to a real modal; the remaining top bar buttons are still visual-only placeholders.
+- The settings modal header is being simplified toward a single `Settings` heading, and the settings content is being extended with `Outline` and `Corners` controls so canvas edge/corner rendering can be user-configurable from the same modal.
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
 - The canvas shell now includes four-sided drafting rulers around the live canvas viewport plus all four corner blocks, with the inner drawing viewport inset inside that frame.
 - Ruler ticks and labels are now drawn from the app's live camera pan, zoom, and grid intervals instead of static DOM marks, and the ruler canvases resize together with the main drawing canvas.

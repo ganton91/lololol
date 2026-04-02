@@ -355,6 +355,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Global layer render properties are expected to live on the layer records themselves rather than inside each render.
 - The main drawing canvas should remain the authoring surface, while renders should be presented through a separate render workspace/tab system.
 - The goal is to achieve the same user-facing outcome studied in the external example, but through app-native architecture and naming that fit this project's current geometry model.
+- Keep a small allowance in the model direction for future inter-layer render relationships beyond basic per-layer height settings, such as targeted trim/cutter behavior between selected layers or derived connection geometry between specific layer pairs; this is future scope only and should not complicate the first render-system rollout.
 
 #### Task Rule
 

@@ -1143,8 +1143,8 @@
           <button class="ghost-button stub" id="undoButton" type="button">Undo</button>
           <button class="ghost-button stub" id="redoButton" type="button">Redo</button>
           <button class="ghost-button" id="settingsButton" type="button">Settings</button>
-          <button class="ghost-button stub" id="exportButton" type="button">Export</button>
-          <button class="ghost-button stub" id="importButton" type="button">Import</button>
+          <button class="ghost-button" id="exportButton" type="button">Export</button>
+          <button class="ghost-button" id="importButton" type="button">Import</button>
         </div>
         <div class="topbar-status">
           <span id="grid-status" class="grid-status">Grid Adaptive | Cell 1 mm</span>
@@ -1290,6 +1290,7 @@
     </div>
 
     <div class="modal-backdrop hidden" id="modalBackdrop"></div>
+    <input id="projectImportInput" type="file" accept=".json,application/json" hidden />
 
     <script type="importmap">
       {

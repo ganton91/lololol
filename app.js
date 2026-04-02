@@ -18,6 +18,8 @@ const zoomLevel = document.getElementById("zoom-level");
 const gridStatus = document.getElementById("grid-status");
 const workplaneStatus = document.getElementById("workplane-status");
 const settingsButton = document.getElementById("settingsButton");
+const exportButton = document.getElementById("exportButton");
+const importButton = document.getElementById("importButton");
 const settingsMenu = document.getElementById("settingsMenu");
 const settingsCloseButton = document.getElementById("settingsCloseButton");
 const settingsApplyButton = document.getElementById("settingsApplyButton");
@@ -36,6 +38,7 @@ const layersList = document.getElementById("layers-list");
 const layerAddBtn = document.getElementById("addLayerButton");
 const addDrawingBtn = document.getElementById("addDrawingButton");
 const layerFillInput = document.getElementById("layer-fill");
+const projectImportInput = document.getElementById("projectImportInput");
 const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
 const settingsCellUnitButtons = Array.from(document.querySelectorAll("[data-settings-cell-unit]"));
 const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-settings-snap-mode]"));
@@ -44,6 +47,9 @@ const settingsOutlineButtons = Array.from(document.querySelectorAll("[data-setti
 const settingsCornersButtons = Array.from(document.querySelectorAll("[data-settings-corners-enabled]"));
 
 const defaultOutlineStrokeColor = "#0f172a";
+const PROJECT_FILE_APP_ID = "millimetre";
+const PROJECT_FILE_VERSION = 1;
+const DEFAULT_PROJECT_FILE_NAME = "millimetre-project.json";
 const DEFAULT_SETTINGS = Object.freeze({
   displayUnit: "m",
   cellUnit: "cm",
@@ -108,6 +114,7 @@ const state = {
   draftOrigin: { x: 0, y: 0 },
   settings: { ...DEFAULT_SETTINGS },
   settingsDraft: null,
+  projectFileName: DEFAULT_PROJECT_FILE_NAME,
   camera: { x: 0, y: 0, zoom: 1 },
   selection: {
     shapeIds: [],
@@ -189,7 +196,7 @@ const draftRulerSurfaces = [
   { surface: draftRulerBottom, context: draftRulerBottomCtx },
   { surface: draftRulerRight, context: draftRulerRightCtx },
 ];
-const draftAngleStore = createDraftAngleStore({
+let draftAngleStore = createDraftAngleStore({
   precisionDecimals: geometryPrecisionDecimals,
 });
 
@@ -547,6 +554,484 @@ function syncSettingsMenu() {
 
   if (settingsOutlineSwatch) {
     settingsOutlineSwatch.style.setProperty("--settings-swatch-color", sanitizeColorValue(state.settingsDraft.outlineColor, DEFAULT_SETTINGS.outlineColor));
+  }
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function createProjectImportError(message) {
+  const error = new Error(message);
+  error.name = "ProjectImportError";
+  return error;
+}
+
+function sanitizeProjectFileName(name, fallback = DEFAULT_PROJECT_FILE_NAME) {
+  if (typeof name !== "string") return fallback;
+  const trimmed = name.trim();
+  return trimmed ? trimmed : fallback;
+}
+
+function sanitizeProjectCounter(value, fallback = 1) {
+  const numericValue = Math.trunc(Number(value));
+  if (!Number.isFinite(numericValue) || numericValue < 1) return fallback;
+  return numericValue;
+}
+
+function sanitizeProjectTool(tool, fallback = state.tool) {
+  return tool === "select" || tool === "draw" ? tool : fallback;
+}
+
+function sanitizeProjectShapeType(shapeType, fallback = state.shapeType) {
+  return shapeType === "rect" || shapeType === "ellipse" || shapeType === "strip" || shapeType === "square-brush"
+    ? shapeType
+    : fallback;
+}
+
+function sanitizeProjectSizeControl(value, fallback = 1) {
+  const numericValue = Math.round(Number(value));
+  if (!Number.isFinite(numericValue)) return fallback;
+  return Math.max(1, Math.min(50, numericValue));
+}
+
+function sanitizeProjectPoint(value, fallback = { x: 0, y: 0 }, quantize = false) {
+  const x = Number(value?.x);
+  const y = Number(value?.y);
+  const point = {
+    x: Number.isFinite(x) ? x : fallback.x,
+    y: Number.isFinite(y) ? y : fallback.y,
+  };
+  return quantize ? quantizePoint(point) : point;
+}
+
+function sanitizeProjectCamera(camera, fallback = state.camera) {
+  return {
+    x: Number.isFinite(Number(camera?.x)) ? Number(camera.x) : fallback.x,
+    y: Number.isFinite(Number(camera?.y)) ? Number(camera.y) : fallback.y,
+    zoom: Math.max(minZoom, Math.min(maxZoom, Number.isFinite(Number(camera?.zoom)) ? Number(camera.zoom) : fallback.zoom)),
+  };
+}
+
+function cloneProjectDraftAngleSnapshot(snapshot = draftAngleStore.getSnapshot()) {
+  return {
+    nextFamilyId: sanitizeProjectCounter(snapshot?.nextFamilyId, 1),
+    familyRecords: Array.isArray(snapshot?.familyRecords) ? snapshot.familyRecords.map((record) => ({ ...record })) : [],
+    candidateRecord: snapshot?.candidateRecord ? { ...snapshot.candidateRecord } : null,
+    activeState: snapshot?.activeState ? { ...snapshot.activeState } : null,
+  };
+}
+
+function createProjectFilePayload() {
+  return {
+    app: PROJECT_FILE_APP_ID,
+    version: PROJECT_FILE_VERSION,
+    document: {
+      drawingsUi: state.drawingsUi.map((drawing) => ({
+        id: drawing.id,
+        name: drawing.name,
+        expanded: drawing.expanded === true,
+        visible: drawing.visible !== false,
+        layersSectionCollapsed: drawing.layersSectionCollapsed === true,
+      })),
+      layers: state.layers.map((layer) => ({
+        id: layer.id,
+        drawingId: getLayerDrawingId(layer),
+        name: layer.name,
+        visible: layer.visible !== false,
+        locked: layer.locked === true,
+        fillColor: sanitizeColorValue(layer.fillColor, getNextLayerColor()),
+        opacity: Math.max(0, Math.min(1, Number.isFinite(layer.opacity) ? layer.opacity : 1)),
+      })),
+      shapes: state.shapes.map((shape) => ({
+        id: shape.id,
+        layerId: shape.layerId,
+        geometry: deepCopyGeometry(shape.geometry),
+      })),
+      activeDrawingId: state.activeDrawingId,
+      activeLayerId: state.activeLayerId,
+      nextDrawingId: sanitizeProjectCounter(state.nextDrawingId, 1),
+      nextLayerId: sanitizeProjectCounter(state.nextLayerId, 1),
+      nextShapeId: sanitizeProjectCounter(state.nextShapeId, 1),
+    },
+    workspace: {
+      tool: sanitizeProjectTool(state.tool, "draw"),
+      shapeType: sanitizeProjectShapeType(state.shapeType, "rect"),
+      drawSize: sanitizeProjectSizeControl(state.drawSize, 1),
+      stripCellWidth: sanitizeProjectSizeControl(state.stripCellWidth, 1),
+      layerSectionCollapsed: state.layerSectionCollapsed === true,
+      settings: cloneSettings(state.settings),
+      draftOrigin: sanitizeProjectPoint(state.draftOrigin, { x: 0, y: 0 }, true),
+      camera: sanitizeProjectCamera(state.camera, { x: 0, y: 0, zoom: 1 }),
+      selectionShapeIds: normalizeSelectedShapeIds(state.selection.shapeIds),
+    },
+    draftAngle: cloneProjectDraftAngleSnapshot(),
+  };
+}
+
+function serializeProjectFile() {
+  return JSON.stringify(createProjectFilePayload(), null, 2);
+}
+
+function getDerivedNextIdFromRecords(records, prefix) {
+  let maxIndex = 0;
+  const matcher = new RegExp(`^${prefix}(\\d+)$`);
+
+  for (const record of records) {
+    const match = matcher.exec(record.id);
+    if (!match) continue;
+    maxIndex = Math.max(maxIndex, Number(match[1]));
+  }
+
+  return maxIndex + 1;
+}
+
+function normalizeImportedDrawingRecords(drawingsUi) {
+  if (!Array.isArray(drawingsUi) || !drawingsUi.length) {
+    throw createProjectImportError("Unsupported project file: missing drawings.");
+  }
+
+  const seenIds = new Set();
+  return drawingsUi.map((drawing, index) => {
+    if (!isPlainObject(drawing)) {
+      throw createProjectImportError("Unsupported project file: invalid drawing record.");
+    }
+
+    const id = typeof drawing.id === "string" ? drawing.id.trim() : "";
+    if (!id || seenIds.has(id)) {
+      throw createProjectImportError("Unsupported project file: drawing ids must be unique.");
+    }
+    seenIds.add(id);
+
+    return {
+      id,
+      name:
+        typeof drawing.name === "string" && drawing.name.trim()
+          ? drawing.name.trim()
+          : `Drawing ${index + 1}`,
+      expanded: drawing.expanded === true,
+      visible: drawing.visible !== false,
+      layersSectionCollapsed: drawing.layersSectionCollapsed === true,
+    };
+  });
+}
+
+function normalizeImportedLayerRecords(layers, drawingIds) {
+  if (!Array.isArray(layers) || !layers.length) {
+    throw createProjectImportError("Unsupported project file: missing layers.");
+  }
+
+  const seenIds = new Set();
+  return layers.map((layer, index) => {
+    if (!isPlainObject(layer)) {
+      throw createProjectImportError("Unsupported project file: invalid layer record.");
+    }
+
+    const id = typeof layer.id === "string" ? layer.id.trim() : "";
+    const drawingId = typeof layer.drawingId === "string" ? layer.drawingId.trim() : "";
+    if (!id || seenIds.has(id)) {
+      throw createProjectImportError("Unsupported project file: layer ids must be unique.");
+    }
+    if (!drawingIds.has(drawingId)) {
+      throw createProjectImportError("Unsupported project file: layer references a missing drawing.");
+    }
+    seenIds.add(id);
+
+    return {
+      id,
+      drawingId,
+      name:
+        typeof layer.name === "string" && layer.name.trim()
+          ? layer.name.trim()
+          : `Layer ${index + 1}`,
+      visible: layer.visible !== false,
+      locked: layer.locked === true,
+      fillColor: sanitizeColorValue(layer.fillColor, layerPalette[index % layerPalette.length]),
+      opacity: Math.max(0, Math.min(1, Number.isFinite(Number(layer.opacity)) ? Number(layer.opacity) : 1)),
+    };
+  });
+}
+
+function normalizeImportedShapeRecords(shapes, layerIds) {
+  if (!Array.isArray(shapes)) {
+    throw createProjectImportError("Unsupported project file: missing shapes.");
+  }
+
+  const seenIds = new Set();
+  return shapes.map((shape) => {
+    if (!isPlainObject(shape)) {
+      throw createProjectImportError("Unsupported project file: invalid shape record.");
+    }
+
+    const id = typeof shape.id === "string" ? shape.id.trim() : "";
+    const layerId = typeof shape.layerId === "string" ? shape.layerId.trim() : "";
+    if (!id || seenIds.has(id)) {
+      throw createProjectImportError("Unsupported project file: shape ids must be unique.");
+    }
+    if (!layerIds.has(layerId)) {
+      throw createProjectImportError("Unsupported project file: shape references a missing layer.");
+    }
+
+    const shapeRecord = createShapeRecord(layerId, shape.geometry, id);
+    if (!shapeRecord) {
+      throw createProjectImportError("Unsupported project file: shape geometry is invalid.");
+    }
+
+    seenIds.add(id);
+    return shapeRecord;
+  });
+}
+
+function normalizeImportedDraftAngleState(draftAngle) {
+  if (!isPlainObject(draftAngle)) {
+    throw createProjectImportError("Unsupported project file: missing draft-angle state.");
+  }
+
+  if (!Array.isArray(draftAngle.familyRecords) || !draftAngle.familyRecords.length) {
+    throw createProjectImportError("Unsupported project file: draft-angle family records are invalid.");
+  }
+
+  const familyRecords = draftAngle.familyRecords.map((record) => {
+    if (!isPlainObject(record)) {
+      throw createProjectImportError("Unsupported project file: invalid draft-angle family record.");
+    }
+    return { ...record };
+  });
+
+  if (draftAngle.candidateRecord !== null && draftAngle.candidateRecord !== undefined && !isPlainObject(draftAngle.candidateRecord)) {
+    throw createProjectImportError("Unsupported project file: invalid draft-angle candidate record.");
+  }
+
+  if (draftAngle.activeState !== null && draftAngle.activeState !== undefined && !isPlainObject(draftAngle.activeState)) {
+    throw createProjectImportError("Unsupported project file: invalid draft-angle active state.");
+  }
+
+  return {
+    nextFamilyId: sanitizeProjectCounter(draftAngle.nextFamilyId, 1),
+    familyRecords,
+    candidateRecord: draftAngle.candidateRecord ? { ...draftAngle.candidateRecord } : null,
+    activeState: draftAngle.activeState ? { ...draftAngle.activeState } : null,
+  };
+}
+
+function normalizeImportedProjectFile(payload) {
+  if (!isPlainObject(payload)) {
+    throw createProjectImportError("Unsupported project file.");
+  }
+
+  if (payload.app !== PROJECT_FILE_APP_ID) {
+    throw createProjectImportError("Unsupported project file.");
+  }
+
+  if (payload.version !== PROJECT_FILE_VERSION) {
+    throw createProjectImportError(`Unsupported project file version: ${String(payload.version)}.`);
+  }
+
+  if (!isPlainObject(payload.document) || !isPlainObject(payload.workspace)) {
+    throw createProjectImportError("Unsupported project file.");
+  }
+
+  const drawingsUi = normalizeImportedDrawingRecords(payload.document.drawingsUi);
+  const drawingIds = new Set(drawingsUi.map((drawing) => drawing.id));
+  const layers = normalizeImportedLayerRecords(payload.document.layers, drawingIds);
+  const layerIds = new Set(layers.map((layer) => layer.id));
+  const shapes = normalizeImportedShapeRecords(payload.document.shapes, layerIds);
+  const draftAngle = normalizeImportedDraftAngleState(payload.draftAngle);
+
+  for (const drawing of drawingsUi) {
+    if (!layers.some((layer) => layer.drawingId === drawing.id)) {
+      throw createProjectImportError("Unsupported project file: each drawing must contain at least one layer.");
+    }
+  }
+
+  const activeDrawingId =
+    typeof payload.document.activeDrawingId === "string" && drawingIds.has(payload.document.activeDrawingId)
+      ? payload.document.activeDrawingId
+      : drawingsUi[0].id;
+
+  const activeLayerId =
+    typeof payload.document.activeLayerId === "string" &&
+    layerIds.has(payload.document.activeLayerId) &&
+    layers.some((layer) => layer.id === payload.document.activeLayerId && layer.drawingId === activeDrawingId)
+      ? payload.document.activeLayerId
+      : getDrawingLayerFallbackFromRecords(layers, activeDrawingId)?.id || layers[0].id;
+
+  return {
+    document: {
+      drawingsUi: drawingsUi.map((drawing) => ({
+        ...drawing,
+        expanded: drawing.id === activeDrawingId,
+      })),
+      layers,
+      shapes,
+      activeDrawingId,
+      activeLayerId,
+      nextDrawingId: Math.max(
+        sanitizeProjectCounter(payload.document.nextDrawingId, 1),
+        getDerivedNextIdFromRecords(drawingsUi, "drawing-")
+      ),
+      nextLayerId: Math.max(
+        sanitizeProjectCounter(payload.document.nextLayerId, 1),
+        getDerivedNextIdFromRecords(layers, "layer-")
+      ),
+      nextShapeId: Math.max(
+        sanitizeProjectCounter(payload.document.nextShapeId, 1),
+        getDerivedNextIdFromRecords(shapes, "shape-")
+      ),
+    },
+    workspace: {
+      tool: sanitizeProjectTool(payload.workspace.tool, "draw"),
+      shapeType: sanitizeProjectShapeType(payload.workspace.shapeType, "rect"),
+      drawSize: sanitizeProjectSizeControl(payload.workspace.drawSize, 1),
+      stripCellWidth: sanitizeProjectSizeControl(payload.workspace.stripCellWidth, 1),
+      layerSectionCollapsed: payload.workspace.layerSectionCollapsed === true,
+      settings: cloneSettings(payload.workspace.settings),
+      draftOrigin: sanitizeProjectPoint(payload.workspace.draftOrigin, { x: 0, y: 0 }, true),
+      camera: sanitizeProjectCamera(payload.workspace.camera, { x: 0, y: 0, zoom: 1 }),
+      selectionShapeIds: Array.isArray(payload.workspace.selectionShapeIds)
+        ? payload.workspace.selectionShapeIds.filter((shapeId) => typeof shapeId === "string")
+        : [],
+    },
+    draftAngle,
+  };
+}
+
+function getDrawingLayerFallbackFromRecords(layers, drawingId) {
+  return layers.filter((layer) => layer.drawingId === drawingId).slice().reverse()[0] || null;
+}
+
+function replaceDraftAngleStoreFromSnapshot(snapshot) {
+  draftAngleStore = createDraftAngleStore({
+    precisionDecimals: geometryPrecisionDecimals,
+    nextFamilyId: snapshot.nextFamilyId,
+    familyRecords: snapshot.familyRecords,
+    candidateRecord: snapshot.candidateRecord,
+    activeState: snapshot.activeState,
+  });
+  window.draftAngleStore = draftAngleStore;
+}
+
+function resetProjectInteractionState() {
+  cancelDrawInteraction();
+  cancelSelectionInteraction();
+  state.panning = false;
+  state.draggingDraftOrigin = false;
+  cancelDraftAlignDrag();
+  state.pointerInCanvas = false;
+  state.pointerScreen = { x: 0, y: 0 };
+  state.start = { x: 0, y: 0 };
+  state.current = { x: 0, y: 0 };
+  state.draftStart = { x: 0, y: 0 };
+  state.draftCurrent = { x: 0, y: 0 };
+  state.panStart = { x: 0, y: 0 };
+  state.panOrigin = { x: 0, y: 0 };
+  state.leftPanelPointerDrag = null;
+  state.draftOriginDragStartScreen = { x: 0, y: 0 };
+  state.draftOriginDragStartOrigin = { x: 0, y: 0 };
+  state.draftOriginDragRotation = null;
+  state.draftAlignStartSnap = null;
+  state.draftAlignCurrentSnap = null;
+  state.squareBrushMemoryPoint = null;
+  state.settingsDraft = null;
+  state.editingDrawingId = null;
+  state.editingDrawingNameDraft = "";
+  state.editingDrawingInitialName = "";
+  state.editingLayerId = null;
+  state.editingLayerNameDraft = "";
+  state.editingLayerInitialName = "";
+  state.spacePressed = false;
+  state.shiftPressed = false;
+
+  if (layersPanel) layersPanel.classList.remove("drag-reordering");
+  clearLeftPanelDropIndicatorClasses(layersList);
+  clearLayerTransferTargetClasses(layersList);
+  clearLayerMergeTargetClasses(layersList);
+}
+
+function applyImportedProject(normalizedProject, importedFileName = DEFAULT_PROJECT_FILE_NAME) {
+  resetProjectInteractionState();
+  closeSettingsMenu();
+  state.drawingsUi = normalizedProject.document.drawingsUi.map((drawing) => ({ ...drawing }));
+  state.layerSectionCollapsed = normalizedProject.workspace.layerSectionCollapsed;
+  state.layers = normalizedProject.document.layers.map((layer) => ({ ...layer }));
+  state.shapes = normalizedProject.document.shapes.map((shape) => cloneShape(shape));
+  state.nextDrawingId = normalizedProject.document.nextDrawingId;
+  state.nextLayerId = normalizedProject.document.nextLayerId;
+  state.nextShapeId = normalizedProject.document.nextShapeId;
+  state.settings = cloneSettings(normalizedProject.workspace.settings);
+  state.projectFileName = sanitizeProjectFileName(importedFileName, state.projectFileName);
+  state.draftOrigin = { ...normalizedProject.workspace.draftOrigin };
+  state.camera = { ...normalizedProject.workspace.camera };
+  state.tool = normalizedProject.workspace.tool;
+  state.shapeType = normalizedProject.workspace.shapeType;
+  state.drawSize = normalizedProject.workspace.drawSize;
+  state.stripCellWidth = normalizedProject.workspace.stripCellWidth;
+  replaceDraftAngleStoreFromSnapshot(normalizedProject.draftAngle);
+  setActiveDrawingById(normalizedProject.document.activeDrawingId, {
+    layerId: normalizedProject.document.activeLayerId,
+  });
+  setSelectedShapeIds(normalizedProject.workspace.selectionShapeIds);
+  resetSelectionInteraction();
+  syncToolControls();
+  shapeSelect.value = state.shapeType;
+  syncDrawSizeInput();
+  updateZoomLabel();
+  updateGridStatus();
+  updateWorkplaneStatus();
+  updateCursor();
+  renderLayersPanel();
+  renderLiveRegistry();
+  render();
+}
+
+async function exportProjectToFile() {
+  if (typeof window.showSaveFilePicker !== "function") {
+    window.alert("Export is not supported in this browser.");
+    return;
+  }
+
+  const handle = await window.showSaveFilePicker({
+    suggestedName: sanitizeProjectFileName(state.projectFileName, DEFAULT_PROJECT_FILE_NAME),
+    types: [
+      {
+        description: "Millimetre Project",
+        accept: {
+          "application/json": [".json"],
+        },
+      },
+    ],
+  });
+
+  const writable = await handle.createWritable();
+  await writable.write(serializeProjectFile());
+  await writable.close();
+  state.projectFileName = sanitizeProjectFileName(handle.name, state.projectFileName);
+}
+
+async function handleProjectExport() {
+  try {
+    await exportProjectToFile();
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    window.alert(error instanceof Error ? error.message : "Project export failed.");
+  }
+}
+
+async function handleProjectImportFile(file) {
+  if (!file) return;
+  if (!window.confirm("Import will replace the current project. Continue?")) return;
+
+  try {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const normalizedProject = normalizeImportedProjectFile(payload);
+    applyImportedProject(normalizedProject, file.name || DEFAULT_PROJECT_FILE_NAME);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      window.alert("Unsupported project file: invalid JSON.");
+      return;
+    }
+    window.alert(error instanceof Error ? error.message : "Project import failed.");
   }
 }
 
@@ -3298,14 +3783,18 @@ function moveActiveLayer(direction) {
   render();
 }
 
+function syncToolControls() {
+  selectBtn.classList.toggle("active", state.tool === "select");
+  drawBtn.classList.toggle("active", state.tool === "draw");
+}
+
 function setTool(tool) {
   const previousTool = state.tool;
   if (previousTool === "draw" && tool !== "draw") cancelDrawInteraction();
   if (previousTool === "select" && tool !== "select") cancelSelectionInteraction();
 
   state.tool = tool;
-  selectBtn.classList.toggle("active", tool === "select");
-  drawBtn.classList.toggle("active", tool === "draw");
+  syncToolControls();
   updateCursor();
   render();
 }
@@ -4819,6 +5308,32 @@ if (settingsButton) {
     }
 
     openSettingsMenu();
+  });
+}
+
+if (exportButton) {
+  exportButton.addEventListener("click", () => {
+    void handleProjectExport();
+  });
+}
+
+if (importButton) {
+  importButton.addEventListener("click", () => {
+    if (!projectImportInput) {
+      window.alert("Import is not available.");
+      return;
+    }
+
+    projectImportInput.value = "";
+    projectImportInput.click();
+  });
+}
+
+if (projectImportInput) {
+  projectImportInput.addEventListener("change", () => {
+    const [file] = projectImportInput.files || [];
+    void handleProjectImportFile(file || null);
+    projectImportInput.value = "";
   });
 }
 

@@ -304,9 +304,75 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 - Export/import should be based on the app's real project state, not on a lossy visual snapshot.
 - The saved format should preserve drawings, layers, shapes, settings, workplane state, and draft-angle family data needed to reopen the project faithfully.
+- Export should preserve the full current project state at the moment of save, not just the document geometry.
+- The only intentional exclusions are incomplete transient interactions that are currently in progress and cannot be resumed cleanly, such as a half-finished tool gesture, drag, or similar mid-operation state.
+- All other stable reopenable state at the moment of export should round-trip through export/import.
 - The first implementation should prioritize a stable app-native project file over external CAD interchange formats.
 - Import does not need backward or cross-version compatibility for older app file formats. If the file version or schema is not exactly supported, the app should reject it and show a clear unsupported-file / unsupported-version message instead of attempting a migration.
 - Export should keep using the current project filename as its default suggested save name.
 - If the user imports a project file, that imported filename becomes the current project's default export filename.
 - If the user exports the project under a chosen filename, later exports should keep suggesting that same filename until another import or explicit export rename replaces it.
 - The first implementation should stay as simple as possible and may rely on the browser save picker instead of adding a separate download fallback path for browsers without that capability.
+
+#### Schema V1
+
+- The first file format should be a strict app-native JSON project file with a single supported `version`.
+- The top-level export payload should include:
+  - app/format metadata
+  - file format `version`
+  - document state
+  - workspace/view state
+  - draft-angle snapshot state
+- The document state should include:
+  - `drawingsUi`
+  - `layers`
+  - `shapes`
+  - `activeDrawingId`
+  - `activeLayerId`
+  - `nextDrawingId`
+  - `nextLayerId`
+  - `nextShapeId`
+- The workspace/view state should include:
+  - current `tool`
+  - current `shapeType`
+  - current size controls (`drawSize` and `stripCellWidth`)
+  - `layerSectionCollapsed`
+  - `settings`
+  - `draftOrigin`
+  - `camera`
+  - stable selection membership via `selection.shapeIds`
+- The draft-angle state should be exported from the store snapshot and should include:
+  - `nextFamilyId`
+  - `familyRecords`
+  - `candidateRecord`
+  - `activeState`
+- Shape geometry should be saved from the canonical vector geometry model.
+- Shape `bounds` are treated as derived data and should be recomputed on import rather than trusted from the file.
+- The import validator should reject files whose top-level shape does not match the exact supported schema version.
+
+#### Explicit Exclusions
+
+- The export file should not include transient interaction state that is only meaningful mid-gesture, including:
+  - pointer position fields
+  - drag flags
+  - pan-in-progress state
+  - draft-align drag state
+  - in-progress brush memory points
+  - unfinished preview geometry
+  - keyboard-held state such as active `Space` or `Shift`
+- The export file should not include temporary editing/UI draft state that should reset cleanly on reopen, including:
+  - rename-in-progress fields
+  - settings modal draft state
+  - pending selection drag snapshots
+  - any other helper/cache field that is recalculated during normal runtime
+
+#### Progress
+
+- The top-bar `Export` and `Import` buttons are now wired to real project I/O flows instead of remaining visual-only placeholders.
+- Export now writes a strict app-native JSON project file with `app = millimetre` and a single supported `version = 1`.
+- Export now includes the stable reopenable project state, including drawings, layers, shapes, active drawing/layer, counters, tool state, size controls, settings, camera, workplane origin, stable selection membership, and draft-angle snapshot state.
+- Export intentionally omits transient mid-gesture state and recomputes shape `bounds` on import instead of trusting them from the file.
+- Import now replaces the current project only after an explicit confirmation step.
+- Import now rejects unsupported file versions, malformed JSON, and broken cross-references instead of attempting compatibility or migration logic.
+- The import flow now restores the draft-angle store from serialized snapshot data and reapplies the restored workspace/view state to the live UI.
+- The export suggested filename is now remembered in runtime state; importing a file adopts that file's name as the next export suggestion, and saving through the picker updates the remembered export name.

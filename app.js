@@ -794,6 +794,14 @@ function getDrawingCardElement(drawingId) {
   return layersList.querySelector(`.drawing-card[data-drawing-id="${drawingId}"]`);
 }
 
+function getLayerCardElements() {
+  return Array.from(layersList.querySelectorAll(".layer-card"));
+}
+
+function getLayerCardElement(layerId) {
+  return layersList.querySelector(`.layer-card[data-layer-id="${layerId}"]`);
+}
+
 function isClientPointInsideRect(clientX, clientY, rect) {
   return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
 }
@@ -803,6 +811,29 @@ function getLayerTransferTargetDrawingId(clientX, clientY, sourceDrawingId) {
     const drawingId = card.dataset.drawingId;
     if (!drawingId || drawingId === sourceDrawingId) continue;
     if (isClientPointInsideRect(clientX, clientY, card.getBoundingClientRect())) return drawingId;
+  }
+
+  return null;
+}
+
+function getLayerMergeTargetLayerId(clientX, clientY, sourceLayerId) {
+  const sourceLayer = getLayerById(sourceLayerId);
+  if (!sourceLayer || sourceLayer.locked) return null;
+
+  for (const card of getLayerCardElements()) {
+    const layerId = card.dataset.layerId;
+    if (!layerId || layerId === sourceLayerId) continue;
+
+    const layer = getLayerById(layerId);
+    if (!layer || layer.locked) continue;
+
+    const rect = card.getBoundingClientRect();
+    if (!isClientPointInsideRect(clientX, clientY, rect)) continue;
+
+    const mergeEdgeInset = Math.max(10, Math.min(24, rect.height * 0.28));
+    if (clientY <= rect.top + mergeEdgeInset || clientY >= rect.bottom - mergeEdgeInset) continue;
+
+    return layerId;
   }
 
   return null;
@@ -828,6 +859,20 @@ function updateLayerTransferTargetIndicator(targetDrawingId) {
 
   const card = getDrawingCardElement(targetDrawingId);
   if (card) card.classList.add("layer-drop-target");
+}
+
+function clearLayerMergeTargetClasses(root = layersList) {
+  root.querySelectorAll(".layer-merge-target").forEach((element) => {
+    element.classList.remove("layer-merge-target");
+  });
+}
+
+function updateLayerMergeTargetIndicator(targetLayerId) {
+  clearLayerMergeTargetClasses(layersList);
+  if (!state.leftPanelPointerDrag || !targetLayerId) return;
+
+  const card = getLayerCardElement(targetLayerId);
+  if (card) card.classList.add("layer-merge-target");
 }
 
 function reorderDrawingsFromVisualOrder(visualDrawingIds) {
@@ -956,9 +1001,18 @@ function clearLeftPanelPointerDrag(commit = true) {
     clearLeftPanelDropIndicatorClasses(getLayerListElementForDrawing(drag.drawingId));
   }
   clearLayerTransferTargetClasses(layersList);
+  clearLayerMergeTargetClasses(layersList);
   if (layersPanel) layersPanel.classList.remove("drag-reordering");
 
   state.leftPanelPointerDrag = null;
+
+  if (commit && drag.type === "layer" && drag.targetMode === "merge" && drag.targetLayerId) {
+    if (mergeLayerIntoTarget(drag.layerId, drag.targetLayerId)) {
+      renderLayersPanel();
+      render();
+      return;
+    }
+  }
 
   if (commit && drag.type === "layer" && drag.targetMode === "drawing" && drag.targetDrawingId) {
     if (moveLayerToDrawingTop(drag.layerId, drag.targetDrawingId)) {
@@ -1029,6 +1083,7 @@ function beginLayerPointerDrag(event, card, drawingId, layerId) {
     drawingId,
     layerId,
     targetDrawingId: null,
+    targetLayerId: null,
     targetMode: "reorder",
     sourceCard: card,
     dropIndex: drop.toIndex,
@@ -2612,6 +2667,8 @@ function renderLayersPanel() {
       const isActive = layer.id === state.activeLayerId;
       const card = document.createElement("div");
       card.className = "layer-card layer-stack-card" + (isActive ? " active" : "");
+      card.dataset.layerId = layer.id;
+      card.dataset.drawingId = drawing.id;
       if (!isActive) card.classList.add("inactive-collapsed");
       card.addEventListener("click", () => {
         setActiveDrawingById(drawing.id, { layerId: layer.id });
@@ -3034,6 +3091,43 @@ function ensureDrawingHasFallbackLayer(drawingId) {
   const fallbackLayer = createLayerRecord(drawingId);
   state.layers.splice(getLayerTopInsertionIndexForDrawing(drawingId), 0, fallbackLayer);
   return fallbackLayer;
+}
+
+function mergeLayerIntoTarget(sourceLayerId, targetLayerId) {
+  if (!sourceLayerId || !targetLayerId || sourceLayerId === targetLayerId) return false;
+
+  const sourceLayer = getLayerById(sourceLayerId);
+  const targetLayer = getLayerById(targetLayerId);
+  if (!sourceLayer || !targetLayer || sourceLayer.locked || targetLayer.locked) return false;
+
+  const sourceShapes = state.shapes.filter((shape) => shape.layerId === sourceLayerId);
+  const targetShapes = state.shapes.filter((shape) => shape.layerId === targetLayerId);
+  const combinedShapes = [...targetShapes, ...sourceShapes];
+  const nextTargetShapes = combinedShapes.length ? buildUnionShapes(targetLayerId, combinedShapes) : [];
+
+  state.shapes = [
+    ...state.shapes.filter((shape) => shape.layerId !== sourceLayerId && shape.layerId !== targetLayerId),
+    ...nextTargetShapes,
+  ];
+
+  const sourceDrawingId = getLayerDrawingId(sourceLayer);
+  const targetDrawingId = getLayerDrawingId(targetLayer);
+  state.layers = state.layers.filter((layer) => layer.id !== sourceLayerId);
+
+  if (sourceDrawingId !== targetDrawingId) ensureDrawingHasFallbackLayer(sourceDrawingId);
+
+  const targetDrawing = getDrawingUiById(targetDrawingId);
+  if (targetDrawing) targetDrawing.layersSectionCollapsed = false;
+
+  if (state.editingLayerId === sourceLayerId) {
+    state.editingLayerId = null;
+    state.editingLayerNameDraft = "";
+    state.editingLayerInitialName = "";
+  }
+
+  clearSelection();
+  setActiveDrawingById(targetDrawingId, { layerId: targetLayerId });
+  return true;
 }
 
 function moveLayerToDrawingTop(layerId, targetDrawingId) {
@@ -4615,12 +4709,27 @@ window.addEventListener("pointermove", (event) => {
     drag.fromIndex = drop.fromIndex;
     updateDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
   } else {
+    const targetLayerId = getLayerMergeTargetLayerId(event.clientX, event.clientY, drag.layerId);
+    if (targetLayerId) {
+      drag.targetMode = "merge";
+      drag.targetLayerId = targetLayerId;
+      drag.targetDrawingId = null;
+      drag.dropIndex = -1;
+      drag.rawIndex = -1;
+      updateLayerTransferTargetIndicator(null);
+      updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
+      updateLayerMergeTargetIndicator(targetLayerId);
+      return;
+    }
+
     const targetDrawingId = getLayerTransferTargetDrawingId(event.clientX, event.clientY, drag.drawingId);
     if (targetDrawingId) {
       drag.targetMode = "drawing";
       drag.targetDrawingId = targetDrawingId;
+      drag.targetLayerId = null;
       drag.dropIndex = -1;
       drag.rawIndex = -1;
+      updateLayerMergeTargetIndicator(null);
       updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
       updateLayerTransferTargetIndicator(targetDrawingId);
       return;
@@ -4634,19 +4743,23 @@ window.addEventListener("pointermove", (event) => {
       const drop = layerDropPositionFromClientY(drag.drawingId, event.clientY, drag.layerId);
       drag.targetMode = "reorder";
       drag.targetDrawingId = null;
+      drag.targetLayerId = null;
       drag.dropIndex = drop.toIndex;
       drag.rawIndex = drop.rawIndex;
       drag.fromIndex = drop.fromIndex;
       updateLayerTransferTargetIndicator(null);
+      updateLayerMergeTargetIndicator(null);
       updateLayerDropIndicator(drag.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
       return;
     }
 
     drag.targetMode = "none";
     drag.targetDrawingId = null;
+    drag.targetLayerId = null;
     drag.dropIndex = -1;
     drag.rawIndex = -1;
     updateLayerTransferTargetIndicator(null);
+    updateLayerMergeTargetIndicator(null);
     updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
   }
 });

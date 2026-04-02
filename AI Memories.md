@@ -80,7 +80,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - When `Outline` is enabled, each visible layer shape is stroked with the configured outline color.
 - When `Corners` is enabled, each stored polygon vertex is rendered as a marker using that same outline color.
 - `Corners` is functionally dependent on `Outline`: when `Outline` is off, corner markers do not render.
-- In `Draw`, the active layer is a deliberate exception: its outline and corner markers always render with the preview blue emphasis even if the general `Outline` or `Corners` settings are off.
+- In `Draw`, the active layer is a deliberate exception: its outline and corner markers always render with the preview blue emphasis even if the general `Outline` or `Corners` settings are off, and that emphasized pass sits back on top of the draft canvas for readability.
 - Selection highlighting is drawn by tracing the selected shape geometries.
 
 ### Draft Angle Model
@@ -168,7 +168,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The top bar now shows a live workplane status readout with the current plane mode (`default` when the workplane is unmodified, otherwise `custom`), rotation in degrees formatted to up to `2` decimal places, and origin coordinates formatted in the active display unit.
 - The settings modal now exposes `Outline` and `Corners` toggles; `Outline` also includes a color swatch, while `Corners` inherits that same outline color and is disabled whenever `Outline` is off.
 - In `Select`, the draft canvas (`Grid` + draft-plane axes) is hidden while the `World` axes remain visible underneath the scene.
-- In `Draw`, both the `World` axes and the draft canvas are visible; the `World` axes render underneath the layer geometry, while the draft canvas currently renders above the layer fills, outlines, and corners.
+- In `Draw`, both the `World` axes and the draft canvas are visible; the `World` axes render underneath the layer geometry, the draft canvas renders above the regular layer geometry, and the active layer's emphasized outline/corners are then re-drawn on top of the draft canvas.
 - `Select` supports marquee selection in draft/screen space: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed by or intersect the box.
 - Holding `Shift` in `Select` toggles selection membership for both click and marquee selection: newly hit shapes are added while already selected shapes captured by the click or box are removed.
 - Multi-selected shapes move together when dragged from a selected shape.
@@ -273,7 +273,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Layer drag now also supports merge-on-drop over another layer card: hovering the middle of a target layer card shows the same soft neutral hover state, and dropping unions the source layer geometry into the target layer while preserving the target layer's properties and deleting the source layer.
 - Each layer card now shows a total area row above the object count, and that area is formatted in the active `Display Unit` squared (`mm²`, `cm²`, or `m²`).
 - The settings modal now includes `Outline` and `Corners` rows below `Cell Size`; `Outline` has `On/Off` plus a circular color swatch, while `Corners` has `On/Off` only and is disabled whenever `Outline` is off.
-- The canvas render stack is now being split into always-visible terracotta `World` axes plus a draft-canvas layer (`Grid` + draft-plane axes) that is shown only in `Draw`; in the current test arrangement the draft canvas renders above layer fills and edges so the visibility/readability tradeoff can be evaluated.
+- The canvas render stack is now split into always-visible terracotta `World` axes plus a draft-canvas layer (`Grid` + draft-plane axes) that is shown only in `Draw`; the draft canvas renders above the regular layer geometry, and the active layer's emphasized outline/corners are re-drawn above that draft canvas.
 - The panel now follows an active-drawing model: only one drawing is active/expanded at a time, and the app keeps a single active layer inside that active drawing.
 - The main `Drawings` add button now creates a real new drawing with a default layer inside it and makes that drawing/layer active.
 - Drawing header controls now work for duplicate, hide/show, and delete; duplicating a drawing clones its layers and stored shapes, hiding a drawing suppresses its layers from render/select/snap, and deleting a drawing removes its layers/shapes while preserving a valid fallback active drawing/layer.

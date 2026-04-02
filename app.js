@@ -978,6 +978,25 @@ function syncActiveLayerControls() {
   layerFillInput.value = activeLayer.fillColor;
 }
 
+function openLayerFillPicker(layerId, drawingId = getLayerDrawingId(getLayerById(layerId))) {
+  const layer = getLayerById(layerId);
+  if (!layer || !layerFillInput) return;
+
+  setActiveDrawingById(drawingId, { layerId });
+  renderLayersPanel();
+  render();
+  syncActiveLayerControls();
+
+  try {
+    if (typeof layerFillInput.showPicker === "function") {
+      layerFillInput.showPicker();
+      return;
+    }
+  } catch {}
+
+  layerFillInput.click();
+}
+
 function beginRenameDrawing(drawingId) {
   const drawing = getDrawingUiById(drawingId);
   if (!drawing) return;
@@ -2507,6 +2526,30 @@ function renderLayersPanel() {
         beginLayerPointerDrag(event, card, drawing.id, layer.id);
       });
 
+      const colorSwatch = document.createElement("div");
+      colorSwatch.className = "layer-color-swatch";
+      colorSwatch.title = "Layer fill color";
+      colorSwatch.style.setProperty("--layer-swatch-color", layer.fillColor);
+      colorSwatch.addEventListener("pointerdown", (event) => event.stopPropagation());
+      colorSwatch.addEventListener("mousedown", (event) => event.stopPropagation());
+      colorSwatch.addEventListener("click", (event) => event.stopPropagation());
+
+      const colorSwatchInput = document.createElement("input");
+      colorSwatchInput.className = "layer-color-swatch-input";
+      colorSwatchInput.type = "color";
+      colorSwatchInput.value = layer.fillColor;
+      colorSwatchInput.title = "Layer fill color";
+      colorSwatchInput.setAttribute("aria-label", `Set fill color for ${layer.name}`);
+      colorSwatchInput.addEventListener("pointerdown", (event) => event.stopPropagation());
+      colorSwatchInput.addEventListener("mousedown", (event) => event.stopPropagation());
+      colorSwatchInput.addEventListener("click", (event) => event.stopPropagation());
+      colorSwatchInput.addEventListener("input", (event) => {
+        layer.fillColor = event.target.value;
+        colorSwatch.style.setProperty("--layer-swatch-color", layer.fillColor);
+        render();
+      });
+      colorSwatch.appendChild(colorSwatchInput);
+
       const main = document.createElement("div");
       main.className = "layer-main";
       main.addEventListener("click", () => {
@@ -2646,6 +2689,7 @@ function renderLayersPanel() {
       main.appendChild(opacityField);
 
       card.appendChild(grip);
+      card.appendChild(colorSwatch);
       card.appendChild(main);
       drawingLayersList.appendChild(card);
     }

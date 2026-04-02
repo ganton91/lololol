@@ -254,7 +254,9 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The right side of the top bar now includes compact live status readouts for grid/workplane state instead of showing them inside the floating canvas toolbar.
 - The old floating layers widget has been replaced by a left-side panel shell with a `Drawings` section.
 - The left panel now renders a `Drawing 1` container with nested `Layers` cards and the new card-based visual hierarchy.
+- Layer cards now span the full width of the nested layers list instead of sitting inside an extra left indent.
 - Layer cards now show inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
+- Each layer card now shows a small clickable circular fill-color swatch between the drag handle and the layer name, and that swatch remains visible even when the layer card is collapsed.
 - The panel now follows an active-drawing model: only one drawing is active/expanded at a time, and the app keeps a single active layer inside that active drawing.
 - The main `Drawings` add button now creates a real new drawing with a default layer inside it and makes that drawing/layer active.
 - Drawing header controls now work for duplicate, hide/show, and delete; duplicating a drawing clones its layers and stored shapes, hiding a drawing suppresses its layers from render/select/snap, and deleting a drawing removes its layers/shapes while preserving a valid fallback active drawing/layer.

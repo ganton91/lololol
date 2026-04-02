@@ -411,7 +411,7 @@
         display: flex;
         flex-direction: column;
         gap: 4px;
-        padding-left: 16px;
+        padding-left: 0;
       }
 
       .drag-handle {
@@ -429,7 +429,7 @@
 
       .layer-card {
         display: grid;
-        grid-template-columns: 16px minmax(0, 1fr);
+        grid-template-columns: 16px 12px minmax(0, 1fr);
         align-items: start;
         gap: 8px;
         padding: 10px;
@@ -496,6 +496,57 @@
         flex-direction: column;
         align-items: flex-start;
         gap: 8px;
+      }
+
+      .layer-color-swatch {
+        position: relative;
+        width: 12px;
+        height: 12px;
+        margin: 2px 0 0;
+        padding: 0;
+        border: 1px solid rgba(15, 23, 42, 0.16);
+        border-radius: 999px;
+        background: var(--layer-swatch-color, #93c5fd);
+        overflow: hidden;
+        cursor: pointer;
+        transition: transform 140ms ease, border-color 140ms ease;
+      }
+
+      .layer-color-swatch:hover {
+        transform: scale(1.04);
+        border-color: var(--ui-line-strong);
+      }
+
+      .layer-color-swatch:focus-visible {
+        outline: 2px solid rgba(14, 165, 233, 0.28);
+        outline-offset: 2px;
+      }
+
+      .layer-card.inactive-collapsed .layer-color-swatch {
+        margin-top: 0;
+        align-self: center;
+      }
+
+      .layer-color-swatch-input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        margin: 0;
+        border: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+
+      .layer-color-picker-input {
+        position: fixed;
+        left: -9999px;
+        top: -9999px;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
       }
 
       .card-header {
@@ -1056,7 +1107,7 @@
               <div id="layers-list" class="layer-list"></div>
             </div>
           </div>
-          <input id="layer-fill" type="color" value="#93c5fd" hidden />
+          <input id="layer-fill" class="layer-color-picker-input" type="color" value="#93c5fd" tabindex="-1" aria-hidden="true" />
         </aside>
 
         <div class="canvas-shell">

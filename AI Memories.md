@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-03-31
+- Last updated: 2026-04-02
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -21,7 +21,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 ### UI Structure
 
 - `index.html` contains the canvas, toolbar, zoom controls, live workplane status readout, hint area, and layers panel.
-- `index.html` now also contains a centered settings modal shell with a backdrop for unit and grid configuration.
+- `index.html` now also contains a centered settings modal shell with a backdrop for unit, snapping, and canvas edge/corner display configuration.
 - `app.js` reads those DOM elements and drives the whole interaction loop.
 - The app still runs as a plain browser project without a bundler.
 - The preferred project direction is to remain compatible with plain browser deployment through native ES modules and static hosting (for example GitHub Pages or similar simple web hosting) without requiring a build step just to run the app.
@@ -74,7 +74,10 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - Trig-generated workplane coordinates and the Clipper adapter now share the same `8`-decimal quantization policy, so rotated world-space geometry enters boolean operations on the same canonical coordinate grid.
 - There is no raster-mask union pipeline anymore.
 - Each visible layer is drawn from its current merged vector shapes.
-- Visible layer shapes also render small black vertex markers at each stored polygon vertex.
+- Layer rendering now has settings-controlled outline and corner-marker visibility.
+- When `Outline` is enabled, each visible layer shape is stroked with the configured outline color.
+- When `Corners` is enabled, each stored polygon vertex is rendered as a marker using that same outline color.
+- `Corners` is functionally dependent on `Outline`: when `Outline` is off, corner markers do not render.
 - Selection highlighting is drawn by tracing the selected shape geometries.
 
 ### Draft Angle Model
@@ -159,6 +162,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Pressing `R` while `Space` is held resets the current workplane to the world-aligned plane, cancels any in-progress draft transform drag, and leaves drafting-transforms mode active as long as `Space` remains held.
 - Releasing `Space` during a pending workplane alignment cancels that alignment and returns control to the underlying tool.
 - The top bar now shows a live workplane status readout with the current plane mode (`default` when the workplane is unmodified, otherwise `custom`), rotation in degrees formatted to up to `2` decimal places, and origin coordinates formatted in the active display unit.
+- The settings modal now exposes `Outline` and `Corners` toggles; `Outline` also includes a color swatch, while `Corners` inherits that same outline color and is disabled whenever `Outline` is off.
 - `Select` supports marquee selection in draft/screen space: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed by or intersect the box.
 - Holding `Shift` in `Select` toggles selection membership for both click and marquee selection: newly hit shapes are added while already selected shapes captured by the click or box are removed.
 - Multi-selected shapes move together when dragged from a selected shape.
@@ -248,7 +252,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The active task has been reset from the old `Renders` planning track to interface implementation.
 - The current app shell now includes the `millimétré` top bar with the current button order, brand styling, separator, translucent surface treatment, and hover behavior.
 - The `Settings` button in the top bar is now wired to a real modal; the remaining top bar buttons are still visual-only placeholders.
-- The settings modal header is being simplified toward a single `Settings` heading, and the settings content is being extended with `Outline` and `Corners` controls so canvas edge/corner rendering can be user-configurable from the same modal.
+- The settings modal now uses a single `Settings` heading with extra breathing room before the rows.
 - The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
 - The canvas shell now includes four-sided drafting rulers around the live canvas viewport plus all four corner blocks, with the inner drawing viewport inset inside that frame.
 - Ruler ticks and labels are now drawn from the app's live camera pan, zoom, and grid intervals instead of static DOM marks, and the ruler canvases resize together with the main drawing canvas.
@@ -262,6 +266,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Layer drag can now move a layer into a different drawing by dropping it onto another drawing card; the moved layer becomes the top layer in the target drawing, and if the source drawing would become empty it automatically keeps a fallback empty layer.
 - Layer drag now also supports merge-on-drop over another layer card: hovering the middle of a target layer card shows the same soft neutral hover state, and dropping unions the source layer geometry into the target layer while preserving the target layer's properties and deleting the source layer.
 - Each layer card now shows a total area row above the object count, and that area is formatted in the active `Display Unit` squared (`mm²`, `cm²`, or `m²`).
+- The settings modal now includes `Outline` and `Corners` rows below `Cell Size`; `Outline` has `On/Off` plus a circular color swatch, while `Corners` has `On/Off` only and is disabled whenever `Outline` is off.
 - The panel now follows an active-drawing model: only one drawing is active/expanded at a time, and the app keeps a single active layer inside that active drawing.
 - The main `Drawings` add button now creates a real new drawing with a default layer inside it and makes that drawing/layer active.
 - Drawing header controls now work for duplicate, hide/show, and delete; duplicating a drawing clones its layers and stored shapes, hiding a drawing suppresses its layers from render/select/snap, and deleting a drawing removes its layers/shapes while preserving a valid fallback active drawing/layer.
@@ -308,13 +313,14 @@ Layer order controls draw order. The active layer receives new geometry when the
 - A second active task has now been opened specifically for real dimensions and units.
 - The app now uses millimeters as the canonical internal world unit.
 - The top bar `Settings` button now opens a centered settings modal shell styled from the reference modal language, but with app-specific content only.
-- The first settings group now exposes `Display Unit`, `Grid Snap`, and `Cell Size`.
+- The first settings group now exposes `Display Unit`, `Grid Snap`, `Cell Size`, `Outline`, and `Corners`.
 - The separate `Grid` selector has been removed; the `Cell Size` row now includes inline `mm`, `cm`, and `m` unit buttons next to the numeric field.
 - The settings modal now exposes `Grid Snap` with `Adaptive` and `Locked` choices.
 - The current supported display units are `mm`, `cm`, and `m`.
 - `Cell Size` now accepts integer values and combines with the selected inline `mm` / `cm` / `m` unit to derive the locked cell size in millimeters.
 - In `Adaptive`, the `Cell Size` field displays the effective minimum `1 mm` cell and the unit buttons are disabled; the previous locked value is preserved and reappears when switching back to `Locked`.
 - The default settings are currently `Display Unit = m`, `Grid Snap = Adaptive`, and a stored locked `Cell Size = 5 cm`.
+- The outline defaults are currently `Outline = On`, `Corners = On`, and `Outline Color = #0f172a`.
 - Cell-based tools still operate in whole cells rather than absolute unit inputs; their real world width now follows the current effective cell, which is adaptive in `Adaptive` mode and user-configured in `Locked` mode.
 - Existing stored geometry is not rescaled when the user applies new display or grid settings.
 - Rulers and the workplane origin readout now format values using the active display unit.

@@ -178,6 +178,7 @@ const previewStrokeColor = "#0284c7";
 const renderBoxStrokeColor = "#f97316";
 const renderBoxStrokeColorSoft = "rgba(249, 115, 22, 0.96)";
 const renderBoxLabelFont = "600 11px IBM Plex Sans, Segoe UI, sans-serif";
+const renderBoxSideLabelFont = "600 10px IBM Plex Sans, Segoe UI, sans-serif";
 const previewStrokeWidth = 1.5;
 const vertexMarkerRadiusPx = 2.5;
 const activeLayerOutlineWidthFactor = 1.64;
@@ -5099,6 +5100,50 @@ function getNormalizedScreenDirection(fromPoint, toPoint, fallback = { x: 1, y: 
   };
 }
 
+function getRenderSideLabelAngle(direction) {
+  let angle = Math.atan2(direction.y, direction.x);
+  if (angle > Math.PI / 2 || angle <= -Math.PI / 2) {
+    angle += Math.PI;
+  }
+  return angle;
+}
+
+function drawRenderBoxEdgeWithGap(targetCtx, start, end, gapHalfLength = 0) {
+  const direction = getNormalizedScreenDirection(start, end, { x: 1, y: 0 });
+  const edgeLength = Math.hypot(end.x - start.x, end.y - start.y);
+  if (edgeLength <= 1e-6) return;
+
+  const maxGapHalfLength = Math.max(0, edgeLength / 2 - 2);
+  const clampedGapHalfLength = Math.min(maxGapHalfLength, Math.max(0, gapHalfLength));
+  if (clampedGapHalfLength <= 0) {
+    targetCtx.beginPath();
+    targetCtx.moveTo(start.x, start.y);
+    targetCtx.lineTo(end.x, end.y);
+    targetCtx.stroke();
+    return;
+  }
+
+  const midpoint = {
+    x: (start.x + end.x) / 2,
+    y: (start.y + end.y) / 2,
+  };
+  const gapStart = {
+    x: midpoint.x - direction.x * clampedGapHalfLength,
+    y: midpoint.y - direction.y * clampedGapHalfLength,
+  };
+  const gapEnd = {
+    x: midpoint.x + direction.x * clampedGapHalfLength,
+    y: midpoint.y + direction.y * clampedGapHalfLength,
+  };
+
+  targetCtx.beginPath();
+  targetCtx.moveTo(start.x, start.y);
+  targetCtx.lineTo(gapStart.x, gapStart.y);
+  targetCtx.moveTo(gapEnd.x, gapEnd.y);
+  targetCtx.lineTo(end.x, end.y);
+  targetCtx.stroke();
+}
+
 function drawRenderBoxOverlay(renderRecord, options = {}) {
   const metrics = getRenderBoxMetrics(renderRecord);
   if (!metrics.isValid || !metrics.boxGeometry.length) return;
@@ -5108,6 +5153,12 @@ function drawRenderBoxOverlay(renderRecord, options = {}) {
   const screenTopLeft = screenPoints[0];
   const screenTopRight = screenPoints[1];
   const screenBottomLeft = screenPoints[3];
+  const sideLabels = [
+    { label: "T", startIndex: 0, endIndex: 1 },
+    { label: "R", startIndex: 1, endIndex: 2 },
+    { label: "B", startIndex: 2, endIndex: 3 },
+    { label: "L", startIndex: 3, endIndex: 0 },
+  ];
   const topEdgeDirection = getNormalizedScreenDirection(screenTopLeft, screenTopRight, { x: 1, y: 0 });
   const leftEdgeDirection = getNormalizedScreenDirection(screenTopLeft, screenBottomLeft, { x: 0, y: 1 });
   const labelOffsetAlongTopPx = 6;
@@ -5119,15 +5170,17 @@ function drawRenderBoxOverlay(renderRecord, options = {}) {
   const labelAngle = Math.atan2(topEdgeDirection.y, topEdgeDirection.x);
 
   ctx.save();
-  applyWorldCameraTransform(ctx);
-  if (!traceRenderBoxPath(ctx, metrics.boxGeometry)) {
-    ctx.restore();
-    return;
-  }
   ctx.strokeStyle = renderBoxStrokeColorSoft;
-  ctx.lineWidth = (isActive ? 1.5 : 1) / state.camera.zoom;
-  ctx.setLineDash(isActive ? [8 / state.camera.zoom, 4 / state.camera.zoom] : [5 / state.camera.zoom, 4 / state.camera.zoom]);
-  ctx.stroke();
+  ctx.lineWidth = isActive ? 1.5 : 1;
+  ctx.setLineDash(isActive ? [8, 4] : [5, 4]);
+  ctx.font = renderBoxSideLabelFont;
+  sideLabels.forEach(({ label, startIndex, endIndex }) => {
+    const start = screenPoints[startIndex];
+    const end = screenPoints[endIndex];
+    const edgeLength = Math.hypot(end.x - start.x, end.y - start.y);
+    const gapHalfLength = Math.min(edgeLength / 2 - 2, ctx.measureText(label).width / 2 + 5);
+    drawRenderBoxEdgeWithGap(ctx, start, end, gapHalfLength);
+  });
   ctx.restore();
 
   ctx.save();
@@ -5138,6 +5191,28 @@ function drawRenderBoxOverlay(renderRecord, options = {}) {
   ctx.translate(labelAnchor.x, labelAnchor.y);
   ctx.rotate(labelAngle);
   ctx.fillText(getRenderTabLabel(renderRecord), 0, 0);
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = renderBoxSideLabelFont;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = renderBoxStrokeColor;
+  sideLabels.forEach(({ label, startIndex, endIndex }) => {
+    const start = screenPoints[startIndex];
+    const end = screenPoints[endIndex];
+    const midpoint = {
+      x: (start.x + end.x) / 2,
+      y: (start.y + end.y) / 2,
+    };
+    const direction = getNormalizedScreenDirection(start, end, { x: 1, y: 0 });
+    const labelAngleForEdge = getRenderSideLabelAngle(direction);
+    ctx.save();
+    ctx.translate(midpoint.x, midpoint.y);
+    ctx.rotate(labelAngleForEdge);
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  });
   ctx.restore();
 }
 

@@ -466,6 +466,7 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `Add Rbox` now acts as a shortcut that arms `Draw > Rbox` and returns focus to the `Main` workspace instead of creating an empty render immediately
 - Committed `Rboxes` now render on `Main` as strong-orange overlays with a small top-left name label inspired by the external reference.
 - That `Rbox` name label should anchor from the committed box's own draft-top-left corner with a small local offset and rotate parallel to the committed top edge, rather than using the screen-space bounding envelope, so rotated workplanes keep the label in the correct place.
+- Each committed `Rbox` side should also show its side initial (`T`, `R`, `B`, `L`) at the midpoint of the corresponding edge, rotated parallel to that edge, with a visible stroke gap behind the letter so the side label does not visually merge into the dashed line.
 - When an `Rbox` card is active:
   - its transform controls open on `Main` independently of whether the underlying app tool is `Draw` or `Select`
   - the current layer drawing/selection interactions are suspended without changing the underlying tool choice

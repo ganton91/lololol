@@ -73,7 +73,9 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - Wheel-based draft-plane rotation is now canonical instead of accumulated: the workplane tracks a canonical angle family/candidate plus integer step identity, so rotating away and back returns to the same exact plane coefficients instead of a float-near-zero residual angle.
 - Trig-generated workplane coordinates and the Clipper adapter now share the same `8`-decimal quantization policy, so rotated world-space geometry enters boolean operations on the same canonical coordinate grid.
 - There is no raster-mask union pipeline anymore.
+- The render stack now includes always-visible `World` axes drawn underneath everything else, separate from the draft grid/workplane overlay.
 - Each visible layer is drawn from its current merged vector shapes.
+- The draft canvas (`Grid` + draft-plane axes) is now rendered only while `Draw` is active, and in the current arrangement it is drawn above the visible layer geometry so its readability can take priority during drafting.
 - Layer rendering now has settings-controlled outline and corner-marker visibility.
 - When `Outline` is enabled, each visible layer shape is stroked with the configured outline color.
 - When `Corners` is enabled, each stored polygon vertex is rendered as a marker using that same outline color.
@@ -163,6 +165,8 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Releasing `Space` during a pending workplane alignment cancels that alignment and returns control to the underlying tool.
 - The top bar now shows a live workplane status readout with the current plane mode (`default` when the workplane is unmodified, otherwise `custom`), rotation in degrees formatted to up to `2` decimal places, and origin coordinates formatted in the active display unit.
 - The settings modal now exposes `Outline` and `Corners` toggles; `Outline` also includes a color swatch, while `Corners` inherits that same outline color and is disabled whenever `Outline` is off.
+- In `Select`, the draft canvas (`Grid` + draft-plane axes) is hidden while the `World` axes remain visible underneath the scene.
+- In `Draw`, both the `World` axes and the draft canvas are visible; the `World` axes render underneath the layer geometry, while the draft canvas currently renders above the layer fills, outlines, and corners.
 - `Select` supports marquee selection in draft/screen space: dragging right selects only shapes fully enclosed by the box, while dragging left selects shapes that are enclosed by or intersect the box.
 - Holding `Shift` in `Select` toggles selection membership for both click and marquee selection: newly hit shapes are added while already selected shapes captured by the click or box are removed.
 - Multi-selected shapes move together when dragged from a selected shape.

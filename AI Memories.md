@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-04-02
+- Last updated: 2026-04-03
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -122,6 +122,9 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
   - draft-angle snapshot state (`nextFamilyId`, `familyRecords`, `candidateRecord`, `activeState`)
 - Shape `bounds` are treated as derived data and are recomputed on import instead of being trusted from the file.
 - Import is strict and does not attempt backward compatibility or migration for unsupported versions or schemas.
+- Whenever a new feature adds project state that must persist, update the app's export/import flow for that feature as part of the same work.
+- During the current development phase, backward compatibility with older project files is not a goal when export/import changes are made for new features.
+- When an export/import change breaks compatibility with older project files, explicitly tell the user that compatibility was lost.
 - Import replaces the current project only after an explicit confirmation step.
 - The app remembers the current project filename in runtime state:
   - importing a file adopts that imported filename as the next export suggestion
@@ -333,7 +336,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 ### Current Task 2: Renders Subsystem Planning
 
 - Task: design the application's new `Renders` subsystem from scratch, with `Render` / `Render Box` naming, global layer render properties, a `Main` tab plus per-render tabs, and a first rollout that focuses on UI before the deeper rendering engine.
-- Status: planning is active. No render subsystem has been implemented yet in the current app, and the next phase should start with UI structure and naming before the full render pipeline.
+- Status: planning and early implementation are active. The non-visual state/persistence scaffolding for `Renders` is now implemented, but no visible render workspace UI exists yet and the next phase should build the `Main` / `Render` tab shell.
 
 #### Locked Decisions
 
@@ -369,3 +372,64 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The first implementation step should be to document and lock the `Renders` data model v1 before any UI or rendering code is built, because that model is the foundation for the rest of the subsystem.
 - Break the render-system work into staged implementation steps instead of attempting the whole subsystem in one pass.
 - Start with the UI shell for `Main` / `Render` tabs, render cards, and render-box management before building the full pane rendering pipeline.
+
+#### Progress
+
+- The staged implementation plan for the `Renders` subsystem is now locked as:
+  1. document and lock the `Renders` data model v1 in `AI Memories`
+  2. add non-visual app-state and project-persistence scaffolding for `renders`, `activeWorkspaceTab`, and layer render properties
+  3. build the `Main` / `Render` tab shell and tab-switching behavior without changing the main authoring canvas behavior
+  4. add render cards and basic create / rename / duplicate / delete / hide management in the workspace UI
+  5. add `Render Box` authoring on the `Main` canvas and bind each committed box to its `Render` tab
+  6. add the initial render workspace surface and placeholder render outputs driven by stored render boxes
+  7. add global layer render-properties editing UI
+  8. expand into deeper render engine behavior, section behavior, and later measurements/scenes integration in follow-up stages
+- The `Renders` data model v1 is now locked around the following project-state additions:
+  - top-level persistent project state should add:
+    - `renders`: ordered array of render records, where array order defines render-tab order
+    - `nextRenderId`
+    - `activeWorkspaceTab`: either `{ kind: "main" }` or `{ kind: "render", renderId }`
+  - top-level runtime-only UI state should add:
+    - `pendingRenderBox`
+    - `editingRenderId`
+    - `editingRenderNameDraft`
+- Each committed render record should store:
+  - `id`
+  - `name`
+  - `visible`
+  - `boxBounds`: `{ x, y, w, h }` stored as axis-aligned canonical world-space millimeter bounds
+  - `sectionSettings`: `{ z: [], x: [], y: [] }` reserved for future render-local section definitions
+- `Render` tabs should be driven one-to-one by committed render records. Unfinished drag state should stay in `pendingRenderBox` instead of creating half-finished render records.
+- Render-box geometry should be stored in world coordinates, not draft-space coordinates, so it stays stable when the workplane origin or angle changes.
+- Global layer render properties are now defined as layer-owned data rather than render-owned overrides. Each layer should gain a `render` object with:
+  - `enabled`
+  - `baseElevationMm`
+  - `heightMm`
+  - optional future-facing `role` field reserved for later inter-layer render relationships
+- Existing layer fields keep their current responsibilities:
+  - `visible` remains the main-canvas authoring visibility control
+  - `opacity` remains the current general layer UI property and is not part of the new render-properties model
+  - main-canvas layer order remains independent from any future render-properties editing presentation
+- Explicit `Renders` v1 exclusions are now:
+  - no per-render `layerConfigs`
+  - no per-render `layerOrder`
+  - no render-specific opacity control
+  - no measurements or scenes integration in the first rollout
+  - no multi-pane or pop-out render workspace in the first rollout
+- The app state and project-file scaffolding now include:
+  - top-level runtime state for `renders`, `nextRenderId`, `activeWorkspaceTab`, `pendingRenderBox`, `editingRenderId`, and `editingRenderNameDraft`
+  - layer-owned `render` settings stored directly on each layer record
+  - project export/import persistence for `document.renders`, `document.nextRenderId`, `workspace.activeWorkspaceTab`, and per-layer `render` settings
+- New layer records now default their render settings to:
+  - `enabled = true`
+  - `baseElevationMm = 0`
+  - `heightMm = 0`
+  - `role = null`
+- Render records are now normalized on import/export with:
+  - `id`
+  - `name`
+  - `visible`
+  - quantized world-space `boxBounds`
+  - `sectionSettings`
+- The render scaffolding now participates in the current export/import round-trip for the current schema, without adding any backward-compatibility commitment for older pre-render project files.
+- With the non-visual scaffolding now in place, the next implementation step should be to build the visible `Main` / `Render` tab UI shell before adding render-box authoring interactions.

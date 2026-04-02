@@ -52,6 +52,13 @@ const defaultOutlineStrokeColor = "#0f172a";
 const PROJECT_FILE_APP_ID = "millimetre";
 const PROJECT_FILE_VERSION = 1;
 const DEFAULT_PROJECT_FILE_NAME = "millimetre-project.json";
+const DEFAULT_ACTIVE_WORKSPACE_TAB = Object.freeze({ kind: "main" });
+const DEFAULT_LAYER_RENDER = Object.freeze({
+  enabled: true,
+  baseElevationMm: 0,
+  heightMm: 0,
+  role: null,
+});
 const DEFAULT_SETTINGS = Object.freeze({
   displayUnit: "m",
   cellUnit: "cm",
@@ -69,9 +76,22 @@ const state = {
   shapes: [],
   drawingsUi: [{ id: "drawing-1", name: "Drawing 1", expanded: true, visible: true, layersSectionCollapsed: false }],
   layerSectionCollapsed: false,
-  layers: [{ id: "layer-1", drawingId: "drawing-1", name: "Layer 1", visible: true, locked: false, fillColor: "#93c5fd", opacity: 1 }],
+  layers: [
+    {
+      id: "layer-1",
+      drawingId: "drawing-1",
+      name: "Layer 1",
+      visible: true,
+      locked: false,
+      fillColor: "#93c5fd",
+      opacity: 1,
+      render: { ...DEFAULT_LAYER_RENDER },
+    },
+  ],
+  renders: [],
   activeDrawingId: "drawing-1",
   activeLayerId: "layer-1",
+  activeWorkspaceTab: { ...DEFAULT_ACTIVE_WORKSPACE_TAB },
   nextDrawingId: 2,
   editingDrawingId: null,
   editingDrawingNameDraft: "",
@@ -79,8 +99,11 @@ const state = {
   editingLayerId: null,
   editingLayerNameDraft: "",
   editingLayerInitialName: "",
+  editingRenderId: null,
+  editingRenderNameDraft: "",
   nextLayerId: 2,
   nextShapeId: 1,
+  nextRenderId: 1,
   dragging: false,
   panning: false,
   draggingDraftOrigin: false,
@@ -99,6 +122,7 @@ const state = {
   draftOriginDragStartScreen: { x: 0, y: 0 },
   draftOriginDragStartOrigin: { x: 0, y: 0 },
   draftOriginDragRotation: null,
+  pendingRenderBox: null,
   draftAlignStartSnap: null,
   draftAlignCurrentSnap: null,
   drawSize: 1,
@@ -598,6 +622,28 @@ function sanitizeProjectSizeControl(value, fallback = 1) {
   return Math.max(1, Math.min(50, numericValue));
 }
 
+function sanitizeProjectBounds(bounds, fallback = { x: 0, y: 0, w: 0, h: 0 }, quantize = false) {
+  const x = Number(bounds?.x);
+  const y = Number(bounds?.y);
+  const w = Number(bounds?.w);
+  const h = Number(bounds?.h);
+  const sanitizedBounds = {
+    x: Number.isFinite(x) ? x : fallback.x,
+    y: Number.isFinite(y) ? y : fallback.y,
+    w: Math.max(0, Number.isFinite(w) ? w : fallback.w),
+    h: Math.max(0, Number.isFinite(h) ? h : fallback.h),
+  };
+
+  if (!quantize) return sanitizedBounds;
+
+  return {
+    x: quantizeCoordinate(sanitizedBounds.x),
+    y: quantizeCoordinate(sanitizedBounds.y),
+    w: quantizeCoordinate(sanitizedBounds.w),
+    h: quantizeCoordinate(sanitizedBounds.h),
+  };
+}
+
 function sanitizeProjectPoint(value, fallback = { x: 0, y: 0 }, quantize = false) {
   const x = Number(value?.x);
   const y = Number(value?.y);
@@ -625,7 +671,61 @@ function cloneProjectDraftAngleSnapshot(snapshot = draftAngleStore.getSnapshot()
   };
 }
 
+function sanitizeLayerRenderRole(value, fallback = DEFAULT_LAYER_RENDER.role) {
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return trimmed || fallback;
+}
+
+function cloneLayerRenderSettings(render = null) {
+  return {
+    enabled: render?.enabled !== false,
+    baseElevationMm: Number.isFinite(Number(render?.baseElevationMm)) ? quantizeCoordinate(Number(render.baseElevationMm)) : DEFAULT_LAYER_RENDER.baseElevationMm,
+    heightMm: Math.max(
+      0,
+      Number.isFinite(Number(render?.heightMm)) ? quantizeCoordinate(Number(render.heightMm)) : DEFAULT_LAYER_RENDER.heightMm
+    ),
+    role: sanitizeLayerRenderRole(render?.role, DEFAULT_LAYER_RENDER.role),
+  };
+}
+
+function cloneRenderSectionEntries(entries) {
+  return Array.isArray(entries) ? entries.filter(isPlainObject).map((entry) => ({ ...entry })) : [];
+}
+
+function cloneRenderSectionSettings(sectionSettings = null) {
+  return {
+    z: cloneRenderSectionEntries(sectionSettings?.z),
+    x: cloneRenderSectionEntries(sectionSettings?.x),
+    y: cloneRenderSectionEntries(sectionSettings?.y),
+  };
+}
+
+function cloneActiveWorkspaceTab(workspaceTab = DEFAULT_ACTIVE_WORKSPACE_TAB, renderIds = null) {
+  if (
+    isPlainObject(workspaceTab) &&
+    workspaceTab.kind === "render" &&
+    typeof workspaceTab.renderId === "string" &&
+    (!renderIds || renderIds.has(workspaceTab.renderId))
+  ) {
+    return { kind: "render", renderId: workspaceTab.renderId };
+  }
+  return { kind: "main" };
+}
+
+function cloneRenderRecord(render) {
+  return {
+    id: render.id,
+    name: render.name,
+    visible: render.visible !== false,
+    boxBounds: sanitizeProjectBounds(render.boxBounds, { x: 0, y: 0, w: 0, h: 0 }, true),
+    sectionSettings: cloneRenderSectionSettings(render.sectionSettings),
+  };
+}
+
 function createProjectFilePayload() {
+  const renderIds = new Set(state.renders.map((render) => render.id));
   return {
     app: PROJECT_FILE_APP_ID,
     version: PROJECT_FILE_VERSION,
@@ -645,23 +745,27 @@ function createProjectFilePayload() {
         locked: layer.locked === true,
         fillColor: sanitizeColorValue(layer.fillColor, getNextLayerColor()),
         opacity: Math.max(0, Math.min(1, Number.isFinite(layer.opacity) ? layer.opacity : 1)),
+        render: cloneLayerRenderSettings(layer.render),
       })),
       shapes: state.shapes.map((shape) => ({
         id: shape.id,
         layerId: shape.layerId,
         geometry: deepCopyGeometry(shape.geometry),
       })),
+      renders: state.renders.map((render) => cloneRenderRecord(render)),
       activeDrawingId: state.activeDrawingId,
       activeLayerId: state.activeLayerId,
       nextDrawingId: sanitizeProjectCounter(state.nextDrawingId, 1),
       nextLayerId: sanitizeProjectCounter(state.nextLayerId, 1),
       nextShapeId: sanitizeProjectCounter(state.nextShapeId, 1),
+      nextRenderId: sanitizeProjectCounter(state.nextRenderId, 1),
     },
     workspace: {
       tool: sanitizeProjectTool(state.tool, "draw"),
       shapeType: sanitizeProjectShapeType(state.shapeType, "rect"),
       drawSize: sanitizeProjectSizeControl(state.drawSize, 1),
       stripCellWidth: sanitizeProjectSizeControl(state.stripCellWidth, 1),
+      activeWorkspaceTab: cloneActiveWorkspaceTab(state.activeWorkspaceTab, renderIds),
       layerSectionCollapsed: state.layerSectionCollapsed === true,
       settings: cloneSettings(state.settings),
       draftOrigin: sanitizeProjectPoint(state.draftOrigin, { x: 0, y: 0 }, true),
@@ -751,6 +855,40 @@ function normalizeImportedLayerRecords(layers, drawingIds) {
       locked: layer.locked === true,
       fillColor: sanitizeColorValue(layer.fillColor, layerPalette[index % layerPalette.length]),
       opacity: Math.max(0, Math.min(1, Number.isFinite(Number(layer.opacity)) ? Number(layer.opacity) : 1)),
+      render: cloneLayerRenderSettings(layer.render),
+    };
+  });
+}
+
+function normalizeImportedRenderRecords(renders) {
+  if (!Array.isArray(renders)) {
+    throw createProjectImportError("Unsupported project file: invalid render records.");
+  }
+
+  const seenIds = new Set();
+  return renders.map((render, index) => {
+    if (!isPlainObject(render)) {
+      throw createProjectImportError("Unsupported project file: invalid render record.");
+    }
+
+    const id = typeof render.id === "string" ? render.id.trim() : "";
+    if (!id || seenIds.has(id)) {
+      throw createProjectImportError("Unsupported project file: render ids must be unique.");
+    }
+    if (!isPlainObject(render.boxBounds)) {
+      throw createProjectImportError("Unsupported project file: render bounds are invalid.");
+    }
+    seenIds.add(id);
+
+    return {
+      id,
+      name:
+        typeof render.name === "string" && render.name.trim()
+          ? render.name.trim()
+          : `Render ${index + 1}`,
+      visible: render.visible !== false,
+      boxBounds: sanitizeProjectBounds(render.boxBounds, { x: 0, y: 0, w: 0, h: 0 }, true),
+      sectionSettings: cloneRenderSectionSettings(render.sectionSettings),
     };
   });
 }
@@ -839,7 +977,10 @@ function normalizeImportedProjectFile(payload) {
   const layers = normalizeImportedLayerRecords(payload.document.layers, drawingIds);
   const layerIds = new Set(layers.map((layer) => layer.id));
   const shapes = normalizeImportedShapeRecords(payload.document.shapes, layerIds);
+  const renders = normalizeImportedRenderRecords(payload.document.renders);
+  const renderIds = new Set(renders.map((render) => render.id));
   const draftAngle = normalizeImportedDraftAngleState(payload.draftAngle);
+  const activeWorkspaceTab = cloneActiveWorkspaceTab(payload.workspace.activeWorkspaceTab, renderIds);
 
   for (const drawing of drawingsUi) {
     if (!layers.some((layer) => layer.drawingId === drawing.id)) {
@@ -881,12 +1022,18 @@ function normalizeImportedProjectFile(payload) {
         sanitizeProjectCounter(payload.document.nextShapeId, 1),
         getDerivedNextIdFromRecords(shapes, "shape-")
       ),
+      renders,
+      nextRenderId: Math.max(
+        sanitizeProjectCounter(payload.document.nextRenderId, 1),
+        getDerivedNextIdFromRecords(renders, "render-")
+      ),
     },
     workspace: {
       tool: sanitizeProjectTool(payload.workspace.tool, "draw"),
       shapeType: sanitizeProjectShapeType(payload.workspace.shapeType, "rect"),
       drawSize: sanitizeProjectSizeControl(payload.workspace.drawSize, 1),
       stripCellWidth: sanitizeProjectSizeControl(payload.workspace.stripCellWidth, 1),
+      activeWorkspaceTab,
       layerSectionCollapsed: payload.workspace.layerSectionCollapsed === true,
       settings: cloneSettings(payload.workspace.settings),
       draftOrigin: sanitizeProjectPoint(payload.workspace.draftOrigin, { x: 0, y: 0 }, true),
@@ -943,6 +1090,9 @@ function resetProjectInteractionState() {
   state.editingLayerId = null;
   state.editingLayerNameDraft = "";
   state.editingLayerInitialName = "";
+  state.editingRenderId = null;
+  state.editingRenderNameDraft = "";
+  state.pendingRenderBox = null;
   state.spacePressed = false;
   state.shiftPressed = false;
 
@@ -957,11 +1107,17 @@ function applyImportedProject(normalizedProject, importedFileName = DEFAULT_PROJ
   closeSettingsMenu();
   state.drawingsUi = normalizedProject.document.drawingsUi.map((drawing) => ({ ...drawing }));
   state.layerSectionCollapsed = normalizedProject.workspace.layerSectionCollapsed;
-  state.layers = normalizedProject.document.layers.map((layer) => ({ ...layer }));
+  state.layers = normalizedProject.document.layers.map((layer) => ({
+    ...layer,
+    render: cloneLayerRenderSettings(layer.render),
+  }));
   state.shapes = normalizedProject.document.shapes.map((shape) => cloneShape(shape));
+  state.renders = normalizedProject.document.renders.map((render) => cloneRenderRecord(render));
   state.nextDrawingId = normalizedProject.document.nextDrawingId;
   state.nextLayerId = normalizedProject.document.nextLayerId;
   state.nextShapeId = normalizedProject.document.nextShapeId;
+  state.nextRenderId = normalizedProject.document.nextRenderId;
+  state.activeWorkspaceTab = cloneActiveWorkspaceTab(normalizedProject.workspace.activeWorkspaceTab, new Set(state.renders.map((render) => render.id)));
   state.settings = cloneSettings(normalizedProject.workspace.settings);
   state.projectFileName = sanitizeProjectFileName(importedFileName, state.projectFileName);
   state.draftOrigin = { ...normalizedProject.workspace.draftOrigin };
@@ -1180,6 +1336,7 @@ function createLayerRecord(drawingId, options = {}) {
     locked: options.locked ?? false,
     fillColor,
     opacity: Number.isFinite(options.opacity) ? options.opacity : 1,
+    render: cloneLayerRenderSettings(options.render),
   };
 }
 
@@ -3583,6 +3740,7 @@ function duplicateDrawing(drawingId) {
       locked: sourceLayer.locked,
       fillColor: sourceLayer.fillColor,
       opacity: Number.isFinite(sourceLayer.opacity) ? sourceLayer.opacity : 1,
+      render: sourceLayer.render,
     });
     layerIdMap.set(sourceLayer.id, duplicate.id);
     return duplicate;
@@ -3671,6 +3829,7 @@ function duplicateLayer(layerId) {
     id: duplicatedLayerId,
     name: sourceLayer.name + " copy",
     opacity: Number.isFinite(sourceLayer.opacity) ? sourceLayer.opacity : 1,
+    render: cloneLayerRenderSettings(sourceLayer.render),
   };
 
   state.layers.splice(index + 1, 0, duplicatedLayer);

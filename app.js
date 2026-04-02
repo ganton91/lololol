@@ -4300,19 +4300,19 @@ function render() {
   const { width, height } = getCanvasViewportSize();
   ctx.clearRect(0, 0, width, height);
   drawWorldAxes();
-  const activeLayer = getActiveLayer();
 
   for (const layer of getRenderableLayersInPaintOrder()) {
     if (!isLayerActuallyVisible(layer)) continue;
-    if (state.tool === "draw" && layer.id === activeLayer?.id) continue;
     drawLayerMerged(layer);
   }
 
   if (state.tool === "draw") {
     drawDraftGridAndAxes();
-    if (isLayerActuallyVisible(activeLayer)) {
-      drawLayerMerged(activeLayer);
-    }
+  }
+
+  const activeLayer = getActiveLayer();
+  if (state.tool === "draw" && isLayerActuallyVisible(activeLayer)) {
+    drawLayerMerged(activeLayer, { renderFill: false });
   }
 
   if (state.dragging && state.tool === "draw" && isLayerAvailableForEditing(activeLayer)) {

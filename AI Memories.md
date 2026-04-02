@@ -309,3 +309,4 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Export should keep using the current project filename as its default suggested save name.
 - If the user imports a project file, that imported filename becomes the current project's default export filename.
 - If the user exports the project under a chosen filename, later exports should keep suggesting that same filename until another import or explicit export rename replaces it.
+- The first implementation should stay as simple as possible and may rely on the browser save picker instead of adding a separate download fallback path for browsers without that capability.

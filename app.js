@@ -2696,8 +2696,8 @@ function renderLayersPanel() {
 
     layersSectionEl.appendChild(drawingLayersList);
     children.appendChild(layersSectionEl);
-    drawingMain.appendChild(children);
     drawingCard.appendChild(drawingMain);
+    drawingCard.appendChild(children);
     layersList.appendChild(drawingCard);
   }
 

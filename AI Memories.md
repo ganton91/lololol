@@ -477,4 +477,13 @@ Layer order controls draw order. The active layer receives new geometry when the
   - draw-only pointer previews and ruler previews should stay hidden while `Rbox` transform mode is active
   - the active `Rbox` is currently move-only
   - pressing `Escape` deactivates the active `Rbox` and closes the transform mode without rewriting the user's underlying base tool choice
+- The left panel now has a fixed bottom `Layer Settings` trigger outside the scroll area, and that trigger opens a dedicated render-layer modal instead of placing the editor inside the scrolling panel content.
+- That fixed `Layer Settings` trigger is now styled as a centered floating button rather than a full-width footer bar, while the footer surface itself blends back into the left-panel background without a separator line.
+- The same footer area now also includes a matching `Render Settings` button placeholder beside `Layer Settings`; it currently shares the same hover/press treatment but has no wired behavior yet.
+- Those two footer buttons are now sized down to fit side by side within the current left-panel width without clipping.
+- The first `Layer Settings` modal pass now follows the external reference much more literally while still omitting the fields we intentionally excluded:
+  - drawings are grouped separately inside the modal
+  - each drawing header shows computed `Height`, `Start`, and `End`
+  - each layer row currently exposes `Height`, `Start`, and `End`
+  - the modal currently reads and writes the global layer-owned `render.baseElevationMm` and `render.heightMm` settings through a draft/apply flow
 - The next implementation step should be to make the render workspace itself consume those committed `Render Box` records for initial placeholder outputs and deeper render behavior.

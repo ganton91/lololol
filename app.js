@@ -20,11 +20,15 @@ const workplaneStatus = document.getElementById("workplane-status");
 const settingsButton = document.getElementById("settingsButton");
 const exportButton = document.getElementById("exportButton");
 const importButton = document.getElementById("importButton");
+const layerSettingsButton = document.getElementById("layerSettingsButton");
 const settingsMenu = document.getElementById("settingsMenu");
 const exportFallbackMenu = document.getElementById("exportFallbackMenu");
+const layerSettingsModal = document.getElementById("layerSettingsModal");
 const settingsCloseButton = document.getElementById("settingsCloseButton");
 const settingsApplyButton = document.getElementById("settingsApplyButton");
 const exportFallbackCloseButton = document.getElementById("exportFallbackCloseButton");
+const layerSettingsCloseButton = document.getElementById("layerSettingsCloseButton");
+const layerSettingsApplyButton = document.getElementById("layerSettingsApplyButton");
 const settingsCellSizeInput = document.getElementById("settingsCellSizeInput");
 const settingsOutlineColorInput = document.getElementById("settingsOutlineColorInput");
 const settingsOutlineSwatch = document.getElementById("settingsOutlineSwatch");
@@ -45,6 +49,9 @@ const layerAddBtn = document.getElementById("addLayerButton");
 const addDrawingBtn = document.getElementById("addDrawingButton");
 const addRenderBtn = document.getElementById("addRenderButton");
 const layerFillInput = document.getElementById("layer-fill");
+const layerSettingsColumnHeadings = document.getElementById("layerSettingsColumnHeadings");
+const layerSettingsDrawingList = document.getElementById("layerSettingsDrawingList");
+const layerSettingsEmptyState = document.getElementById("layerSettingsEmptyState");
 const projectImportInput = document.getElementById("projectImportInput");
 const workspaceSwitcher = document.getElementById("workspaceSwitcher");
 const renderWorkspaceShell = document.getElementById("renderWorkspaceShell");
@@ -155,6 +162,7 @@ const state = {
   draftOrigin: { x: 0, y: 0 },
   settings: { ...DEFAULT_SETTINGS },
   settingsDraft: null,
+  layerSettingsDraft: null,
   projectFileName: DEFAULT_PROJECT_FILE_NAME,
   exportFallbackNoticeShown: false,
   camera: { x: 0, y: 0, zoom: 1 },
@@ -406,6 +414,31 @@ function formatLengthValue(valueMm, unitId = state.settings.displayUnit, maxFrac
 
 function formatLengthWithUnit(valueMm, unitId = state.settings.displayUnit, maxFractionDigits = null) {
   return `${formatLengthValue(valueMm, unitId, maxFractionDigits)} ${getMeasurementUnit(unitId).shortLabel}`;
+}
+
+function formatLengthInputValue(valueMm, unitId = state.settings.displayUnit) {
+  const fractionDigits = getMeasurementUnit(unitId).fractionDigits;
+  return formatLengthValue(valueMm, unitId, fractionDigits);
+}
+
+function getLengthInputStep(unitId = state.settings.displayUnit) {
+  const fractionDigits = getMeasurementUnit(unitId).fractionDigits;
+  if (fractionDigits <= 0) return "1";
+  return (1 / 10 ** fractionDigits).toString();
+}
+
+function parseNumericInputString(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "-" || trimmed === "." || trimmed === "-.") return null;
+  const numericValue = Number(trimmed);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function parseLayerSettingsLengthInput(value, unitId = state.settings.displayUnit) {
+  const numericValue = parseNumericInputString(value);
+  if (numericValue === null) return null;
+  return quantizeCoordinate(convertLengthToMm(numericValue, unitId));
 }
 
 function getAreaFractionDigits(unitId = state.settings.displayUnit) {
@@ -1338,6 +1371,7 @@ function resetProjectInteractionState() {
   cancelDrawInteraction();
   cancelSelectionInteraction();
   closeExportFallbackMenu();
+  closeLayerSettingsModal();
   state.panning = false;
   state.draggingDraftOrigin = false;
   cancelDraftAlignDrag();
@@ -1357,6 +1391,7 @@ function resetProjectInteractionState() {
   state.draftAlignCurrentSnap = null;
   state.squareBrushMemoryPoint = null;
   state.settingsDraft = null;
+  state.layerSettingsDraft = null;
   state.renderSectionCollapsed = false;
   state.editingDrawingId = null;
   state.editingDrawingNameDraft = "";
@@ -1489,10 +1524,331 @@ async function handleProjectImportFile(file) {
   }
 }
 
+function isLayerSettingsMenuOpen() {
+  return !!layerSettingsModal && !layerSettingsModal.classList.contains("hidden");
+}
+
+function createLayerSettingsDraft() {
+  return {
+    drawings: state.drawingsUi.map((drawing) => ({
+      drawingId: drawing.id,
+      name: drawing.name,
+      collapsed: drawing.id !== state.activeDrawingId,
+      items: getLayersForDrawing(drawing.id).map((layer) => {
+        const renderSettings = cloneLayerRenderSettings(layer.render);
+        return {
+          layerId: layer.id,
+          name: layer.name,
+          baseElevationMm: renderSettings.baseElevationMm,
+          heightMm: renderSettings.heightMm,
+        };
+      }),
+    })),
+  };
+}
+
+function getLayerSettingsGroupStartMm(group) {
+  if (!group?.items?.length) return 0;
+  return Math.min(...group.items.map((item) => item.baseElevationMm));
+}
+
+function getLayerSettingsGroupEndMm(group) {
+  if (!group?.items?.length) return 0;
+  return Math.max(...group.items.map((item) => item.baseElevationMm + item.heightMm));
+}
+
+function getLayerSettingsGroupHeightMm(group) {
+  return quantizeCoordinate(getLayerSettingsGroupEndMm(group) - getLayerSettingsGroupStartMm(group));
+}
+
+function renderLayerSettingsModal() {
+  if (!layerSettingsDrawingList || !layerSettingsEmptyState || !layerSettingsColumnHeadings) return;
+
+  const draft = state.layerSettingsDraft;
+  const displayUnitId = state.settings.displayUnit;
+  const lengthStep = getLengthInputStep(displayUnitId);
+
+  layerSettingsDrawingList.innerHTML = "";
+  layerSettingsColumnHeadings.classList.add("hidden");
+
+  const drawings = Array.isArray(draft?.drawings) ? draft.drawings : [];
+  layerSettingsEmptyState.classList.toggle("hidden", drawings.length > 0);
+  if (!drawings.length) return;
+
+  for (const group of drawings) {
+    const groupEl = document.createElement("section");
+    groupEl.className = `layer-settings-drawing-group${group.collapsed ? " collapsed" : ""}`;
+    groupEl.dataset.drawingId = group.drawingId;
+
+    const header = document.createElement("div");
+    header.className = "layer-settings-drawing-header";
+
+    const headerSpacer = document.createElement("div");
+    headerSpacer.className = "layer-settings-spacer";
+    header.setAttribute("data-drawing-id", group.drawingId);
+    header.appendChild(headerSpacer);
+
+    const headerMain = document.createElement("div");
+    headerMain.className = "layer-settings-drawing-main";
+
+    const toggleButton = document.createElement("button");
+    toggleButton.className = "layer-settings-drawing-toggle";
+    toggleButton.type = "button";
+    toggleButton.textContent = "▼";
+    toggleButton.setAttribute("aria-label", `${group.collapsed ? "Expand" : "Collapse"} ${group.name}`);
+    toggleButton.addEventListener("click", () => {
+      group.collapsed = !group.collapsed;
+      renderLayerSettingsModal();
+    });
+    headerMain.appendChild(toggleButton);
+
+    const drawingName = document.createElement("div");
+    drawingName.className = "layer-settings-drawing-name";
+    drawingName.textContent = group.name;
+    headerMain.appendChild(drawingName);
+    header.appendChild(headerMain);
+
+    const drawingHeightDisplay = document.createElement("input");
+    drawingHeightDisplay.className = "layer-settings-summary-field";
+    drawingHeightDisplay.type = "number";
+    drawingHeightDisplay.readOnly = true;
+    drawingHeightDisplay.setAttribute("aria-label", `${group.name} total height`);
+    drawingHeightDisplay.step = lengthStep;
+
+    const drawingStartField = document.createElement("div");
+    drawingStartField.className = "layer-settings-field";
+    const drawingStartInput = document.createElement("input");
+    drawingStartInput.type = "number";
+    drawingStartInput.step = lengthStep;
+    drawingStartInput.setAttribute("aria-label", `${group.name} start elevation`);
+    drawingStartField.appendChild(drawingStartInput);
+
+    const drawingEndField = document.createElement("div");
+    drawingEndField.className = "layer-settings-field";
+    const drawingEndInput = document.createElement("input");
+    drawingEndInput.type = "number";
+    drawingEndInput.step = lengthStep;
+    drawingEndInput.setAttribute("aria-label", `${group.name} end elevation`);
+    drawingEndField.appendChild(drawingEndInput);
+
+    const rowControllers = [];
+    const syncGroupFields = () => {
+      drawingHeightDisplay.value = formatLengthInputValue(getLayerSettingsGroupHeightMm(group), displayUnitId);
+      drawingStartInput.value = formatLengthInputValue(getLayerSettingsGroupStartMm(group), displayUnitId);
+      drawingEndInput.value = formatLengthInputValue(getLayerSettingsGroupEndMm(group), displayUnitId);
+      rowControllers.forEach((controller) => controller.sync());
+    };
+
+    const shiftGroupStartByMm = (deltaMm) => {
+      if (!Number.isFinite(deltaMm) || Math.abs(deltaMm) <= 1e-9) return;
+      group.items.forEach((item) => {
+        item.baseElevationMm = quantizeCoordinate(item.baseElevationMm + deltaMm);
+      });
+      syncGroupFields();
+    };
+
+    drawingStartInput.addEventListener("input", () => {
+      const parsedStartMm = parseLayerSettingsLengthInput(drawingStartInput.value, displayUnitId);
+      if (parsedStartMm === null) return;
+      shiftGroupStartByMm(parsedStartMm - getLayerSettingsGroupStartMm(group));
+    });
+    const normalizeGroupStart = () => {
+      const parsedStartMm = parseLayerSettingsLengthInput(drawingStartInput.value, displayUnitId);
+      if (parsedStartMm !== null) {
+        shiftGroupStartByMm(parsedStartMm - getLayerSettingsGroupStartMm(group));
+      } else {
+        syncGroupFields();
+      }
+    };
+    drawingStartInput.addEventListener("change", normalizeGroupStart);
+    drawingStartInput.addEventListener("blur", normalizeGroupStart);
+
+    drawingEndInput.addEventListener("input", () => {
+      const parsedEndMm = parseLayerSettingsLengthInput(drawingEndInput.value, displayUnitId);
+      if (parsedEndMm === null) return;
+      shiftGroupStartByMm(parsedEndMm - getLayerSettingsGroupEndMm(group));
+    });
+    const normalizeGroupEnd = () => {
+      const parsedEndMm = parseLayerSettingsLengthInput(drawingEndInput.value, displayUnitId);
+      if (parsedEndMm !== null) {
+        shiftGroupStartByMm(parsedEndMm - getLayerSettingsGroupEndMm(group));
+      } else {
+        syncGroupFields();
+      }
+    };
+    drawingEndInput.addEventListener("change", normalizeGroupEnd);
+    drawingEndInput.addEventListener("blur", normalizeGroupEnd);
+
+    header.appendChild(drawingHeightDisplay);
+    header.appendChild(drawingStartField);
+    header.appendChild(drawingEndField);
+    groupEl.appendChild(header);
+
+    const layerList = document.createElement("div");
+    layerList.className = "layer-settings-drawing-layers";
+
+    const innerHeadings = document.createElement("div");
+    innerHeadings.className = "layer-settings-column-headings layer-settings-column-headings-inner";
+    ["", "Layer", "Height", "Start", "End"].forEach((labelText) => {
+      const label = document.createElement("span");
+      label.textContent = labelText;
+      innerHeadings.appendChild(label);
+    });
+    layerList.appendChild(innerHeadings);
+
+    group.items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "layer-settings-row";
+
+      const rowSpacer = document.createElement("div");
+      rowSpacer.className = "layer-settings-spacer";
+      row.appendChild(rowSpacer);
+
+      const nameCell = document.createElement("div");
+      nameCell.className = "layer-settings-layer-name";
+
+      const label = document.createElement("div");
+      label.className = "layer-settings-layer-label";
+      label.textContent = item.name;
+      nameCell.appendChild(label);
+      row.appendChild(nameCell);
+
+      const heightField = document.createElement("div");
+      heightField.className = "layer-settings-field";
+      const heightInput = document.createElement("input");
+      heightInput.type = "number";
+      heightInput.step = lengthStep;
+      heightInput.min = "0";
+      heightInput.setAttribute("aria-label", `${item.name} height`);
+      heightField.appendChild(heightInput);
+      row.appendChild(heightField);
+
+      const startField = document.createElement("div");
+      startField.className = "layer-settings-field";
+      const startInput = document.createElement("input");
+      startInput.type = "number";
+      startInput.step = lengthStep;
+      startInput.setAttribute("aria-label", `${item.name} start elevation`);
+      startField.appendChild(startInput);
+      row.appendChild(startField);
+
+      const endField = document.createElement("div");
+      endField.className = "layer-settings-field";
+      const endInput = document.createElement("input");
+      endInput.type = "number";
+      endInput.step = lengthStep;
+      endInput.setAttribute("aria-label", `${item.name} end elevation`);
+      endField.appendChild(endInput);
+      row.appendChild(endField);
+
+      const syncRowFields = () => {
+        heightInput.value = formatLengthInputValue(item.heightMm, displayUnitId);
+        startInput.value = formatLengthInputValue(item.baseElevationMm, displayUnitId);
+        endInput.value = formatLengthInputValue(item.baseElevationMm + item.heightMm, displayUnitId);
+      };
+
+      heightInput.addEventListener("input", () => {
+        const parsedHeightMm = parseLayerSettingsLengthInput(heightInput.value, displayUnitId);
+        if (parsedHeightMm === null) return;
+        item.heightMm = Math.max(0, parsedHeightMm);
+        endInput.value = formatLengthInputValue(item.baseElevationMm + item.heightMm, displayUnitId);
+        drawingHeightDisplay.value = formatLengthInputValue(getLayerSettingsGroupHeightMm(group), displayUnitId);
+        drawingEndInput.value = formatLengthInputValue(getLayerSettingsGroupEndMm(group), displayUnitId);
+      });
+      const normalizeHeight = () => {
+        const parsedHeightMm = parseLayerSettingsLengthInput(heightInput.value, displayUnitId);
+        if (parsedHeightMm !== null) {
+          item.heightMm = Math.max(0, parsedHeightMm);
+        }
+        syncGroupFields();
+      };
+      heightInput.addEventListener("change", normalizeHeight);
+      heightInput.addEventListener("blur", normalizeHeight);
+
+      startInput.addEventListener("input", () => {
+        const parsedStartMm = parseLayerSettingsLengthInput(startInput.value, displayUnitId);
+        if (parsedStartMm === null) return;
+        item.baseElevationMm = parsedStartMm;
+        endInput.value = formatLengthInputValue(item.baseElevationMm + item.heightMm, displayUnitId);
+        drawingHeightDisplay.value = formatLengthInputValue(getLayerSettingsGroupHeightMm(group), displayUnitId);
+        drawingStartInput.value = formatLengthInputValue(getLayerSettingsGroupStartMm(group), displayUnitId);
+        drawingEndInput.value = formatLengthInputValue(getLayerSettingsGroupEndMm(group), displayUnitId);
+      });
+      const normalizeStart = () => {
+        const parsedStartMm = parseLayerSettingsLengthInput(startInput.value, displayUnitId);
+        if (parsedStartMm !== null) {
+          item.baseElevationMm = parsedStartMm;
+        }
+        syncGroupFields();
+      };
+      startInput.addEventListener("change", normalizeStart);
+      startInput.addEventListener("blur", normalizeStart);
+
+      endInput.addEventListener("input", () => {
+        const parsedEndMm = parseLayerSettingsLengthInput(endInput.value, displayUnitId);
+        if (parsedEndMm === null) return;
+        item.baseElevationMm = quantizeCoordinate(parsedEndMm - item.heightMm);
+        startInput.value = formatLengthInputValue(item.baseElevationMm, displayUnitId);
+        drawingHeightDisplay.value = formatLengthInputValue(getLayerSettingsGroupHeightMm(group), displayUnitId);
+        drawingStartInput.value = formatLengthInputValue(getLayerSettingsGroupStartMm(group), displayUnitId);
+        drawingEndInput.value = formatLengthInputValue(getLayerSettingsGroupEndMm(group), displayUnitId);
+      });
+      const normalizeEnd = () => {
+        const parsedEndMm = parseLayerSettingsLengthInput(endInput.value, displayUnitId);
+        if (parsedEndMm !== null) {
+          item.baseElevationMm = quantizeCoordinate(parsedEndMm - item.heightMm);
+        }
+        syncGroupFields();
+      };
+      endInput.addEventListener("change", normalizeEnd);
+      endInput.addEventListener("blur", normalizeEnd);
+
+      rowControllers.push({ sync: syncRowFields });
+      syncRowFields();
+      layerList.appendChild(row);
+    });
+
+    syncGroupFields();
+    groupEl.appendChild(layerList);
+    layerSettingsDrawingList.appendChild(groupEl);
+  }
+}
+
+function applyLayerSettingsDraft() {
+  if (!state.layerSettingsDraft) return;
+
+  const layerDrafts = new Map();
+  for (const drawing of state.layerSettingsDraft.drawings || []) {
+    for (const item of drawing.items || []) {
+      layerDrafts.set(item.layerId, {
+        baseElevationMm: quantizeCoordinate(item.baseElevationMm),
+        heightMm: Math.max(0, quantizeCoordinate(item.heightMm)),
+      });
+    }
+  }
+
+  state.layers = state.layers.map((layer) => {
+    const layerDraft = layerDrafts.get(layer.id);
+    if (!layerDraft) return layer;
+    return {
+      ...layer,
+      render: {
+        ...cloneLayerRenderSettings(layer.render),
+        baseElevationMm: layerDraft.baseElevationMm,
+        heightMm: layerDraft.heightMm,
+      },
+    };
+  });
+
+  renderLayersPanel();
+  render();
+}
+
 function isAnyModalOpen() {
   return (
     (!!settingsMenu && !settingsMenu.classList.contains("hidden")) ||
-    (!!exportFallbackMenu && !exportFallbackMenu.classList.contains("hidden"))
+    (!!exportFallbackMenu && !exportFallbackMenu.classList.contains("hidden")) ||
+    (!!layerSettingsModal && !layerSettingsModal.classList.contains("hidden"))
   );
 }
 
@@ -1505,6 +1861,7 @@ function openSettingsMenu() {
   if (!settingsMenu) return;
 
   closeExportFallbackMenu();
+  closeLayerSettingsModal();
   state.settingsDraft = cloneSettings(state.settings);
   syncSettingsMenu();
   settingsMenu.classList.remove("hidden");
@@ -1522,6 +1879,7 @@ function closeSettingsMenu() {
 function openExportFallbackMenu() {
   if (!exportFallbackMenu) return;
   closeSettingsMenu();
+  closeLayerSettingsModal();
   exportFallbackMenu.classList.remove("hidden");
   syncModalBackdropVisibility();
 }
@@ -1529,6 +1887,24 @@ function openExportFallbackMenu() {
 function closeExportFallbackMenu() {
   if (!exportFallbackMenu) return;
   exportFallbackMenu.classList.add("hidden");
+  syncModalBackdropVisibility();
+}
+
+function openLayerSettingsModal() {
+  if (!layerSettingsModal) return;
+
+  closeSettingsMenu();
+  closeExportFallbackMenu();
+  state.layerSettingsDraft = createLayerSettingsDraft();
+  renderLayerSettingsModal();
+  layerSettingsModal.classList.remove("hidden");
+  syncModalBackdropVisibility();
+}
+
+function closeLayerSettingsModal() {
+  if (!layerSettingsModal) return;
+  layerSettingsModal.classList.add("hidden");
+  state.layerSettingsDraft = null;
   syncModalBackdropVisibility();
 }
 
@@ -6436,6 +6812,17 @@ if (exportButton) {
   });
 }
 
+if (layerSettingsButton) {
+  layerSettingsButton.addEventListener("click", () => {
+    if (isLayerSettingsMenuOpen()) {
+      closeLayerSettingsModal();
+      return;
+    }
+
+    openLayerSettingsModal();
+  });
+}
+
 if (importButton) {
   importButton.addEventListener("click", () => {
     if (!projectImportInput) {
@@ -6475,10 +6862,24 @@ if (exportFallbackCloseButton) {
   });
 }
 
+if (layerSettingsCloseButton) {
+  layerSettingsCloseButton.addEventListener("click", () => {
+    closeLayerSettingsModal();
+  });
+}
+
+if (layerSettingsApplyButton) {
+  layerSettingsApplyButton.addEventListener("click", () => {
+    applyLayerSettingsDraft();
+    closeLayerSettingsModal();
+  });
+}
+
 if (modalBackdrop) {
   modalBackdrop.addEventListener("click", () => {
     closeSettingsMenu();
     closeExportFallbackMenu();
+    closeLayerSettingsModal();
   });
 }
 
@@ -6748,6 +7149,14 @@ window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       e.preventDefault();
       closeSettingsMenu();
+    }
+    return;
+  }
+
+  if (isLayerSettingsMenuOpen()) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeLayerSettingsModal();
     }
     return;
   }

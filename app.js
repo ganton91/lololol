@@ -141,6 +141,7 @@ const state = {
   panStart: { x: 0, y: 0 },
   panOrigin: { x: 0, y: 0 },
   leftPanelPointerDrag: null,
+  layerSettingsPointerDrag: null,
   draftOriginDragStartScreen: { x: 0, y: 0 },
   draftOriginDragStartOrigin: { x: 0, y: 0 },
   draftOriginDragRotation: null,
@@ -1384,6 +1385,7 @@ function resetProjectInteractionState() {
   state.panStart = { x: 0, y: 0 };
   state.panOrigin = { x: 0, y: 0 };
   state.leftPanelPointerDrag = null;
+  state.layerSettingsPointerDrag = null;
   state.draftOriginDragStartScreen = { x: 0, y: 0 };
   state.draftOriginDragStartOrigin = { x: 0, y: 0 };
   state.draftOriginDragRotation = null;
@@ -1561,6 +1563,172 @@ function getLayerSettingsGroupHeightMm(group) {
   return quantizeCoordinate(getLayerSettingsGroupEndMm(group) - getLayerSettingsGroupStartMm(group));
 }
 
+function clearLayerSettingsDropIndicatorClasses(itemSelector) {
+  if (!layerSettingsDrawingList) return;
+  layerSettingsDrawingList.querySelectorAll(itemSelector).forEach((item) => {
+    item.classList.remove("drag-insert-before");
+    item.classList.remove("drag-insert-after");
+  });
+}
+
+function layerSettingsDrawingDropPosition(clientY, drawingId) {
+  const draft = state.layerSettingsDraft;
+  if (!draft || !draft.drawings.length || !layerSettingsDrawingList) {
+    return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+  }
+
+  const fromIndex = draft.drawings.findIndex((group) => group.drawingId === drawingId);
+  if (fromIndex === -1) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const groups = Array.from(layerSettingsDrawingList.querySelectorAll(".layer-settings-drawing-group"));
+  if (!groups.length) return { rawIndex: fromIndex, toIndex: fromIndex, fromIndex };
+
+  let rawIndex = groups.length;
+  for (let index = 0; index < groups.length; index += 1) {
+    const rect = groups[index].getBoundingClientRect();
+    if (clientY < rect.top + rect.height * 0.5) {
+      rawIndex = index;
+      break;
+    }
+  }
+
+  let toIndex = rawIndex;
+  if (toIndex > fromIndex) toIndex -= 1;
+
+  return {
+    rawIndex,
+    toIndex: Math.max(0, Math.min(draft.drawings.length - 1, toIndex)),
+    fromIndex,
+  };
+}
+
+function layerSettingsLayerDropPosition(clientY, layerId, drawingId) {
+  const draft = state.layerSettingsDraft;
+  if (!draft || !layerSettingsDrawingList) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const group = draft.drawings.find((entry) => entry.drawingId === drawingId);
+  if (!group) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const fromIndex = group.items.findIndex((entry) => entry.layerId === layerId);
+  if (fromIndex === -1) return { rawIndex: -1, toIndex: -1, fromIndex: -1 };
+
+  const groupEl = layerSettingsDrawingList.querySelector(`.layer-settings-drawing-group[data-drawing-id="${drawingId}"]`);
+  const rows = groupEl ? Array.from(groupEl.querySelectorAll(".layer-settings-row")) : [];
+  if (!rows.length) return { rawIndex: fromIndex, toIndex: fromIndex, fromIndex };
+
+  let rawIndex = rows.length;
+  for (let index = 0; index < rows.length; index += 1) {
+    const rect = rows[index].getBoundingClientRect();
+    if (clientY < rect.top + rect.height * 0.5) {
+      rawIndex = index;
+      break;
+    }
+  }
+
+  let toIndex = rawIndex;
+  if (toIndex > fromIndex) toIndex -= 1;
+
+  return {
+    rawIndex,
+    toIndex: Math.max(0, Math.min(group.items.length - 1, toIndex)),
+    fromIndex,
+  };
+}
+
+function updateLayerSettingsDropIndicator() {
+  const drag = state.layerSettingsPointerDrag;
+  clearLayerSettingsDropIndicatorClasses(".layer-settings-drawing-group");
+  clearLayerSettingsDropIndicatorClasses(".layer-settings-row");
+  if (!drag || !layerSettingsDrawingList) return;
+
+  const { rawIndex, toIndex, fromIndex } = drag;
+  if (toIndex === -1 || fromIndex === -1 || toIndex === fromIndex) return;
+
+  if (drag.type === "drawing") {
+    const groups = Array.from(layerSettingsDrawingList.querySelectorAll(".layer-settings-drawing-group"));
+    if (!groups.length) return;
+    if (rawIndex >= groups.length) {
+      groups[groups.length - 1].classList.add("drag-insert-after");
+      return;
+    }
+    groups[Math.max(0, rawIndex)].classList.add("drag-insert-before");
+    return;
+  }
+
+  const groupEl = layerSettingsDrawingList.querySelector(`.layer-settings-drawing-group[data-drawing-id="${drag.drawingId}"]`);
+  const rows = groupEl ? Array.from(groupEl.querySelectorAll(".layer-settings-row")) : [];
+  if (!rows.length) return;
+  if (rawIndex >= rows.length) {
+    rows[rows.length - 1].classList.add("drag-insert-after");
+    return;
+  }
+  rows[Math.max(0, rawIndex)].classList.add("drag-insert-before");
+}
+
+function clearLayerSettingsPointerDrag(commit = true) {
+  const drag = state.layerSettingsPointerDrag;
+  if (!drag) return;
+
+  const draft = state.layerSettingsDraft;
+  let shouldRerender = false;
+  if (commit && draft) {
+    const fromIndex = drag.fromIndex;
+    const toIndex = Number.isInteger(drag.dropIndex) ? drag.dropIndex : fromIndex;
+    if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
+      if (drag.type === "drawing") {
+        draft.drawings = moveArrayItem(draft.drawings, fromIndex, toIndex);
+      } else {
+        draft.drawings = draft.drawings.map((group) =>
+          group.drawingId === drag.drawingId
+            ? {
+                ...group,
+                items: moveArrayItem(group.items, fromIndex, toIndex),
+              }
+            : group
+        );
+      }
+      shouldRerender = true;
+    }
+  }
+
+  if (drag.draggingEl) drag.draggingEl.classList.remove("dragging");
+  clearLayerSettingsDropIndicatorClasses(".layer-settings-drawing-group");
+  clearLayerSettingsDropIndicatorClasses(".layer-settings-row");
+  if (layerSettingsModal) layerSettingsModal.classList.remove("drag-reordering");
+  state.layerSettingsPointerDrag = null;
+  if (shouldRerender) renderLayerSettingsModal();
+}
+
+function beginLayerSettingsPointerDrag(event, row, dragInfo) {
+  if (!state.layerSettingsDraft || !row || !dragInfo) return;
+  if (event.button !== 0) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  clearLayerSettingsPointerDrag(false);
+
+  const draggingEl = dragInfo.type === "drawing" ? row.closest(".layer-settings-drawing-group") || row : row;
+  draggingEl.classList.add("dragging");
+  if (layerSettingsModal) layerSettingsModal.classList.add("drag-reordering");
+
+  const drop =
+    dragInfo.type === "drawing"
+      ? layerSettingsDrawingDropPosition(event.clientY, dragInfo.drawingId)
+      : layerSettingsLayerDropPosition(event.clientY, dragInfo.layerId, dragInfo.drawingId);
+
+  state.layerSettingsPointerDrag = {
+    pointerId: event.pointerId,
+    type: dragInfo.type,
+    drawingId: dragInfo.drawingId,
+    layerId: dragInfo.layerId,
+    draggingEl,
+    dropIndex: drop.toIndex,
+    rawIndex: drop.rawIndex,
+    fromIndex: drop.fromIndex,
+  };
+  updateLayerSettingsDropIndicator();
+}
+
 function renderLayerSettingsModal() {
   if (!layerSettingsDrawingList || !layerSettingsEmptyState || !layerSettingsColumnHeadings) return;
 
@@ -1575,18 +1743,26 @@ function renderLayerSettingsModal() {
   layerSettingsEmptyState.classList.toggle("hidden", drawings.length > 0);
   if (!drawings.length) return;
 
+  const activeDrag = state.layerSettingsPointerDrag;
   for (const group of drawings) {
     const groupEl = document.createElement("section");
     groupEl.className = `layer-settings-drawing-group${group.collapsed ? " collapsed" : ""}`;
     groupEl.dataset.drawingId = group.drawingId;
+    if (activeDrag && activeDrag.type === "drawing" && activeDrag.drawingId === group.drawingId) {
+      groupEl.classList.add("dragging");
+    }
 
     const header = document.createElement("div");
     header.className = "layer-settings-drawing-header";
 
-    const headerSpacer = document.createElement("div");
-    headerSpacer.className = "layer-settings-spacer";
-    header.setAttribute("data-drawing-id", group.drawingId);
-    header.appendChild(headerSpacer);
+    const headerGrip = document.createElement("div");
+    headerGrip.className = "drag-handle";
+    headerGrip.textContent = "⋮⋮";
+    headerGrip.draggable = false;
+    headerGrip.addEventListener("pointerdown", (event) => {
+      beginLayerSettingsPointerDrag(event, groupEl, { type: "drawing", drawingId: group.drawingId });
+    });
+    header.appendChild(headerGrip);
 
     const headerMain = document.createElement("div");
     headerMain.className = "layer-settings-drawing-main";
@@ -1699,10 +1875,18 @@ function renderLayerSettingsModal() {
     group.items.forEach((item) => {
       const row = document.createElement("div");
       row.className = "layer-settings-row";
+      if (activeDrag && activeDrag.type === "layer" && activeDrag.layerId === item.layerId) {
+        row.classList.add("dragging");
+      }
 
-      const rowSpacer = document.createElement("div");
-      rowSpacer.className = "layer-settings-spacer";
-      row.appendChild(rowSpacer);
+      const rowGrip = document.createElement("div");
+      rowGrip.className = "drag-handle";
+      rowGrip.textContent = "⋮⋮";
+      rowGrip.draggable = false;
+      rowGrip.addEventListener("pointerdown", (event) => {
+        beginLayerSettingsPointerDrag(event, row, { type: "layer", drawingId: group.drawingId, layerId: item.layerId });
+      });
+      row.appendChild(rowGrip);
 
       const nameCell = document.createElement("div");
       nameCell.className = "layer-settings-layer-name";
@@ -1902,6 +2086,7 @@ function openLayerSettingsModal() {
 }
 
 function closeLayerSettingsModal() {
+  clearLayerSettingsPointerDrag(false);
   if (!layerSettingsModal) return;
   layerSettingsModal.classList.add("hidden");
   state.layerSettingsDraft = null;
@@ -7058,90 +7243,115 @@ for (const button of renderLayoutButtons) {
 
 window.addEventListener("pointermove", (event) => {
   const drag = state.leftPanelPointerDrag;
-  if (!drag || event.pointerId !== drag.pointerId) return;
-
-  if (drag.type === "drawing") {
-    const drop = drawingDropPositionFromClientY(event.clientY, drag.drawingId);
-    drag.dropIndex = drop.toIndex;
-    drag.rawIndex = drop.rawIndex;
-    drag.fromIndex = drop.fromIndex;
-    updateDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
-  } else if (drag.type === "render") {
-    const drop = renderDropPositionFromClientY(event.clientY, drag.renderId);
-    drag.dropIndex = drop.toIndex;
-    drag.rawIndex = drop.rawIndex;
-    drag.fromIndex = drop.fromIndex;
-    updateRenderDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
-  } else {
-    const targetLayerId = getLayerMergeTargetLayerId(event.clientX, event.clientY, drag.layerId);
-    if (targetLayerId) {
-      drag.targetMode = "merge";
-      drag.targetLayerId = targetLayerId;
-      drag.targetDrawingId = null;
-      drag.dropIndex = -1;
-      drag.rawIndex = -1;
-      updateLayerTransferTargetIndicator(null);
-      updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
-      updateLayerMergeTargetIndicator(targetLayerId);
-      return;
-    }
-
-    const targetDrawingId = getLayerTransferTargetDrawingId(event.clientX, event.clientY, drag.drawingId);
-    if (targetDrawingId) {
-      drag.targetMode = "drawing";
-      drag.targetDrawingId = targetDrawingId;
-      drag.targetLayerId = null;
-      drag.dropIndex = -1;
-      drag.rawIndex = -1;
-      updateLayerMergeTargetIndicator(null);
-      updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
-      updateLayerTransferTargetIndicator(targetDrawingId);
-      return;
-    }
-
-    const sourceDrawingCard = getDrawingCardElement(drag.drawingId);
-    const isInsideSourceDrawing =
-      !!sourceDrawingCard && isClientPointInsideRect(event.clientX, event.clientY, sourceDrawingCard.getBoundingClientRect());
-
-    if (isInsideSourceDrawing) {
-      const drop = layerDropPositionFromClientY(drag.drawingId, event.clientY, drag.layerId);
-      drag.targetMode = "reorder";
-      drag.targetDrawingId = null;
-      drag.targetLayerId = null;
+  if (drag && event.pointerId === drag.pointerId) {
+    if (drag.type === "drawing") {
+      const drop = drawingDropPositionFromClientY(event.clientY, drag.drawingId);
       drag.dropIndex = drop.toIndex;
       drag.rawIndex = drop.rawIndex;
       drag.fromIndex = drop.fromIndex;
+      updateDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
+    } else if (drag.type === "render") {
+      const drop = renderDropPositionFromClientY(event.clientY, drag.renderId);
+      drag.dropIndex = drop.toIndex;
+      drag.rawIndex = drop.rawIndex;
+      drag.fromIndex = drop.fromIndex;
+      updateRenderDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
+    } else {
+      const targetLayerId = getLayerMergeTargetLayerId(event.clientX, event.clientY, drag.layerId);
+      if (targetLayerId) {
+        drag.targetMode = "merge";
+        drag.targetLayerId = targetLayerId;
+        drag.targetDrawingId = null;
+        drag.dropIndex = -1;
+        drag.rawIndex = -1;
+        updateLayerTransferTargetIndicator(null);
+        updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
+        updateLayerMergeTargetIndicator(targetLayerId);
+        return;
+      }
+
+      const targetDrawingId = getLayerTransferTargetDrawingId(event.clientX, event.clientY, drag.drawingId);
+      if (targetDrawingId) {
+        drag.targetMode = "drawing";
+        drag.targetDrawingId = targetDrawingId;
+        drag.targetLayerId = null;
+        drag.dropIndex = -1;
+        drag.rawIndex = -1;
+        updateLayerMergeTargetIndicator(null);
+        updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
+        updateLayerTransferTargetIndicator(targetDrawingId);
+        return;
+      }
+
+      const sourceDrawingCard = getDrawingCardElement(drag.drawingId);
+      const isInsideSourceDrawing =
+        !!sourceDrawingCard && isClientPointInsideRect(event.clientX, event.clientY, sourceDrawingCard.getBoundingClientRect());
+
+      if (isInsideSourceDrawing) {
+        const drop = layerDropPositionFromClientY(drag.drawingId, event.clientY, drag.layerId);
+        drag.targetMode = "reorder";
+        drag.targetDrawingId = null;
+        drag.targetLayerId = null;
+        drag.dropIndex = drop.toIndex;
+        drag.rawIndex = drop.rawIndex;
+        drag.fromIndex = drop.fromIndex;
+        updateLayerTransferTargetIndicator(null);
+        updateLayerMergeTargetIndicator(null);
+        updateLayerDropIndicator(drag.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
+        return;
+      }
+
+      drag.targetMode = "none";
+      drag.targetDrawingId = null;
+      drag.targetLayerId = null;
+      drag.dropIndex = -1;
+      drag.rawIndex = -1;
       updateLayerTransferTargetIndicator(null);
       updateLayerMergeTargetIndicator(null);
-      updateLayerDropIndicator(drag.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
-      return;
+      updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
     }
+  }
 
-    drag.targetMode = "none";
-    drag.targetDrawingId = null;
-    drag.targetLayerId = null;
-    drag.dropIndex = -1;
-    drag.rawIndex = -1;
-    updateLayerTransferTargetIndicator(null);
-    updateLayerMergeTargetIndicator(null);
-    updateLayerDropIndicator(drag.drawingId, -1, -1, drag.fromIndex);
+  const layerSettingsDrag = state.layerSettingsPointerDrag;
+  if (layerSettingsDrag && event.pointerId === layerSettingsDrag.pointerId) {
+    const drop =
+      layerSettingsDrag.type === "drawing"
+        ? layerSettingsDrawingDropPosition(event.clientY, layerSettingsDrag.drawingId)
+        : layerSettingsLayerDropPosition(event.clientY, layerSettingsDrag.layerId, layerSettingsDrag.drawingId);
+    layerSettingsDrag.dropIndex = drop.toIndex;
+    layerSettingsDrag.rawIndex = drop.rawIndex;
+    layerSettingsDrag.fromIndex = drop.fromIndex;
+    updateLayerSettingsDropIndicator();
   }
 });
 
 window.addEventListener("pointerup", (event) => {
   const drag = state.leftPanelPointerDrag;
-  if (!drag || event.pointerId !== drag.pointerId) return;
-  clearLeftPanelPointerDrag(true);
+  if (drag && event.pointerId === drag.pointerId) {
+    clearLeftPanelPointerDrag(true);
+  }
+
+  const layerSettingsDrag = state.layerSettingsPointerDrag;
+  if (layerSettingsDrag && event.pointerId === layerSettingsDrag.pointerId) {
+    clearLayerSettingsPointerDrag(true);
+  }
 });
 
 window.addEventListener("pointercancel", (event) => {
   const drag = state.leftPanelPointerDrag;
-  if (!drag || event.pointerId !== drag.pointerId) return;
-  clearLeftPanelPointerDrag(false);
+  if (drag && event.pointerId === drag.pointerId) {
+    clearLeftPanelPointerDrag(false);
+  }
+
+  const layerSettingsDrag = state.layerSettingsPointerDrag;
+  if (layerSettingsDrag && event.pointerId === layerSettingsDrag.pointerId) {
+    clearLayerSettingsPointerDrag(false);
+  }
 });
 
 window.addEventListener("blur", () => {
   if (state.leftPanelPointerDrag) clearLeftPanelPointerDrag(false);
+  if (state.layerSettingsPointerDrag) clearLayerSettingsPointerDrag(false);
 });
 
 window.addEventListener("keydown", (e) => {
@@ -7154,6 +7364,11 @@ window.addEventListener("keydown", (e) => {
   }
 
   if (isLayerSettingsMenuOpen()) {
+    if (e.key === "Escape" && state.layerSettingsPointerDrag) {
+      e.preventDefault();
+      clearLayerSettingsPointerDrag(false);
+      return;
+    }
     if (e.key === "Escape") {
       e.preventDefault();
       closeLayerSettingsModal();

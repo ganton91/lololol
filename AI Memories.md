@@ -486,4 +486,5 @@ Layer order controls draw order. The active layer receives new geometry when the
   - each drawing header shows computed `Height`, `Start`, and `End`
   - each layer row currently exposes `Height`, `Start`, and `End`
   - the modal currently reads and writes the global layer-owned `render.baseElevationMm` and `render.heightMm` settings through a draft/apply flow
+  - the modal now also supports reorder-only pointer drag for drawings and for layers within each drawing, using insertion indicators without preview/ghost cards
 - The next implementation step should be to make the render workspace itself consume those committed `Render Box` records for initial placeholder outputs and deeper render behavior.

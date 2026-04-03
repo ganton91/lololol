@@ -1090,6 +1090,35 @@
         border-color: var(--line-strong);
       }
 
+      .layer-settings-drawing-group.dragging,
+      .layer-settings-row.dragging {
+        opacity: 0.55;
+      }
+
+      .layer-settings-drawing-group.drag-insert-before::before,
+      .layer-settings-drawing-group.drag-insert-after::after,
+      .layer-settings-row.drag-insert-before::before,
+      .layer-settings-row.drag-insert-after::after {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        height: 2px;
+        background: color-mix(in srgb, var(--text) 8%, transparent);
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      .layer-settings-drawing-group.drag-insert-before::before,
+      .layer-settings-row.drag-insert-before::before {
+        top: -6px;
+      }
+
+      .layer-settings-drawing-group.drag-insert-after::after,
+      .layer-settings-row.drag-insert-after::after {
+        bottom: -3px;
+      }
+
       .layer-settings-drawing-header {
         padding: 8px 18px 8px 10px;
         border-radius: 11px 11px 0 0;
@@ -1179,6 +1208,11 @@
         border-radius: 12px;
         background: var(--surface);
         position: relative;
+      }
+
+      .layer-settings-modal.drag-reordering,
+      .layer-settings-modal.drag-reordering * {
+        cursor: grabbing !important;
       }
 
       .layer-settings-layer-name {

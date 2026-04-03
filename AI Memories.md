@@ -488,4 +488,6 @@ Layer order controls draw order. The active layer receives new geometry when the
   - the modal currently reads and writes the global layer-owned `render.baseElevationMm` and `render.heightMm` settings through a draft/apply flow
   - the modal now also supports reorder-only pointer drag for drawings and for layers within each drawing, using insertion indicators without preview/ghost cards
   - that modal reorder path now mirrors the left panel more literally, with separate drawing and layer indicator updaters using the same `toIndex === fromIndex` no-op suppression pattern
+  - the modal scroll body now keeps a slightly larger bottom buffer so the final drawing-level `drag-insert-after` line stays visible above the action buttons instead of clipping at the very bottom edge
+  - each drawing group's inner layer stack also keeps extra bottom padding so the last layer-row insertion line has breathing room before the group edge
 - The next implementation step should be to make the render workspace itself consume those committed `Render Box` records for initial placeholder outputs and deeper render behavior.

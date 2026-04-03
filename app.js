@@ -59,6 +59,12 @@ const renderWorkspaceShell = document.getElementById("renderWorkspaceShell");
 const renderLayoutButtons = Array.from(document.querySelectorAll("[data-render-layout]"));
 const renderOutputGrid = document.getElementById("renderOutputGrid");
 const renderPaneSlots = Array.from(document.querySelectorAll(".render-pane[data-render-slot]"));
+const renderPaneTitles = renderPaneSlots.map((pane) => pane.querySelector(".render-pane-title"));
+const renderPaneEmptyStates = renderPaneSlots.map((pane) => pane.querySelector(".render-pane-empty"));
+const renderPaneCanvases = renderPaneSlots.map((pane) => pane.querySelector(".render-pane-canvas"));
+const renderPaneSectionButtonRows = renderPaneSlots.map((pane) => pane.querySelector(".render-pane-section-buttons"));
+const renderPaneExportButtons = Array.from(document.querySelectorAll("[data-render-export-slot][data-render-export-format]"));
+const renderPaneSelectorButtons = Array.from(document.querySelectorAll("[data-render-slot][data-render-direction]"));
 const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
 const settingsCellUnitButtons = Array.from(document.querySelectorAll("[data-settings-cell-unit]"));
 const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-settings-snap-mode]"));
@@ -71,6 +77,8 @@ const PROJECT_FILE_APP_ID = "millimetre";
 const PROJECT_FILE_VERSION = 1;
 const DEFAULT_PROJECT_FILE_NAME = "millimetre-project.json";
 const DEFAULT_ACTIVE_WORKSPACE_TAB = Object.freeze({ kind: "main" });
+const STANDARD_RENDER_DIRECTIONS = Object.freeze(["topToBottom", "bottomToTop", "leftToRight", "rightToLeft", "plan"]);
+const DEFAULT_RENDER_PANE_DIRECTIONS = Object.freeze(["topToBottom", "bottomToTop", "leftToRight", "rightToLeft"]);
 const DEFAULT_LAYER_RENDER = Object.freeze({
   enabled: true,
   baseElevationMm: 0,
@@ -118,6 +126,7 @@ const state = {
   renderTransformDrag: null,
   activeWorkspaceTab: { ...DEFAULT_ACTIVE_WORKSPACE_TAB },
   renderLayoutPreset: 1,
+  renderPaneDirections: [...DEFAULT_RENDER_PANE_DIRECTIONS],
   nextDrawingId: 2,
   editingDrawingId: null,
   editingDrawingNameDraft: "",
@@ -794,6 +803,104 @@ function cloneRenderSectionSettings(sectionSettings = null) {
   };
 }
 
+function normalizeRenderPaneDirection(direction, fallback = DEFAULT_RENDER_PANE_DIRECTIONS[0]) {
+  return STANDARD_RENDER_DIRECTIONS.includes(direction) ? direction : fallback;
+}
+
+function normalizeRenderPaneDirections(directions = null) {
+  return DEFAULT_RENDER_PANE_DIRECTIONS.map((fallbackDirection, slotIndex) =>
+    normalizeRenderPaneDirection(Array.isArray(directions) ? directions[slotIndex] : null, fallbackDirection)
+  );
+}
+
+function getRenderDirectionLabel(direction) {
+  switch (direction) {
+    case "bottomToTop":
+      return "Bottom to Top";
+    case "leftToRight":
+      return "Left to Right";
+    case "rightToLeft":
+      return "Right to Left";
+    case "plan":
+      return "Plan";
+    case "topToBottom":
+    default:
+      return "Top to Bottom";
+  }
+}
+
+function getRenderDirectionShortLabel(direction) {
+  switch (direction) {
+    case "bottomToTop":
+      return "B-T";
+    case "leftToRight":
+      return "L-R";
+    case "rightToLeft":
+      return "R-L";
+    case "plan":
+      return "PL";
+    case "topToBottom":
+    default:
+      return "T-B";
+  }
+}
+
+function getRenderDirectionConfig(direction) {
+  switch (direction) {
+    case "bottomToTop":
+      return {
+        label: getRenderDirectionLabel(direction),
+        shortLabel: getRenderDirectionShortLabel(direction),
+        mode: "directional",
+        primaryAxis: "localX",
+        depthAxis: "localY",
+        verticalAxis: "elevation",
+        frontBoundary: "max",
+      };
+    case "leftToRight":
+      return {
+        label: getRenderDirectionLabel(direction),
+        shortLabel: getRenderDirectionShortLabel(direction),
+        mode: "directional",
+        primaryAxis: "localY",
+        depthAxis: "localX",
+        verticalAxis: "elevation",
+        frontBoundary: "min",
+      };
+    case "rightToLeft":
+      return {
+        label: getRenderDirectionLabel(direction),
+        shortLabel: getRenderDirectionShortLabel(direction),
+        mode: "directional",
+        primaryAxis: "localY",
+        depthAxis: "localX",
+        verticalAxis: "elevation",
+        frontBoundary: "max",
+      };
+    case "plan":
+      return {
+        label: getRenderDirectionLabel(direction),
+        shortLabel: getRenderDirectionShortLabel(direction),
+        mode: "plan",
+        primaryAxis: "localX",
+        depthAxis: "elevation",
+        verticalAxis: "localY",
+        frontBoundary: "max",
+      };
+    case "topToBottom":
+    default:
+      return {
+        label: getRenderDirectionLabel(direction),
+        shortLabel: getRenderDirectionShortLabel(direction),
+        mode: "directional",
+        primaryAxis: "localX",
+        depthAxis: "localY",
+        verticalAxis: "elevation",
+        frontBoundary: "min",
+      };
+  }
+}
+
 function cloneActiveWorkspaceTab(workspaceTab = DEFAULT_ACTIVE_WORKSPACE_TAB, renderIds = null) {
   if (
     isPlainObject(workspaceTab) &&
@@ -854,6 +961,41 @@ function getRenderBoxMetrics(render) {
     center,
     isValid: width > 1e-6 && height > 1e-6,
   };
+}
+
+function getRenderBoxLocalFrame(render) {
+  const metrics = getRenderBoxMetrics(render);
+  if (!metrics.isValid || metrics.boxGeometry.length !== 4) return null;
+
+  const [origin, xTarget, , yTarget] = metrics.boxGeometry;
+  const width = distanceBetweenPoints(origin, xTarget);
+  const height = distanceBetweenPoints(origin, yTarget);
+  if (width <= 1e-6 || height <= 1e-6) return null;
+
+  return {
+    origin: { ...origin },
+    xAxis: quantizePoint({
+      x: (xTarget.x - origin.x) / width,
+      y: (xTarget.y - origin.y) / width,
+    }),
+    yAxis: quantizePoint({
+      x: (yTarget.x - origin.x) / height,
+      y: (yTarget.y - origin.y) / height,
+    }),
+    widthMm: quantizeCoordinate(width),
+    heightMm: quantizeCoordinate(height),
+    boxGeometry: metrics.boxGeometry.map((point) => ({ ...point })),
+    boundsWorld: getGeometryBounds([[metrics.boxGeometry.map((point) => [point.x, point.y])]]),
+  };
+}
+
+function worldPointToRenderLocal(point, frame) {
+  const dx = point.x - frame.origin.x;
+  const dy = point.y - frame.origin.y;
+  return quantizePoint({
+    x: dx * frame.xAxis.x + dy * frame.xAxis.y,
+    y: dx * frame.yAxis.x + dy * frame.yAxis.y,
+  });
 }
 
 function getRenderBoxGeometryFromDraftRect(startDraft, currentDraft) {
@@ -1013,6 +1155,252 @@ function setActiveWorkspaceTab(workspaceTab) {
   return true;
 }
 
+function getRenderPaneDirection(slotIndex) {
+  return normalizeRenderPaneDirection(state.renderPaneDirections?.[slotIndex], DEFAULT_RENDER_PANE_DIRECTIONS[slotIndex] || DEFAULT_RENDER_PANE_DIRECTIONS[0]);
+}
+
+function setRenderPaneDirection(slotIndex, direction) {
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= DEFAULT_RENDER_PANE_DIRECTIONS.length) return false;
+  const nextDirection = normalizeRenderPaneDirection(direction, DEFAULT_RENDER_PANE_DIRECTIONS[slotIndex]);
+  if (getRenderPaneDirection(slotIndex) === nextDirection) return false;
+  const nextDirections = normalizeRenderPaneDirections(state.renderPaneDirections);
+  nextDirections[slotIndex] = nextDirection;
+  state.renderPaneDirections = nextDirections;
+  renderWorkspaceUi();
+  return true;
+}
+
+function getLayerMergedGeometryForRender(layerId) {
+  const layerShapes = state.shapes.filter((shape) => shape.layerId === layerId);
+  if (!layerShapes.length) return [];
+  return unionGeometryList(layerShapes.map((shape) => shape.geometry));
+}
+
+function compileRenderScene() {
+  const entries = [];
+
+  state.drawingsUi.forEach((drawing, drawingOrderIndex) => {
+    const drawingLayers = getLayersForDrawing(drawing.id);
+    drawingLayers.forEach((layer, layerOrderIndex) => {
+      const renderSettings = cloneLayerRenderSettings(layer.render);
+      if (renderSettings.enabled === false) return;
+
+      const geometryWorld = getLayerMergedGeometryForRender(layer.id);
+      if (!geometryWorld.length) return;
+
+      const boundsWorld = getGeometryBounds(geometryWorld);
+      const areaWorld = getGeometryArea(geometryWorld);
+      const baseElevationMm = quantizeCoordinate(renderSettings.baseElevationMm);
+      const heightMm = Math.max(0, quantizeCoordinate(renderSettings.heightMm));
+      const topElevationMm = quantizeCoordinate(baseElevationMm + heightMm);
+
+      entries.push({
+        drawingId: drawing.id,
+        drawingName: drawing.name,
+        drawingOrderIndex,
+        layerId: layer.id,
+        layerName: layer.name,
+        layerOrderIndex,
+        stackOrderIndex: entries.length,
+        fillColor: layer.fillColor,
+        geometryWorld,
+        boundsWorld,
+        areaWorld,
+        baseElevationMm,
+        heightMm,
+        topElevationMm,
+        role: renderSettings.role,
+      });
+    });
+  });
+
+  const elevationRange =
+    entries.length > 0
+      ? {
+          minMm: Math.min(...entries.map((entry) => entry.baseElevationMm)),
+          maxMm: Math.max(...entries.map((entry) => entry.topElevationMm)),
+        }
+      : { minMm: 0, maxMm: 0 };
+
+  return {
+    entries,
+    layerCount: entries.length,
+    drawingCount: new Set(entries.map((entry) => entry.drawingId)).size,
+    elevationRange,
+  };
+}
+
+function resolveRenderPaneRequest(renderRecord, slotIndex) {
+  const direction = getRenderPaneDirection(slotIndex);
+  const directionConfig = getRenderDirectionConfig(direction);
+  const frame = getRenderBoxLocalFrame(renderRecord);
+  const clipGeometryWorld = frame ? [[frame.boxGeometry.map((point) => [point.x, point.y])]] : [];
+
+  return {
+    slotIndex,
+    renderId: renderRecord?.id || null,
+    direction,
+    directionConfig,
+    frame,
+    clipGeometryWorld,
+    clipBoundsWorld: clipGeometryWorld.length ? getGeometryBounds(clipGeometryWorld) : { x: 0, y: 0, w: 0, h: 0 },
+  };
+}
+
+function buildRenderPaneFoundation(renderRecord, slotIndex, compiledScene = compileRenderScene()) {
+  const request = resolveRenderPaneRequest(renderRecord, slotIndex);
+  if (!request.frame || !request.clipGeometryWorld.length) {
+    return {
+      request,
+      compiledScene,
+      status: "missing_box",
+      intersectingEntries: [],
+      intersectingLayerCount: 0,
+      clippedAreaWorld: 0,
+      elevationRangeMm: { minMm: 0, maxMm: 0 },
+    };
+  }
+
+  const intersectingEntries = [];
+  let clippedAreaWorld = 0;
+
+  compiledScene.entries.forEach((entry) => {
+    if (!boundsTouch(entry.boundsWorld, request.clipBoundsWorld)) return;
+
+    const clippedGeometryWorld = executeClipperBoolean(ClipType.Intersection, entry.geometryWorld, request.clipGeometryWorld);
+    if (!clippedGeometryWorld.length) return;
+
+    const localGeometry = transformGeometry(clippedGeometryWorld, (point) => worldPointToRenderLocal(point, request.frame));
+    const localBounds = getGeometryBounds(localGeometry);
+    const clippedEntryArea = getGeometryArea(clippedGeometryWorld);
+    clippedAreaWorld += clippedEntryArea;
+
+    intersectingEntries.push({
+      ...entry,
+      clippedGeometryWorld,
+      localGeometry,
+      localBounds,
+      clippedAreaWorld: clippedEntryArea,
+    });
+  });
+
+  const elevationRangeMm =
+    intersectingEntries.length > 0
+      ? {
+          minMm: Math.min(...intersectingEntries.map((entry) => entry.baseElevationMm)),
+          maxMm: Math.max(...intersectingEntries.map((entry) => entry.topElevationMm)),
+        }
+      : { minMm: 0, maxMm: 0 };
+
+  return {
+    request,
+    compiledScene,
+    status: intersectingEntries.length ? "ready" : "empty",
+    intersectingEntries,
+    intersectingLayerCount: intersectingEntries.length,
+    clippedAreaWorld,
+    elevationRangeMm,
+  };
+}
+
+function buildRenderPanePlaceholderLines(foundation) {
+  const { request, compiledScene } = foundation;
+  if (!request.frame) {
+    return {
+      heading: request.directionConfig.label,
+      lines: ["No Render Box Yet", "Commit an Rbox on Main first."],
+    };
+  }
+
+  if (!foundation.intersectingLayerCount) {
+    return {
+      heading: request.directionConfig.label,
+      lines: [
+        "No render-enabled layer geometry intersects this Rbox yet.",
+        `Scene ${compiledScene.layerCount} layers | Box ${formatLengthWithUnit(request.frame.widthMm)} × ${formatLengthWithUnit(request.frame.heightMm)}`,
+      ],
+    };
+  }
+
+  const primaryMetric =
+    request.direction === "plan"
+      ? `Plan crop ${formatLengthWithUnit(request.frame.widthMm)} × ${formatLengthWithUnit(request.frame.heightMm)}`
+      : `Box ${formatLengthWithUnit(request.frame.widthMm)} × ${formatLengthWithUnit(request.frame.heightMm)}`;
+
+  const layerNames = foundation.intersectingEntries
+    .slice(0, 3)
+    .map((entry) => entry.layerName)
+    .join(", ");
+  const remainingCount = Math.max(0, foundation.intersectingEntries.length - 3);
+  const layerSummary = remainingCount > 0 ? `${layerNames} + ${remainingCount} more` : layerNames;
+
+  return {
+    heading: request.directionConfig.label,
+    lines: [
+      `${foundation.intersectingLayerCount} render layer${foundation.intersectingLayerCount === 1 ? "" : "s"} intersect this Rbox.`,
+      `${primaryMetric} | Z ${formatLengthWithUnit(foundation.elevationRangeMm.minMm)} → ${formatLengthWithUnit(foundation.elevationRangeMm.maxMm)}`,
+      layerSummary,
+    ],
+  };
+}
+
+function setRenderPanePlaceholderContent(emptyEl, content) {
+  if (!emptyEl) return;
+  emptyEl.replaceChildren();
+
+  if (content?.heading) {
+    const headingEl = document.createElement("strong");
+    headingEl.textContent = content.heading;
+    emptyEl.appendChild(headingEl);
+  }
+
+  (Array.isArray(content?.lines) ? content.lines : []).forEach((line) => {
+    const lineEl = document.createElement("div");
+    lineEl.textContent = line;
+    emptyEl.appendChild(lineEl);
+  });
+}
+
+function renderRenderWorkspaceOutputs() {
+  const activeRender = getActiveRenderRecord();
+  const compiledScene = activeRender ? compileRenderScene() : null;
+
+  renderPaneSlots.forEach((pane, slotIndex) => {
+    const direction = getRenderPaneDirection(slotIndex);
+    const directionConfig = getRenderDirectionConfig(direction);
+    const titleEl = renderPaneTitles[slotIndex];
+    const emptyEl = renderPaneEmptyStates[slotIndex];
+    const canvasEl = renderPaneCanvases[slotIndex];
+    const sectionRow = renderPaneSectionButtonRows[slotIndex];
+
+    if (titleEl) titleEl.textContent = directionConfig.label;
+    if (canvasEl) canvasEl.classList.add("hidden");
+    if (sectionRow) sectionRow.innerHTML = "";
+
+    renderPaneSelectorButtons.forEach((button) => {
+      if (Number(button.dataset.renderSlot) !== slotIndex) return;
+      button.classList.toggle("active", button.dataset.renderDirection === direction);
+    });
+
+    if (!emptyEl) return;
+    if (!activeRender) {
+      setRenderPanePlaceholderContent(emptyEl, {
+        heading: directionConfig.label,
+        lines: ["Select an Rbox tab to start the render workspace."],
+      });
+      return;
+    }
+
+    const foundation = buildRenderPaneFoundation(activeRender, slotIndex, compiledScene);
+    setRenderPanePlaceholderContent(emptyEl, buildRenderPanePlaceholderLines(foundation));
+  });
+
+  renderPaneExportButtons.forEach((button) => {
+    button.disabled = true;
+    button.title = "Render export will be enabled in a later render-engine phase.";
+  });
+}
+
 function renderWorkspaceSwitcher() {
   if (!workspaceSwitcher) return;
   workspaceSwitcher.innerHTML = "";
@@ -1066,8 +1454,10 @@ function syncRenderWorkspaceShell() {
 }
 
 function renderWorkspaceUi() {
+  state.renderPaneDirections = normalizeRenderPaneDirections(state.renderPaneDirections);
   renderWorkspaceSwitcher();
   syncRenderWorkspaceShell();
+  renderRenderWorkspaceOutputs();
 }
 
 function createProjectFilePayload() {
@@ -1453,6 +1843,7 @@ function resetProjectInteractionState() {
   state.activeRenderId = null;
   state.renderTransformDrag = null;
   state.pendingRenderBox = null;
+  state.renderPaneDirections = [...DEFAULT_RENDER_PANE_DIRECTIONS];
   state.spacePressed = false;
   state.shiftPressed = false;
 
@@ -7346,6 +7737,15 @@ for (const button of renderLayoutButtons) {
     if (state.renderLayoutPreset === nextPreset) return;
     state.renderLayoutPreset = nextPreset;
     renderWorkspaceUi();
+  });
+}
+
+for (const button of renderPaneSelectorButtons) {
+  button.addEventListener("click", () => {
+    const slotIndex = Number(button.dataset.renderSlot);
+    const direction = button.dataset.renderDirection;
+    if (!Number.isInteger(slotIndex) || slotIndex < 0) return;
+    setRenderPaneDirection(slotIndex, direction);
   });
 }
 

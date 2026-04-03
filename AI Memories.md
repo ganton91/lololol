@@ -495,4 +495,11 @@ Layer order controls draw order. The active layer receives new geometry when the
   - the `Height / Start / End` headings row now sits outside the scroll area as a frozen strip, while the modal body below it remains the only scrolling region
   - `Apply` now commits both drawing order and per-drawing layer order from the modal draft, not just the numeric render fields
   - the modal also now keeps dedicated UI memory for collapsed/open drawing groups and scroll position, and that memory is restored on reopen and included in the project workspace snapshot
-- The next implementation step should be to make the render workspace itself consume those committed `Render Box` records for initial placeholder outputs and deeper render behavior.
+- The render workspace now has a first real Phase 1 engine foundation instead of hardcoded placeholder copy:
+  - render panes now read from a compiled render-scene pass derived from current drawings, layer order, merged layer geometry, and global layer render settings
+  - each pane now resolves a normalized render request against the active `Rbox`, including direction metadata and the `Rbox` local frame
+  - the workspace now computes real `Rbox` intersection awareness per pane by clipping render-enabled layer geometry against the committed render box
+  - pane titles and selector-button active states now update from runtime pane-direction state instead of staying static in the markup
+  - pane placeholder surfaces now show live derived summaries such as intersecting render-layer count, box dimensions, and elevation range for the active render box
+  - export buttons are intentionally disabled for now until the later phases add actual canvas/export output builders
+- The next implementation step should be to turn that Phase 1 foundation into the first actual output painter, starting with real `Top to Bottom` and `Plan` pane rendering before the other directions and section cuts.

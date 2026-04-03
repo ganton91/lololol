@@ -1635,33 +1635,40 @@ function layerSettingsLayerDropPosition(clientY, layerId, drawingId) {
   };
 }
 
-function updateLayerSettingsDropIndicator() {
-  const drag = state.layerSettingsPointerDrag;
+function updateLayerSettingsDrawingDropIndicator(rawIndex, toIndex, fromIndex) {
   clearLayerSettingsDropIndicatorClasses(".layer-settings-drawing-group");
-  clearLayerSettingsDropIndicatorClasses(".layer-settings-row");
-  if (!drag || !layerSettingsDrawingList) return;
 
-  const { rawIndex, toIndex, fromIndex } = drag;
-  if (toIndex === -1 || fromIndex === -1 || toIndex === fromIndex) return;
-
-  if (drag.type === "drawing") {
-    const groups = Array.from(layerSettingsDrawingList.querySelectorAll(".layer-settings-drawing-group"));
-    if (!groups.length) return;
-    if (rawIndex >= groups.length) {
-      groups[groups.length - 1].classList.add("drag-insert-after");
-      return;
-    }
-    groups[Math.max(0, rawIndex)].classList.add("drag-insert-before");
+  if (!state.layerSettingsPointerDrag || !layerSettingsDrawingList || toIndex === -1 || fromIndex === -1 || toIndex === fromIndex) {
     return;
   }
 
-  const groupEl = layerSettingsDrawingList.querySelector(`.layer-settings-drawing-group[data-drawing-id="${drag.drawingId}"]`);
+  const groups = Array.from(layerSettingsDrawingList.querySelectorAll(".layer-settings-drawing-group"));
+  if (!groups.length) return;
+
+  if (rawIndex >= groups.length) {
+    groups[groups.length - 1].classList.add("drag-insert-after");
+    return;
+  }
+
+  groups[Math.max(0, rawIndex)].classList.add("drag-insert-before");
+}
+
+function updateLayerSettingsLayerDropIndicator(drawingId, rawIndex, toIndex, fromIndex) {
+  clearLayerSettingsDropIndicatorClasses(".layer-settings-row");
+
+  if (!state.layerSettingsPointerDrag || !layerSettingsDrawingList || toIndex === -1 || fromIndex === -1 || toIndex === fromIndex) {
+    return;
+  }
+
+  const groupEl = layerSettingsDrawingList.querySelector(`.layer-settings-drawing-group[data-drawing-id="${drawingId}"]`);
   const rows = groupEl ? Array.from(groupEl.querySelectorAll(".layer-settings-row")) : [];
   if (!rows.length) return;
+
   if (rawIndex >= rows.length) {
     rows[rows.length - 1].classList.add("drag-insert-after");
     return;
   }
+
   rows[Math.max(0, rawIndex)].classList.add("drag-insert-before");
 }
 
@@ -1726,7 +1733,11 @@ function beginLayerSettingsPointerDrag(event, row, dragInfo) {
     rawIndex: drop.rawIndex,
     fromIndex: drop.fromIndex,
   };
-  updateLayerSettingsDropIndicator();
+  if (dragInfo.type === "drawing") {
+    updateLayerSettingsDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
+  } else {
+    updateLayerSettingsLayerDropIndicator(dragInfo.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
+  }
 }
 
 function renderLayerSettingsModal() {
@@ -7321,7 +7332,11 @@ window.addEventListener("pointermove", (event) => {
     layerSettingsDrag.dropIndex = drop.toIndex;
     layerSettingsDrag.rawIndex = drop.rawIndex;
     layerSettingsDrag.fromIndex = drop.fromIndex;
-    updateLayerSettingsDropIndicator();
+    if (layerSettingsDrag.type === "drawing") {
+      updateLayerSettingsDrawingDropIndicator(drop.rawIndex, drop.toIndex, drop.fromIndex);
+    } else {
+      updateLayerSettingsLayerDropIndicator(layerSettingsDrag.drawingId, drop.rawIndex, drop.toIndex, drop.fromIndex);
+    }
   }
 });
 

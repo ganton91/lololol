@@ -856,6 +856,7 @@ function getRenderDirectionConfig(direction) {
         depthAxis: "localY",
         verticalAxis: "elevation",
         frontBoundary: "max",
+        mirrorPrimary: false,
       };
     case "leftToRight":
       return {
@@ -866,6 +867,7 @@ function getRenderDirectionConfig(direction) {
         depthAxis: "localX",
         verticalAxis: "elevation",
         frontBoundary: "min",
+        mirrorPrimary: false,
       };
     case "rightToLeft":
       return {
@@ -876,6 +878,7 @@ function getRenderDirectionConfig(direction) {
         depthAxis: "localX",
         verticalAxis: "elevation",
         frontBoundary: "max",
+        mirrorPrimary: true,
       };
     case "plan":
       return {
@@ -886,6 +889,7 @@ function getRenderDirectionConfig(direction) {
         depthAxis: "elevation",
         verticalAxis: "localY",
         frontBoundary: "max",
+        mirrorPrimary: false,
       };
     case "topToBottom":
     default:
@@ -897,6 +901,7 @@ function getRenderDirectionConfig(direction) {
         depthAxis: "localY",
         verticalAxis: "elevation",
         frontBoundary: "min",
+        mirrorPrimary: true,
       };
   }
 }
@@ -1362,7 +1367,13 @@ function setRenderPanePlaceholderContent(emptyEl, content) {
 }
 
 function isRenderPanePainterImplemented(direction) {
-  return direction === "topToBottom" || direction === "plan";
+  return (
+    direction === "topToBottom" ||
+    direction === "bottomToTop" ||
+    direction === "leftToRight" ||
+    direction === "rightToLeft" ||
+    direction === "plan"
+  );
 }
 
 function getRenderPaneCanvasContext(canvasEl) {
@@ -1396,20 +1407,29 @@ function drawRenderPaneBackdrop(context, width, height) {
   context.restore();
 }
 
-function buildLocalGeometryProjectionSpans(localGeometry, widthMm, heightMm, targetColumns = 320) {
-  if (!Array.isArray(localGeometry) || !localGeometry.length || widthMm <= 1e-6 || heightMm <= 1e-6) return [];
+function getDirectionalAxisSpanMm(frame, axisId) {
+  if (!frame) return 0;
+  return axisId === "localY" ? frame.heightMm : frame.widthMm;
+}
+
+function buildDirectionalProjectionColumns(localGeometry, request, targetColumns = 320) {
+  const directionConfig = request?.directionConfig;
+  const primarySpanMm = getDirectionalAxisSpanMm(request?.frame, directionConfig?.primaryAxis);
+  const depthSpanMm = getDirectionalAxisSpanMm(request?.frame, directionConfig?.depthAxis);
+  if (!Array.isArray(localGeometry) || !localGeometry.length || primarySpanMm <= 1e-6 || depthSpanMm <= 1e-6) return [];
 
   const maskCanvas = document.createElement("canvas");
   const maskWidth = Math.max(64, Math.min(960, Math.round(targetColumns)));
-  const maskHeight = Math.max(64, Math.min(960, Math.round((heightMm / widthMm) * maskWidth)));
+  const maskHeight = Math.max(64, Math.min(960, Math.round((depthSpanMm / primarySpanMm) * maskWidth)));
   maskCanvas.width = maskWidth;
   maskCanvas.height = maskHeight;
   const maskContext = maskCanvas.getContext("2d");
-  if (!maskContext) return [];
+  if (!maskContext) return Array(maskWidth).fill(null);
 
   const rasterGeometry = transformGeometry(localGeometry, (point) => ({
-    x: (point.x / widthMm) * Math.max(1, maskWidth - 1),
-    y: (point.y / heightMm) * Math.max(1, maskHeight - 1),
+    x:
+      (((directionConfig?.primaryAxis === "localY" ? point.y : point.x) || 0) / primarySpanMm) * Math.max(1, maskWidth - 1),
+    y: (((directionConfig?.depthAxis === "localY" ? point.y : point.x) || 0) / depthSpanMm) * Math.max(1, maskHeight - 1),
   }));
 
   maskContext.clearRect(0, 0, maskWidth, maskHeight);
@@ -1419,40 +1439,134 @@ function buildLocalGeometryProjectionSpans(localGeometry, widthMm, heightMm, tar
   maskContext.fill("evenodd");
 
   const alpha = maskContext.getImageData(0, 0, maskWidth, maskHeight).data;
-  const spans = [];
-  let spanStart = -1;
+  const columns = Array(maskWidth).fill(null);
 
   for (let column = 0; column < maskWidth; column += 1) {
-    let occupied = false;
-    for (let row = 0; row < maskHeight; row += 1) {
-      if (alpha[(row * maskWidth + column) * 4 + 3] > 0) {
-        occupied = true;
-        break;
+    let nearestRow = -1;
+
+    if (directionConfig?.frontBoundary === "max") {
+      for (let row = maskHeight - 1; row >= 0; row -= 1) {
+        if (alpha[(row * maskWidth + column) * 4 + 3] > 0) {
+          nearestRow = row;
+          break;
+        }
+      }
+    } else {
+      for (let row = 0; row < maskHeight; row += 1) {
+        if (alpha[(row * maskWidth + column) * 4 + 3] > 0) {
+          nearestRow = row;
+          break;
+        }
       }
     }
 
-    if (occupied && spanStart === -1) {
-      spanStart = column;
-      continue;
-    }
-
-    if (!occupied && spanStart !== -1) {
-      spans.push({
-        startMm: quantizeCoordinate((spanStart / maskWidth) * widthMm),
-        endMm: quantizeCoordinate((column / maskWidth) * widthMm),
-      });
-      spanStart = -1;
-    }
+    if (nearestRow === -1) continue;
+    const projectedColumnIndex = directionConfig?.mirrorPrimary ? maskWidth - 1 - column : column;
+    columns[projectedColumnIndex] = {
+      depthMm: quantizeCoordinate((nearestRow / Math.max(1, maskHeight - 1)) * depthSpanMm),
+    };
   }
 
-  if (spanStart !== -1) {
-    spans.push({
-      startMm: quantizeCoordinate((spanStart / maskWidth) * widthMm),
-      endMm: quantizeCoordinate(widthMm),
+  return columns;
+}
+
+function buildDirectionalRenderGrid(foundation, targetColumns = 320) {
+  const { request, intersectingEntries, elevationRangeMm } = foundation;
+  const directionConfig = request?.directionConfig;
+  const primarySpanMm = getDirectionalAxisSpanMm(request?.frame, directionConfig?.primaryAxis);
+  if (primarySpanMm <= 1e-6) return null;
+
+  const minZ = Math.min(0, elevationRangeMm?.minMm ?? 0);
+  const maxZ = Math.max(minZ + 1, elevationRangeMm?.maxMm ?? minZ + 1);
+  const zSpan = Math.max(1, maxZ - minZ);
+  const columnCount = Math.max(64, Math.min(480, Math.round(targetColumns)));
+  const rowCount = Math.max(64, Math.min(320, Math.round((zSpan / primarySpanMm) * columnCount)));
+  const grid = Array.from({ length: rowCount }, () => Array(columnCount).fill(null));
+  let paintedCellCount = 0;
+
+  intersectingEntries.forEach((entry) => {
+    const projectedColumns = buildDirectionalProjectionColumns(entry.localGeometry, request, columnCount);
+    if (!projectedColumns.some(Boolean)) return;
+
+    let rowStart = Math.floor(((maxZ - entry.topElevationMm) / zSpan) * rowCount);
+    let rowEnd = Math.ceil(((maxZ - entry.baseElevationMm) / zSpan) * rowCount) - 1;
+    rowStart = Math.max(0, Math.min(rowCount - 1, rowStart));
+    rowEnd = Math.max(0, Math.min(rowCount - 1, rowEnd));
+    if (rowEnd < rowStart) rowEnd = rowStart;
+
+    const fillColor = sanitizeColorValue(entry.fillColor, "#93c5fd");
+    projectedColumns.forEach((column, columnIndex) => {
+      if (!column) return;
+
+      for (let rowIndex = rowStart; rowIndex <= rowEnd; rowIndex += 1) {
+        const existing = grid[rowIndex][columnIndex];
+        const depthDelta = existing ? column.depthMm - existing.depthMm : 0;
+        const isCloser =
+          !existing ||
+          (directionConfig?.frontBoundary === "min" ? depthDelta < -1e-6 : depthDelta > 1e-6) ||
+          (Math.abs(depthDelta) <= 1e-6 && entry.stackOrderIndex >= existing.stackOrderIndex);
+        if (!isCloser) continue;
+        if (!existing) paintedCellCount += 1;
+        grid[rowIndex][columnIndex] = {
+          color: fillColor,
+          depthMm: column.depthMm,
+          stackOrderIndex: entry.stackOrderIndex,
+        };
+      }
     });
-  }
+  });
 
-  return spans.filter((span) => span.endMm - span.startMm > 1e-6);
+  return {
+    primarySpanMm,
+    minZ,
+    maxZ,
+    zSpan,
+    columnCount,
+    rowCount,
+    paintedCellCount,
+    grid,
+  };
+}
+
+function buildDirectionalRenderGridRuns(grid) {
+  const runs = [];
+  if (!Array.isArray(grid) || !grid.length) return runs;
+
+  grid.forEach((row, rowIndex) => {
+    let runStart = -1;
+    let runColor = null;
+
+    for (let columnIndex = 0; columnIndex <= row.length; columnIndex += 1) {
+      const cell = columnIndex < row.length ? row[columnIndex] : null;
+      const cellColor = cell?.color || null;
+
+      if (runStart === -1 && cellColor) {
+        runStart = columnIndex;
+        runColor = cellColor;
+        continue;
+      }
+
+      if (runStart !== -1 && cellColor === runColor) continue;
+
+      if (runStart !== -1) {
+        runs.push({
+          rowIndex,
+          startColumn: runStart,
+          endColumn: columnIndex - 1,
+          color: runColor,
+        });
+        runStart = -1;
+        runColor = null;
+      }
+
+      if (runStart === -1 && cellColor) {
+        runStart = columnIndex;
+        runColor = cellColor;
+      }
+    }
+  });
+
+  return runs;
 }
 
 function paintPlanRenderPane(context, width, height, foundation) {
@@ -1500,22 +1614,22 @@ function paintPlanRenderPane(context, width, height, foundation) {
   return true;
 }
 
-function paintTopToBottomRenderPane(context, width, height, foundation) {
-  const { request, intersectingEntries } = foundation;
-  const boxWidth = request.frame.widthMm;
-  if (boxWidth <= 1e-6) return false;
+function paintDirectionalRenderPane(context, width, height, foundation) {
+  const { request } = foundation;
+  const directionalGrid = buildDirectionalRenderGrid(foundation);
+  if (!directionalGrid || !directionalGrid.paintedCellCount) return false;
 
-  const minZ = Math.min(0, foundation.elevationRangeMm.minMm);
-  const maxZ = Math.max(minZ + 1, foundation.elevationRangeMm.maxMm);
-  const zSpan = Math.max(1, maxZ - minZ);
+  const primarySpanMm = directionalGrid.primarySpanMm;
+  const minZ = directionalGrid.minZ;
+  const maxZ = directionalGrid.maxZ;
+  const zSpan = directionalGrid.zSpan;
   const paddingX = 18;
   const paddingY = 18;
-  const scale = Math.min((width - paddingX * 2) / boxWidth, (height - paddingY * 2) / zSpan);
+  const scale = Math.min((width - paddingX * 2) / primarySpanMm, (height - paddingY * 2) / zSpan);
   if (!Number.isFinite(scale) || scale <= 0) return false;
 
-  const originX = (width - boxWidth * scale) * 0.5;
+  const originX = (width - primarySpanMm * scale) * 0.5;
   const originY = (height - zSpan * scale) * 0.5;
-  const toCanvasX = (xMm) => originX + xMm * scale;
   const toCanvasY = (zMm) => originY + (maxZ - zMm) * scale;
 
   drawRenderPaneBackdrop(context, width, height);
@@ -1527,7 +1641,7 @@ function paintTopToBottomRenderPane(context, width, height, foundation) {
     const zeroY = toCanvasY(0);
     context.beginPath();
     context.moveTo(originX, zeroY);
-    context.lineTo(originX + boxWidth * scale, zeroY);
+    context.lineTo(originX + primarySpanMm * scale, zeroY);
     context.stroke();
     context.restore();
   }
@@ -1536,31 +1650,26 @@ function paintTopToBottomRenderPane(context, width, height, foundation) {
   context.strokeStyle = "rgba(20, 24, 28, 0.14)";
   context.setLineDash([6, 4]);
   context.lineWidth = 1;
-  context.strokeRect(originX, originY, boxWidth * scale, zSpan * scale);
+  context.strokeRect(originX, originY, primarySpanMm * scale, zSpan * scale);
   context.restore();
 
-  intersectingEntries.forEach((entry) => {
-    const spans = buildLocalGeometryProjectionSpans(entry.localGeometry, request.frame.widthMm, request.frame.heightMm);
-    if (!spans.length) return;
+  const paintCanvas = document.createElement("canvas");
+  paintCanvas.width = directionalGrid.columnCount;
+  paintCanvas.height = directionalGrid.rowCount;
+  const paintContext = paintCanvas.getContext("2d");
+  if (!paintContext) return false;
 
-    spans.forEach((span) => {
-      const x = toCanvasX(span.startMm);
-      const rectWidth = Math.max(1, (span.endMm - span.startMm) * scale);
-      const topY = toCanvasY(entry.topElevationMm);
-      const bottomY = toCanvasY(entry.baseElevationMm);
-      const rectHeight = Math.max(1, bottomY - topY);
-
-      context.save();
-      context.fillStyle = sanitizeColorValue(entry.fillColor, "#93c5fd");
-      context.globalAlpha = 0.9;
-      context.fillRect(x, topY, rectWidth, rectHeight);
-      context.globalAlpha = 1;
-      context.strokeStyle = "rgba(20, 24, 28, 0.24)";
-      context.lineWidth = 1;
-      context.strokeRect(x + 0.5, topY + 0.5, Math.max(0, rectWidth - 1), Math.max(0, rectHeight - 1));
-      context.restore();
-    });
+  buildDirectionalRenderGridRuns(directionalGrid.grid).forEach((run) => {
+    paintContext.save();
+    paintContext.fillStyle = run.color;
+    paintContext.fillRect(run.startColumn, run.rowIndex, run.endColumn - run.startColumn + 1, 1);
+    paintContext.restore();
   });
+
+  context.save();
+  context.imageSmoothingEnabled = false;
+  context.drawImage(paintCanvas, originX, originY, primarySpanMm * scale, zSpan * scale);
+  context.restore();
 
   return true;
 }
@@ -1575,8 +1684,11 @@ function paintImplementedRenderPane(canvasEl, foundation) {
   switch (foundation.request.direction) {
     case "plan":
       return paintPlanRenderPane(context, width, height, foundation);
+    case "bottomToTop":
+    case "leftToRight":
+    case "rightToLeft":
     case "topToBottom":
-      return paintTopToBottomRenderPane(context, width, height, foundation);
+      return paintDirectionalRenderPane(context, width, height, foundation);
     default:
       return false;
   }

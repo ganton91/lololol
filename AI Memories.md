@@ -506,6 +506,10 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `Top to Bottom` and `Plan` panes now paint real first-pass canvas output instead of only summary copy whenever an active `Rbox` has intersecting render-enabled geometry
   - the `Plan` painter currently draws clipped local geometry directly in the `Rbox` frame with the layer fill colors
   - the `Top to Bottom` painter currently draws a simplified projected x/z documentation view derived from the clipped local geometry and each layer's `baseElevationMm` / `heightMm`
-  - the other directions (`Bottom to Top`, `Left to Right`, `Right to Left`) intentionally remain on the Phase 1 summary fallback for now
   - export buttons are still intentionally disabled, because the canvas/export builder layer is not finished yet
-- The next implementation step should be to generalize the painter path for the remaining directions and then layer section-cut behavior on top of the same normalized render-request model.
+- The render workspace now also has a first real Phase 3 directional generalization pass:
+  - the non-plan panes now share one common directional painter instead of a one-off `Top to Bottom` implementation
+  - `Bottom to Top`, `Left to Right`, and `Right to Left` now paint real first-pass canvas output too, using the active direction's own local-primary axis, front boundary, and mirrored/non-mirrored horizontal mapping
+  - that shared directional painter currently resolves visibility in a simplified rasterized projection grid, choosing the nearest visible layer per projected column and z band before painting the result into the pane canvas
+  - `Plan` remains a separate painter, because it is not the same kind of output as the directional elevation panes
+- The next implementation step should be to layer real section-cut behavior and section-button-driven pane requests on top of the same normalized render-request model before export work is expanded further.

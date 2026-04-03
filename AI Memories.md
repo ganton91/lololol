@@ -351,6 +351,10 @@ Layer order controls draw order. The active layer receives new geometry when the
   - separate `Rbox` tabs (`Rbox 1`, `Rbox 2`, etc., or user-renamed equivalents) driven by the created render boxes
 - The initial rollout should prioritize UI structure, naming, tabs, and render-box management before the full final render engine behavior.
 - Future support for measurements and scenes is still expected, but they are not part of the first render-system rollout and should not block the initial `Renders` work.
+- The first-pass placement for global render controls is now:
+  - `Render Layers` should live in the lower area of the left panel as a global editor, not inside individual `Rbox` cards
+  - `Render Settings` should also live in the lower area of the left panel for now, instead of staying inside the general app `Settings`
+  - render-specific controls kept on the `Rbox` side should be limited to properties owned by the render itself, such as section-related `Rbox` properties
 
 #### Planned Render Model Direction
 

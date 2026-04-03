@@ -492,4 +492,7 @@ Layer order controls draw order. The active layer receives new geometry when the
   - each drawing group's inner layer stack also keeps extra bottom padding so the last layer-row insertion line has breathing room before the group edge
   - the modal now uses a single top headings row that shows only `Height`, `Start`, and `End`; the repeated per-drawing headings row and the old inner `Layer` heading row have both been removed to free up space
   - that single top headings row now keeps extra bottom margin so `Height / Start / End` does not sit too tightly against the first drawing card
+  - the `Height / Start / End` headings row now sits outside the scroll area as a frozen strip, while the modal body below it remains the only scrolling region
+  - `Apply` now commits both drawing order and per-drawing layer order from the modal draft, not just the numeric render fields
+  - the modal also now keeps dedicated UI memory for collapsed/open drawing groups and scroll position, and that memory is restored on reopen and included in the project workspace snapshot
 - The next implementation step should be to make the render workspace itself consume those committed `Render Box` records for initial placeholder outputs and deeper render behavior.

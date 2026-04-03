@@ -50,6 +50,7 @@ const addDrawingBtn = document.getElementById("addDrawingButton");
 const addRenderBtn = document.getElementById("addRenderButton");
 const layerFillInput = document.getElementById("layer-fill");
 const layerSettingsColumnHeadings = document.getElementById("layerSettingsColumnHeadings");
+const layerSettingsBody = document.getElementById("layerSettingsBody");
 const layerSettingsDrawingList = document.getElementById("layerSettingsDrawingList");
 const layerSettingsEmptyState = document.getElementById("layerSettingsEmptyState");
 const projectImportInput = document.getElementById("projectImportInput");
@@ -75,6 +76,10 @@ const DEFAULT_LAYER_RENDER = Object.freeze({
   baseElevationMm: 0,
   heightMm: 0,
   role: null,
+});
+const DEFAULT_LAYER_SETTINGS_UI_MEMORY = Object.freeze({
+  collapsedByDrawingId: Object.freeze({}),
+  scrollTop: 0,
 });
 const DEFAULT_SETTINGS = Object.freeze({
   displayUnit: "m",
@@ -164,6 +169,10 @@ const state = {
   settings: { ...DEFAULT_SETTINGS },
   settingsDraft: null,
   layerSettingsDraft: null,
+  layerSettingsUi: {
+    collapsedByDrawingId: {},
+    scrollTop: 0,
+  },
   projectFileName: DEFAULT_PROJECT_FILE_NAME,
   exportFallbackNoticeShown: false,
   camera: { x: 0, y: 0, zoom: 1 },
@@ -641,6 +650,36 @@ function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function sanitizeLayerSettingsScrollTop(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue <= 0) return 0;
+  return numericValue;
+}
+
+function cloneLayerSettingsUiMemory(memory = DEFAULT_LAYER_SETTINGS_UI_MEMORY, drawingIds = null) {
+  const validDrawingIds = new Set(
+    Array.isArray(drawingIds) ? drawingIds : Array.isArray(state.drawingsUi) ? state.drawingsUi.map((drawing) => drawing.id) : []
+  );
+  const collapsedByDrawingId = {};
+  if (isPlainObject(memory?.collapsedByDrawingId)) {
+    for (const [drawingId, collapsed] of Object.entries(memory.collapsedByDrawingId)) {
+      if (validDrawingIds.size && !validDrawingIds.has(drawingId)) continue;
+      collapsedByDrawingId[drawingId] = collapsed === true;
+    }
+  }
+  return {
+    collapsedByDrawingId,
+    scrollTop: sanitizeLayerSettingsScrollTop(memory?.scrollTop),
+  };
+}
+
+function normalizeImportedLayerSettingsUiMemory(memory, drawingIds) {
+  if (!isPlainObject(memory)) {
+    return cloneLayerSettingsUiMemory(DEFAULT_LAYER_SETTINGS_UI_MEMORY, drawingIds);
+  }
+  return cloneLayerSettingsUiMemory(memory, drawingIds);
+}
+
 function createProjectImportError(message) {
   const error = new Error(message);
   error.name = "ProjectImportError";
@@ -1074,6 +1113,7 @@ function createProjectFilePayload() {
       stripCellWidth: sanitizeProjectSizeControl(state.stripCellWidth, 1),
       activeWorkspaceTab: cloneActiveWorkspaceTab(state.activeWorkspaceTab, renderIds),
       layerSectionCollapsed: state.layerSectionCollapsed === true,
+      layerSettingsUi: cloneLayerSettingsUiMemory(state.layerSettingsUi, state.drawingsUi.map((drawing) => drawing.id)),
       settings: cloneSettings(state.settings),
       draftOrigin: sanitizeProjectPoint(state.draftOrigin, { x: 0, y: 0 }, true),
       camera: sanitizeProjectCamera(state.camera, { x: 0, y: 0, zoom: 1 }),
@@ -1288,6 +1328,7 @@ function normalizeImportedProjectFile(payload) {
   const renderIds = new Set(renders.map((render) => render.id));
   const draftAngle = normalizeImportedDraftAngleState(payload.draftAngle);
   const activeWorkspaceTab = cloneActiveWorkspaceTab(payload.workspace.activeWorkspaceTab, renderIds);
+  const layerSettingsUi = normalizeImportedLayerSettingsUiMemory(payload.workspace.layerSettingsUi, drawingsUi.map((drawing) => drawing.id));
 
   for (const drawing of drawingsUi) {
     if (!layers.some((layer) => layer.drawingId === drawing.id)) {
@@ -1342,6 +1383,7 @@ function normalizeImportedProjectFile(payload) {
       stripCellWidth: sanitizeProjectSizeControl(payload.workspace.stripCellWidth, 1),
       activeWorkspaceTab,
       layerSectionCollapsed: payload.workspace.layerSectionCollapsed === true,
+      layerSettingsUi,
       settings: cloneSettings(payload.workspace.settings),
       draftOrigin: sanitizeProjectPoint(payload.workspace.draftOrigin, { x: 0, y: 0 }, true),
       camera: sanitizeProjectCamera(payload.workspace.camera, { x: 0, y: 0, zoom: 1 }),
@@ -1394,6 +1436,10 @@ function resetProjectInteractionState() {
   state.squareBrushMemoryPoint = null;
   state.settingsDraft = null;
   state.layerSettingsDraft = null;
+  state.layerSettingsUi = {
+    collapsedByDrawingId: {},
+    scrollTop: 0,
+  };
   state.renderSectionCollapsed = false;
   state.editingDrawingId = null;
   state.editingDrawingNameDraft = "";
@@ -1434,6 +1480,10 @@ function applyImportedProject(normalizedProject, importedFileName = DEFAULT_PROJ
   state.activeWorkspaceTab = cloneActiveWorkspaceTab(normalizedProject.workspace.activeWorkspaceTab, new Set(state.renders.map((render) => render.id)));
   state.activeRenderId = null;
   state.settings = cloneSettings(normalizedProject.workspace.settings);
+  state.layerSettingsUi = cloneLayerSettingsUiMemory(
+    normalizedProject.workspace.layerSettingsUi,
+    normalizedProject.document.drawingsUi.map((drawing) => drawing.id)
+  );
   state.projectFileName = sanitizeProjectFileName(importedFileName, state.projectFileName);
   state.draftOrigin = { ...normalizedProject.workspace.draftOrigin };
   state.camera = { ...normalizedProject.workspace.camera };
@@ -1531,11 +1581,15 @@ function isLayerSettingsMenuOpen() {
 }
 
 function createLayerSettingsDraft() {
+  const layerSettingsUi = cloneLayerSettingsUiMemory(state.layerSettingsUi, state.drawingsUi.map((drawing) => drawing.id));
   return {
     drawings: state.drawingsUi.map((drawing) => ({
       drawingId: drawing.id,
       name: drawing.name,
-      collapsed: drawing.id !== state.activeDrawingId,
+      collapsed:
+        Object.prototype.hasOwnProperty.call(layerSettingsUi.collapsedByDrawingId, drawing.id)
+          ? layerSettingsUi.collapsedByDrawingId[drawing.id] === true
+          : drawing.id !== state.activeDrawingId,
       items: getLayersForDrawing(drawing.id).map((layer) => {
         const renderSettings = cloneLayerRenderSettings(layer.render);
         return {
@@ -1547,6 +1601,23 @@ function createLayerSettingsDraft() {
       }),
     })),
   };
+}
+
+function syncLayerSettingsUiMemoryFromDraft() {
+  const drawingIds = Array.isArray(state.layerSettingsDraft?.drawings)
+    ? state.layerSettingsDraft.drawings.map((drawing) => drawing.drawingId)
+    : state.drawingsUi.map((drawing) => drawing.id);
+  const nextMemory = cloneLayerSettingsUiMemory(state.layerSettingsUi, drawingIds);
+  if (Array.isArray(state.layerSettingsDraft?.drawings)) {
+    nextMemory.collapsedByDrawingId = {};
+    state.layerSettingsDraft.drawings.forEach((drawing) => {
+      nextMemory.collapsedByDrawingId[drawing.drawingId] = drawing.collapsed === true;
+    });
+  }
+  if (layerSettingsBody) {
+    nextMemory.scrollTop = sanitizeLayerSettingsScrollTop(layerSettingsBody.scrollTop);
+  }
+  state.layerSettingsUi = nextMemory;
 }
 
 function getLayerSettingsGroupStartMm(group) {
@@ -1740,19 +1811,29 @@ function beginLayerSettingsPointerDrag(event, row, dragInfo) {
   }
 }
 
-function renderLayerSettingsModal() {
+function renderLayerSettingsModal(options = {}) {
   if (!layerSettingsDrawingList || !layerSettingsEmptyState || !layerSettingsColumnHeadings) return;
 
   const draft = state.layerSettingsDraft;
   const displayUnitId = state.settings.displayUnit;
   const lengthStep = getLengthInputStep(displayUnitId);
+  const preservedScrollTop =
+    options.scrollTop !== undefined
+      ? sanitizeLayerSettingsScrollTop(options.scrollTop)
+      : layerSettingsBody
+        ? sanitizeLayerSettingsScrollTop(layerSettingsBody.scrollTop)
+        : sanitizeLayerSettingsScrollTop(state.layerSettingsUi?.scrollTop);
 
   layerSettingsDrawingList.innerHTML = "";
   layerSettingsColumnHeadings.classList.add("hidden");
 
   const drawings = Array.isArray(draft?.drawings) ? draft.drawings : [];
   layerSettingsEmptyState.classList.toggle("hidden", drawings.length > 0);
-  if (!drawings.length) return;
+  if (!drawings.length) {
+    if (layerSettingsBody) layerSettingsBody.scrollTop = 0;
+    state.layerSettingsUi.scrollTop = 0;
+    return;
+  }
   layerSettingsColumnHeadings.classList.remove("hidden");
 
   const activeDrag = state.layerSettingsPointerDrag;
@@ -1786,7 +1867,8 @@ function renderLayerSettingsModal() {
     toggleButton.setAttribute("aria-label", `${group.collapsed ? "Expand" : "Collapse"} ${group.name}`);
     toggleButton.addEventListener("click", () => {
       group.collapsed = !group.collapsed;
-      renderLayerSettingsModal();
+      syncLayerSettingsUiMemoryFromDraft();
+      renderLayerSettingsModal({ scrollTop: state.layerSettingsUi.scrollTop });
     });
     headerMain.appendChild(toggleButton);
 
@@ -1999,10 +2081,29 @@ function renderLayerSettingsModal() {
     groupEl.appendChild(layerList);
     layerSettingsDrawingList.appendChild(groupEl);
   }
+
+  if (layerSettingsBody) {
+    layerSettingsBody.scrollTop = preservedScrollTop;
+  }
+  state.layerSettingsUi.scrollTop = preservedScrollTop;
 }
 
 function applyLayerSettingsDraft() {
   if (!state.layerSettingsDraft) return;
+
+  syncLayerSettingsUiMemoryFromDraft();
+
+  const visualDrawingIds = (state.layerSettingsDraft.drawings || []).map((drawing) => drawing.drawingId);
+  if (visualDrawingIds.length) {
+    reorderDrawingsFromVisualOrder(visualDrawingIds);
+  }
+
+  for (const drawing of state.layerSettingsDraft.drawings || []) {
+    const visualLayerIds = (drawing.items || []).map((item) => item.layerId);
+    if (visualLayerIds.length) {
+      reorderLayersForDrawingFromVisualOrder(drawing.drawingId, visualLayerIds);
+    }
+  }
 
   const layerDrafts = new Map();
   for (const drawing of state.layerSettingsDraft.drawings || []) {
@@ -2083,14 +2184,18 @@ function openLayerSettingsModal() {
   closeSettingsMenu();
   closeExportFallbackMenu();
   state.layerSettingsDraft = createLayerSettingsDraft();
-  renderLayerSettingsModal();
   layerSettingsModal.classList.remove("hidden");
+  renderLayerSettingsModal({ scrollTop: state.layerSettingsUi.scrollTop });
+  if (layerSettingsBody) {
+    layerSettingsBody.scrollTop = sanitizeLayerSettingsScrollTop(state.layerSettingsUi.scrollTop);
+  }
   syncModalBackdropVisibility();
 }
 
 function closeLayerSettingsModal() {
   clearLayerSettingsPointerDrag(false);
   if (!layerSettingsModal) return;
+  syncLayerSettingsUiMemoryFromDraft();
   layerSettingsModal.classList.add("hidden");
   state.layerSettingsDraft = null;
   syncModalBackdropVisibility();

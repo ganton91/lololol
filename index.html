@@ -1036,6 +1036,11 @@
         margin-top: 2px;
       }
 
+      .layer-settings-headings-shell {
+        flex: 0 0 auto;
+        padding-right: 4px;
+      }
+
       .layer-settings-body {
         min-height: 0;
         overflow-y: auto;
@@ -2045,7 +2050,7 @@
       aria-labelledby="layerSettingsHeading"
     >
       <div class="tool-heading" id="layerSettingsHeading">Layer Settings</div>
-      <div class="layer-settings-body">
+      <div class="layer-settings-headings-shell">
         <div class="layer-settings-column-headings hidden" id="layerSettingsColumnHeadings">
           <span></span>
           <span></span>
@@ -2053,6 +2058,8 @@
           <span>Start</span>
           <span>End</span>
         </div>
+      </div>
+      <div class="layer-settings-body" id="layerSettingsBody">
         <div class="layer-settings-drawing-list" id="layerSettingsDrawingList"></div>
         <div class="layer-settings-empty hidden" id="layerSettingsEmptyState">No drawings or layers available.</div>
       </div>

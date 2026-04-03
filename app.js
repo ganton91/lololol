@@ -1401,9 +1401,6 @@ function drawRenderPaneBackdrop(context, width, height) {
   context.save();
   context.fillStyle = "rgba(255, 255, 255, 0.96)";
   context.fillRect(0, 0, width, height);
-  context.strokeStyle = "rgba(20, 24, 28, 0.12)";
-  context.lineWidth = 1;
-  context.strokeRect(0.5, 0.5, width - 1, height - 1);
   context.restore();
 }
 

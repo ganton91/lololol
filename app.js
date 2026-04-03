@@ -1361,6 +1361,227 @@ function setRenderPanePlaceholderContent(emptyEl, content) {
   });
 }
 
+function isRenderPanePainterImplemented(direction) {
+  return direction === "topToBottom" || direction === "plan";
+}
+
+function getRenderPaneCanvasContext(canvasEl) {
+  if (!canvasEl || !canvasEl.parentElement) return null;
+  const width = canvasEl.parentElement.clientWidth;
+  const height = canvasEl.parentElement.clientHeight;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+
+  const dpr = window.devicePixelRatio || 1;
+  const targetWidth = Math.max(1, Math.round(width * dpr));
+  const targetHeight = Math.max(1, Math.round(height * dpr));
+  if (canvasEl.width !== targetWidth || canvasEl.height !== targetHeight) {
+    canvasEl.width = targetWidth;
+    canvasEl.height = targetHeight;
+  }
+
+  const context = canvasEl.getContext("2d");
+  if (!context) return null;
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  context.clearRect(0, 0, width, height);
+  return { context, width, height };
+}
+
+function drawRenderPaneBackdrop(context, width, height) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.96)";
+  context.fillRect(0, 0, width, height);
+  context.strokeStyle = "rgba(20, 24, 28, 0.12)";
+  context.lineWidth = 1;
+  context.strokeRect(0.5, 0.5, width - 1, height - 1);
+  context.restore();
+}
+
+function buildLocalGeometryProjectionSpans(localGeometry, widthMm, heightMm, targetColumns = 320) {
+  if (!Array.isArray(localGeometry) || !localGeometry.length || widthMm <= 1e-6 || heightMm <= 1e-6) return [];
+
+  const maskCanvas = document.createElement("canvas");
+  const maskWidth = Math.max(64, Math.min(960, Math.round(targetColumns)));
+  const maskHeight = Math.max(64, Math.min(960, Math.round((heightMm / widthMm) * maskWidth)));
+  maskCanvas.width = maskWidth;
+  maskCanvas.height = maskHeight;
+  const maskContext = maskCanvas.getContext("2d");
+  if (!maskContext) return [];
+
+  const rasterGeometry = transformGeometry(localGeometry, (point) => ({
+    x: (point.x / widthMm) * Math.max(1, maskWidth - 1),
+    y: (point.y / heightMm) * Math.max(1, maskHeight - 1),
+  }));
+
+  maskContext.clearRect(0, 0, maskWidth, maskHeight);
+  maskContext.beginPath();
+  traceGeometryPath(maskContext, rasterGeometry);
+  maskContext.fillStyle = "#000";
+  maskContext.fill("evenodd");
+
+  const alpha = maskContext.getImageData(0, 0, maskWidth, maskHeight).data;
+  const spans = [];
+  let spanStart = -1;
+
+  for (let column = 0; column < maskWidth; column += 1) {
+    let occupied = false;
+    for (let row = 0; row < maskHeight; row += 1) {
+      if (alpha[(row * maskWidth + column) * 4 + 3] > 0) {
+        occupied = true;
+        break;
+      }
+    }
+
+    if (occupied && spanStart === -1) {
+      spanStart = column;
+      continue;
+    }
+
+    if (!occupied && spanStart !== -1) {
+      spans.push({
+        startMm: quantizeCoordinate((spanStart / maskWidth) * widthMm),
+        endMm: quantizeCoordinate((column / maskWidth) * widthMm),
+      });
+      spanStart = -1;
+    }
+  }
+
+  if (spanStart !== -1) {
+    spans.push({
+      startMm: quantizeCoordinate((spanStart / maskWidth) * widthMm),
+      endMm: quantizeCoordinate(widthMm),
+    });
+  }
+
+  return spans.filter((span) => span.endMm - span.startMm > 1e-6);
+}
+
+function paintPlanRenderPane(context, width, height, foundation) {
+  const { request, intersectingEntries } = foundation;
+  const boxWidth = request.frame.widthMm;
+  const boxHeight = request.frame.heightMm;
+  if (boxWidth <= 1e-6 || boxHeight <= 1e-6) return false;
+
+  const padding = 18;
+  const scale = Math.min((width - padding * 2) / boxWidth, (height - padding * 2) / boxHeight);
+  if (!Number.isFinite(scale) || scale <= 0) return false;
+
+  const offsetX = (width - boxWidth * scale) * 0.5;
+  const offsetY = (height - boxHeight * scale) * 0.5;
+  const toCanvasGeometry = (geometry) =>
+    transformGeometry(geometry, (point) => ({
+      x: offsetX + point.x * scale,
+      y: offsetY + point.y * scale,
+    }));
+
+  drawRenderPaneBackdrop(context, width, height);
+
+  context.save();
+  context.strokeStyle = "rgba(20, 24, 28, 0.14)";
+  context.setLineDash([6, 4]);
+  context.lineWidth = 1;
+  context.strokeRect(offsetX, offsetY, boxWidth * scale, boxHeight * scale);
+  context.restore();
+
+  intersectingEntries.forEach((entry) => {
+    const geometry = toCanvasGeometry(entry.localGeometry);
+    context.save();
+    context.beginPath();
+    traceGeometryPath(context, geometry);
+    context.fillStyle = sanitizeColorValue(entry.fillColor, "#93c5fd");
+    context.globalAlpha = 0.9;
+    context.fill("evenodd");
+    context.globalAlpha = 1;
+    context.strokeStyle = "rgba(20, 24, 28, 0.24)";
+    context.lineWidth = 1;
+    context.stroke();
+    context.restore();
+  });
+
+  return true;
+}
+
+function paintTopToBottomRenderPane(context, width, height, foundation) {
+  const { request, intersectingEntries } = foundation;
+  const boxWidth = request.frame.widthMm;
+  if (boxWidth <= 1e-6) return false;
+
+  const minZ = Math.min(0, foundation.elevationRangeMm.minMm);
+  const maxZ = Math.max(minZ + 1, foundation.elevationRangeMm.maxMm);
+  const zSpan = Math.max(1, maxZ - minZ);
+  const paddingX = 18;
+  const paddingY = 18;
+  const scale = Math.min((width - paddingX * 2) / boxWidth, (height - paddingY * 2) / zSpan);
+  if (!Number.isFinite(scale) || scale <= 0) return false;
+
+  const originX = (width - boxWidth * scale) * 0.5;
+  const originY = (height - zSpan * scale) * 0.5;
+  const toCanvasX = (xMm) => originX + xMm * scale;
+  const toCanvasY = (zMm) => originY + (maxZ - zMm) * scale;
+
+  drawRenderPaneBackdrop(context, width, height);
+
+  if (minZ <= 0 && maxZ >= 0) {
+    context.save();
+    context.strokeStyle = "rgba(20, 24, 28, 0.14)";
+    context.lineWidth = 1;
+    const zeroY = toCanvasY(0);
+    context.beginPath();
+    context.moveTo(originX, zeroY);
+    context.lineTo(originX + boxWidth * scale, zeroY);
+    context.stroke();
+    context.restore();
+  }
+
+  context.save();
+  context.strokeStyle = "rgba(20, 24, 28, 0.14)";
+  context.setLineDash([6, 4]);
+  context.lineWidth = 1;
+  context.strokeRect(originX, originY, boxWidth * scale, zSpan * scale);
+  context.restore();
+
+  intersectingEntries.forEach((entry) => {
+    const spans = buildLocalGeometryProjectionSpans(entry.localGeometry, request.frame.widthMm, request.frame.heightMm);
+    if (!spans.length) return;
+
+    spans.forEach((span) => {
+      const x = toCanvasX(span.startMm);
+      const rectWidth = Math.max(1, (span.endMm - span.startMm) * scale);
+      const topY = toCanvasY(entry.topElevationMm);
+      const bottomY = toCanvasY(entry.baseElevationMm);
+      const rectHeight = Math.max(1, bottomY - topY);
+
+      context.save();
+      context.fillStyle = sanitizeColorValue(entry.fillColor, "#93c5fd");
+      context.globalAlpha = 0.9;
+      context.fillRect(x, topY, rectWidth, rectHeight);
+      context.globalAlpha = 1;
+      context.strokeStyle = "rgba(20, 24, 28, 0.24)";
+      context.lineWidth = 1;
+      context.strokeRect(x + 0.5, topY + 0.5, Math.max(0, rectWidth - 1), Math.max(0, rectHeight - 1));
+      context.restore();
+    });
+  });
+
+  return true;
+}
+
+function paintImplementedRenderPane(canvasEl, foundation) {
+  if (!canvasEl || foundation?.status !== "ready") return false;
+
+  const canvasContext = getRenderPaneCanvasContext(canvasEl);
+  if (!canvasContext) return false;
+
+  const { context, width, height } = canvasContext;
+  switch (foundation.request.direction) {
+    case "plan":
+      return paintPlanRenderPane(context, width, height, foundation);
+    case "topToBottom":
+      return paintTopToBottomRenderPane(context, width, height, foundation);
+    default:
+      return false;
+  }
+}
+
 function renderRenderWorkspaceOutputs() {
   const activeRender = getActiveRenderRecord();
   const compiledScene = activeRender ? compileRenderScene() : null;
@@ -1375,6 +1596,7 @@ function renderRenderWorkspaceOutputs() {
 
     if (titleEl) titleEl.textContent = directionConfig.label;
     if (canvasEl) canvasEl.classList.add("hidden");
+    if (emptyEl) emptyEl.classList.remove("hidden");
     if (sectionRow) sectionRow.innerHTML = "";
 
     renderPaneSelectorButtons.forEach((button) => {
@@ -1392,6 +1614,15 @@ function renderRenderWorkspaceOutputs() {
     }
 
     const foundation = buildRenderPaneFoundation(activeRender, slotIndex, compiledScene);
+    const canPaint = isRenderPanePainterImplemented(direction) && foundation.status === "ready";
+    const painted = canPaint ? paintImplementedRenderPane(canvasEl, foundation) : false;
+
+    if (painted) {
+      if (canvasEl) canvasEl.classList.remove("hidden");
+      emptyEl.classList.add("hidden");
+      return;
+    }
+
     setRenderPanePlaceholderContent(emptyEl, buildRenderPanePlaceholderLines(foundation));
   });
 

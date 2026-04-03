@@ -1104,7 +1104,8 @@
         left: 8px;
         right: 8px;
         height: 2px;
-        background: color-mix(in srgb, var(--text) 8%, transparent);
+        background: color-mix(in srgb, var(--ui-text) 24%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-text) 8%, transparent);
         pointer-events: none;
         z-index: 1;
       }
@@ -1116,7 +1117,7 @@
 
       .layer-settings-drawing-group.drag-insert-after::after,
       .layer-settings-row.drag-insert-after::after {
-        bottom: -3px;
+        bottom: -6px;
       }
 
       .layer-settings-drawing-header {

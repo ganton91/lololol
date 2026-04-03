@@ -21,14 +21,21 @@ const settingsButton = document.getElementById("settingsButton");
 const exportButton = document.getElementById("exportButton");
 const importButton = document.getElementById("importButton");
 const layerSettingsButton = document.getElementById("layerSettingsButton");
+const renderSettingsButton = document.getElementById("renderSettingsButton");
 const settingsMenu = document.getElementById("settingsMenu");
 const exportFallbackMenu = document.getElementById("exportFallbackMenu");
 const layerSettingsModal = document.getElementById("layerSettingsModal");
+const renderSettingsModal = document.getElementById("renderSettingsModal");
 const settingsCloseButton = document.getElementById("settingsCloseButton");
 const settingsApplyButton = document.getElementById("settingsApplyButton");
 const exportFallbackCloseButton = document.getElementById("exportFallbackCloseButton");
 const layerSettingsCloseButton = document.getElementById("layerSettingsCloseButton");
 const layerSettingsApplyButton = document.getElementById("layerSettingsApplyButton");
+const renderSettingsCloseButton = document.getElementById("renderSettingsCloseButton");
+const renderSettingsApplyButton = document.getElementById("renderSettingsApplyButton");
+const renderDepthStrengthDecrease = document.getElementById("renderDepthStrengthDecrease");
+const renderDepthStrengthIncrease = document.getElementById("renderDepthStrengthIncrease");
+const renderDepthStrengthValue = document.getElementById("renderDepthStrengthValue");
 const settingsCellSizeInput = document.getElementById("settingsCellSizeInput");
 const settingsOutlineColorInput = document.getElementById("settingsOutlineColorInput");
 const settingsOutlineSwatch = document.getElementById("settingsOutlineSwatch");
@@ -71,6 +78,7 @@ const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-sett
 const settingsAlignSnapButtons = Array.from(document.querySelectorAll("[data-settings-align-snap]"));
 const settingsOutlineButtons = Array.from(document.querySelectorAll("[data-settings-outline-enabled]"));
 const settingsCornersButtons = Array.from(document.querySelectorAll("[data-settings-corners-enabled]"));
+const renderDepthModeButtons = Array.from(document.querySelectorAll("[data-render-depth-mode]"));
 
 const defaultOutlineStrokeColor = "#0f172a";
 const PROJECT_FILE_APP_ID = "millimetre";
@@ -88,6 +96,14 @@ const DEFAULT_LAYER_RENDER = Object.freeze({
 const DEFAULT_LAYER_SETTINGS_UI_MEMORY = Object.freeze({
   collapsedByDrawingId: Object.freeze({}),
   scrollTop: 0,
+});
+const DEFAULT_RENDER_DEPTH_EFFECT = Object.freeze({
+  enabled: true,
+  strength: 0.05,
+  mode: "shadow",
+});
+const DEFAULT_RENDER_SETTINGS = Object.freeze({
+  depthEffect: DEFAULT_RENDER_DEPTH_EFFECT,
 });
 const DEFAULT_SETTINGS = Object.freeze({
   displayUnit: "m",
@@ -177,6 +193,10 @@ const state = {
   draftOrigin: { x: 0, y: 0 },
   settings: { ...DEFAULT_SETTINGS },
   settingsDraft: null,
+  renderSettings: {
+    depthEffect: { ...DEFAULT_RENDER_DEPTH_EFFECT },
+  },
+  renderSettingsDraft: null,
   layerSettingsDraft: null,
   layerSettingsUi: {
     collapsedByDrawingId: {},
@@ -310,6 +330,32 @@ function sanitizeAlignSnapValue(value, fallback = DEFAULT_SETTINGS.alignSnap) {
   if (value === "off" || value === null || value === false) return "off";
   const numericValue = Number(value);
   return numericValue === 15 || numericValue === 30 || numericValue === 45 || numericValue === 90 ? numericValue : fallback;
+}
+
+function sanitizeRenderDepthMode(mode, fallback = DEFAULT_RENDER_DEPTH_EFFECT.mode) {
+  return mode === "shadow" || mode === "fog" || mode === "off" ? mode : fallback;
+}
+
+function sanitizeRenderDepthStrength(value, fallback = DEFAULT_RENDER_DEPTH_EFFECT.strength) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return fallback;
+  return Math.max(0.01, Math.min(100, Math.round(numericValue * 100) / 100));
+}
+
+function cloneRenderDepthEffect(effect = null) {
+  const fallbackMode = effect?.enabled === false ? "off" : DEFAULT_RENDER_DEPTH_EFFECT.mode;
+  const mode = sanitizeRenderDepthMode(effect?.mode, fallbackMode);
+  return {
+    enabled: mode !== "off",
+    mode,
+    strength: sanitizeRenderDepthStrength(effect?.strength, DEFAULT_RENDER_DEPTH_EFFECT.strength),
+  };
+}
+
+function cloneRenderSettings(settings = state.renderSettings) {
+  return {
+    depthEffect: cloneRenderDepthEffect(settings?.depthEffect),
+  };
 }
 
 function cloneSettings(settings = state.settings) {
@@ -652,6 +698,28 @@ function syncSettingsMenu() {
 
   if (settingsOutlineSwatch) {
     settingsOutlineSwatch.style.setProperty("--settings-swatch-color", sanitizeColorValue(state.settingsDraft.outlineColor, DEFAULT_SETTINGS.outlineColor));
+  }
+}
+
+function isRenderSettingsMenuOpen() {
+  return !!renderSettingsModal && !renderSettingsModal.classList.contains("hidden");
+}
+
+function syncRenderSettingsMenu() {
+  if (!state.renderSettingsDraft || !renderSettingsModal) return;
+
+  for (const button of renderDepthModeButtons) {
+    const active = button.dataset.renderDepthMode === state.renderSettingsDraft.depthEffect.mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+
+  const depthControlsEnabled = state.renderSettingsDraft.depthEffect.enabled;
+  if (renderDepthStrengthDecrease) renderDepthStrengthDecrease.disabled = !depthControlsEnabled;
+  if (renderDepthStrengthIncrease) renderDepthStrengthIncrease.disabled = !depthControlsEnabled;
+  if (renderDepthStrengthValue) {
+    renderDepthStrengthValue.disabled = !depthControlsEnabled;
+    renderDepthStrengthValue.value = state.renderSettingsDraft.depthEffect.strength.toFixed(2);
   }
 }
 
@@ -1404,6 +1472,38 @@ function drawRenderPaneBackdrop(context, width, height) {
   context.restore();
 }
 
+function hexToRgbChannels(color) {
+  const normalized = sanitizeColorValue(color, "#000000");
+  return {
+    r: Number.parseInt(normalized.slice(1, 3), 16),
+    g: Number.parseInt(normalized.slice(3, 5), 16),
+    b: Number.parseInt(normalized.slice(5, 7), 16),
+  };
+}
+
+function rgbChannelsToHex(r, g, b) {
+  const toHex = (value) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function applyRenderDepthShading(color, depthOffsetSteps, renderSettings = state.renderSettings) {
+  const depthEffect = cloneRenderDepthEffect(renderSettings?.depthEffect);
+  const baseColor = sanitizeColorValue(color, "#93c5fd");
+  if (!depthEffect.enabled || depthEffect.mode === "off") return baseColor;
+  if (!Number.isFinite(depthOffsetSteps) || depthOffsetSteps <= 0) return baseColor;
+
+  const baseRgb = hexToRgbChannels(baseColor);
+  const overlayRgb = depthEffect.mode === "fog" ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
+  const stepAlpha = Math.max(0, depthEffect.strength) / 100;
+  const alpha = Math.max(0, Math.min(0.95, depthOffsetSteps * stepAlpha));
+  const mixChannel = (base, overlay) => Math.round(base * (1 - alpha) + overlay * alpha);
+  return rgbChannelsToHex(
+    mixChannel(baseRgb.r, overlayRgb.r),
+    mixChannel(baseRgb.g, overlayRgb.g),
+    mixChannel(baseRgb.b, overlayRgb.b)
+  );
+}
+
 function getDirectionalAxisSpanMm(frame, axisId) {
   if (!frame) return 0;
   return axisId === "localY" ? frame.heightMm : frame.widthMm;
@@ -1460,6 +1560,7 @@ function buildDirectionalProjectionColumns(localGeometry, request, targetColumns
     if (nearestRow === -1) continue;
     const projectedColumnIndex = directionConfig?.mirrorPrimary ? maskWidth - 1 - column : column;
     columns[projectedColumnIndex] = {
+      depthStep: nearestRow,
       depthMm: quantizeCoordinate((nearestRow / Math.max(1, maskHeight - 1)) * depthSpanMm),
     };
   }
@@ -1497,15 +1598,16 @@ function buildDirectionalRenderGrid(foundation, targetColumns = 320) {
 
       for (let rowIndex = rowStart; rowIndex <= rowEnd; rowIndex += 1) {
         const existing = grid[rowIndex][columnIndex];
-        const depthDelta = existing ? column.depthMm - existing.depthMm : 0;
+        const depthDelta = existing ? column.depthStep - existing.depthStep : 0;
         const isCloser =
           !existing ||
-          (directionConfig?.frontBoundary === "min" ? depthDelta < -1e-6 : depthDelta > 1e-6) ||
-          (Math.abs(depthDelta) <= 1e-6 && entry.stackOrderIndex >= existing.stackOrderIndex);
+          (directionConfig?.frontBoundary === "min" ? depthDelta < 0 : depthDelta > 0) ||
+          (depthDelta === 0 && entry.stackOrderIndex >= existing.stackOrderIndex);
         if (!isCloser) continue;
         if (!existing) paintedCellCount += 1;
         grid[rowIndex][columnIndex] = {
           color: fillColor,
+          depthStep: column.depthStep,
           depthMm: column.depthMm,
           stackOrderIndex: entry.stackOrderIndex,
         };
@@ -1525,40 +1627,58 @@ function buildDirectionalRenderGrid(foundation, targetColumns = 320) {
   };
 }
 
-function buildDirectionalRenderGridRuns(grid) {
+function getDirectionalGridNearestVisibleDepthStep(grid, frontBoundary = "min") {
+  let nearestDepthStep = frontBoundary === "min" ? Infinity : -Infinity;
+  if (!Array.isArray(grid) || !grid.length) return 0;
+
+  grid.forEach((row) => {
+    row.forEach((cell) => {
+      if (!cell || !Number.isFinite(cell.depthStep)) return;
+      if (frontBoundary === "min") {
+        if (cell.depthStep < nearestDepthStep) nearestDepthStep = cell.depthStep;
+      } else if (cell.depthStep > nearestDepthStep) {
+        nearestDepthStep = cell.depthStep;
+      }
+    });
+  });
+
+  return Number.isFinite(nearestDepthStep) ? nearestDepthStep : 0;
+}
+
+function buildDirectionalRenderGridRuns(grid, styleResolver = (cell) => cell?.color || null) {
   const runs = [];
   if (!Array.isArray(grid) || !grid.length) return runs;
 
   grid.forEach((row, rowIndex) => {
     let runStart = -1;
-    let runColor = null;
+    let runStyle = null;
 
     for (let columnIndex = 0; columnIndex <= row.length; columnIndex += 1) {
       const cell = columnIndex < row.length ? row[columnIndex] : null;
-      const cellColor = cell?.color || null;
+      const cellStyle = cell ? styleResolver(cell) : null;
 
-      if (runStart === -1 && cellColor) {
+      if (runStart === -1 && cellStyle) {
         runStart = columnIndex;
-        runColor = cellColor;
+        runStyle = cellStyle;
         continue;
       }
 
-      if (runStart !== -1 && cellColor === runColor) continue;
+      if (runStart !== -1 && cellStyle === runStyle) continue;
 
       if (runStart !== -1) {
         runs.push({
           rowIndex,
           startColumn: runStart,
           endColumn: columnIndex - 1,
-          color: runColor,
+          color: runStyle,
         });
         runStart = -1;
-        runColor = null;
+        runStyle = null;
       }
 
-      if (runStart === -1 && cellColor) {
+      if (runStart === -1 && cellStyle) {
         runStart = columnIndex;
-        runColor = cellColor;
+        runStyle = cellStyle;
       }
     }
   });
@@ -1599,9 +1719,7 @@ function paintPlanRenderPane(context, width, height, foundation) {
     context.beginPath();
     traceGeometryPath(context, geometry);
     context.fillStyle = sanitizeColorValue(entry.fillColor, "#93c5fd");
-    context.globalAlpha = 0.9;
     context.fill("evenodd");
-    context.globalAlpha = 1;
     context.strokeStyle = "rgba(20, 24, 28, 0.24)";
     context.lineWidth = 1;
     context.stroke();
@@ -1650,13 +1768,24 @@ function paintDirectionalRenderPane(context, width, height, foundation) {
   context.strokeRect(originX, originY, primarySpanMm * scale, zSpan * scale);
   context.restore();
 
+  const nearestVisibleDepthStep = getDirectionalGridNearestVisibleDepthStep(
+    directionalGrid.grid,
+    request.directionConfig?.frontBoundary
+  );
   const paintCanvas = document.createElement("canvas");
   paintCanvas.width = directionalGrid.columnCount;
   paintCanvas.height = directionalGrid.rowCount;
   const paintContext = paintCanvas.getContext("2d");
   if (!paintContext) return false;
 
-  buildDirectionalRenderGridRuns(directionalGrid.grid).forEach((run) => {
+  buildDirectionalRenderGridRuns(directionalGrid.grid, (cell) => {
+    if (!cell) return null;
+    const depthOffset =
+      request.directionConfig?.frontBoundary === "min"
+        ? cell.depthStep - nearestVisibleDepthStep
+        : nearestVisibleDepthStep - cell.depthStep;
+    return applyRenderDepthShading(cell.color, depthOffset, state.renderSettings);
+  }).forEach((run) => {
     paintContext.save();
     paintContext.fillStyle = run.color;
     paintContext.fillRect(run.startColumn, run.rowIndex, run.endColumn - run.startColumn + 1, 1);
@@ -1844,6 +1973,7 @@ function createProjectFilePayload() {
       activeWorkspaceTab: cloneActiveWorkspaceTab(state.activeWorkspaceTab, renderIds),
       layerSectionCollapsed: state.layerSectionCollapsed === true,
       layerSettingsUi: cloneLayerSettingsUiMemory(state.layerSettingsUi, state.drawingsUi.map((drawing) => drawing.id)),
+      renderSettings: cloneRenderSettings(state.renderSettings),
       settings: cloneSettings(state.settings),
       draftOrigin: sanitizeProjectPoint(state.draftOrigin, { x: 0, y: 0 }, true),
       camera: sanitizeProjectCamera(state.camera, { x: 0, y: 0, zoom: 1 }),
@@ -2114,6 +2244,7 @@ function normalizeImportedProjectFile(payload) {
       activeWorkspaceTab,
       layerSectionCollapsed: payload.workspace.layerSectionCollapsed === true,
       layerSettingsUi,
+      renderSettings: cloneRenderSettings(payload.workspace.renderSettings),
       settings: cloneSettings(payload.workspace.settings),
       draftOrigin: sanitizeProjectPoint(payload.workspace.draftOrigin, { x: 0, y: 0 }, true),
       camera: sanitizeProjectCamera(payload.workspace.camera, { x: 0, y: 0, zoom: 1 }),
@@ -2145,6 +2276,7 @@ function resetProjectInteractionState() {
   cancelSelectionInteraction();
   closeExportFallbackMenu();
   closeLayerSettingsModal();
+  closeRenderSettingsMenu();
   state.panning = false;
   state.draggingDraftOrigin = false;
   cancelDraftAlignDrag();
@@ -2165,6 +2297,7 @@ function resetProjectInteractionState() {
   state.draftAlignCurrentSnap = null;
   state.squareBrushMemoryPoint = null;
   state.settingsDraft = null;
+  state.renderSettingsDraft = null;
   state.layerSettingsDraft = null;
   state.layerSettingsUi = {
     collapsedByDrawingId: {},
@@ -2211,6 +2344,7 @@ function applyImportedProject(normalizedProject, importedFileName = DEFAULT_PROJ
   state.activeWorkspaceTab = cloneActiveWorkspaceTab(normalizedProject.workspace.activeWorkspaceTab, new Set(state.renders.map((render) => render.id)));
   state.activeRenderId = null;
   state.settings = cloneSettings(normalizedProject.workspace.settings);
+  state.renderSettings = cloneRenderSettings(normalizedProject.workspace.renderSettings);
   state.layerSettingsUi = cloneLayerSettingsUiMemory(
     normalizedProject.workspace.layerSettingsUi,
     normalizedProject.document.drawingsUi.map((drawing) => drawing.id)
@@ -2867,7 +3001,8 @@ function isAnyModalOpen() {
   return (
     (!!settingsMenu && !settingsMenu.classList.contains("hidden")) ||
     (!!exportFallbackMenu && !exportFallbackMenu.classList.contains("hidden")) ||
-    (!!layerSettingsModal && !layerSettingsModal.classList.contains("hidden"))
+    (!!layerSettingsModal && !layerSettingsModal.classList.contains("hidden")) ||
+    (!!renderSettingsModal && !renderSettingsModal.classList.contains("hidden"))
   );
 }
 
@@ -2881,6 +3016,7 @@ function openSettingsMenu() {
 
   closeExportFallbackMenu();
   closeLayerSettingsModal();
+  closeRenderSettingsMenu();
   state.settingsDraft = cloneSettings(state.settings);
   syncSettingsMenu();
   settingsMenu.classList.remove("hidden");
@@ -2899,6 +3035,7 @@ function openExportFallbackMenu() {
   if (!exportFallbackMenu) return;
   closeSettingsMenu();
   closeLayerSettingsModal();
+  closeRenderSettingsMenu();
   exportFallbackMenu.classList.remove("hidden");
   syncModalBackdropVisibility();
 }
@@ -2914,6 +3051,7 @@ function openLayerSettingsModal() {
 
   closeSettingsMenu();
   closeExportFallbackMenu();
+  closeRenderSettingsMenu();
   state.layerSettingsDraft = createLayerSettingsDraft();
   layerSettingsModal.classList.remove("hidden");
   renderLayerSettingsModal({ scrollTop: state.layerSettingsUi.scrollTop });
@@ -2932,6 +3070,26 @@ function closeLayerSettingsModal() {
   syncModalBackdropVisibility();
 }
 
+function openRenderSettingsMenu() {
+  if (!renderSettingsModal) return;
+
+  closeSettingsMenu();
+  closeExportFallbackMenu();
+  closeLayerSettingsModal();
+  state.renderSettingsDraft = cloneRenderSettings(state.renderSettings);
+  syncRenderSettingsMenu();
+  renderSettingsModal.classList.remove("hidden");
+  syncModalBackdropVisibility();
+}
+
+function closeRenderSettingsMenu() {
+  if (!renderSettingsModal) return;
+
+  renderSettingsModal.classList.add("hidden");
+  state.renderSettingsDraft = null;
+  syncModalBackdropVisibility();
+}
+
 function applySettingsDraft() {
   if (!state.settingsDraft) return;
 
@@ -2945,6 +3103,23 @@ function applySettingsDraft() {
   refreshPointerDerivedState();
   updateGridStatus();
   updateWorkplaneStatus();
+  render();
+}
+
+function applyRenderSettingsDraft() {
+  if (!state.renderSettingsDraft) return;
+
+  if (renderDepthStrengthValue && renderDepthStrengthValue.value.trim() !== "") {
+    state.renderSettingsDraft.depthEffect.strength = sanitizeRenderDepthStrength(
+      renderDepthStrengthValue.value,
+      state.renderSettingsDraft.depthEffect.strength
+    );
+  }
+
+  state.renderSettings = cloneRenderSettings(state.renderSettingsDraft);
+  state.renderSettingsDraft = cloneRenderSettings(state.renderSettings);
+  syncRenderSettingsMenu();
+  renderWorkspaceUi();
   render();
 }
 
@@ -7847,6 +8022,17 @@ if (layerSettingsButton) {
   });
 }
 
+if (renderSettingsButton) {
+  renderSettingsButton.addEventListener("click", () => {
+    if (isRenderSettingsMenuOpen()) {
+      closeRenderSettingsMenu();
+      return;
+    }
+
+    openRenderSettingsMenu();
+  });
+}
+
 if (importButton) {
   importButton.addEventListener("click", () => {
     if (!projectImportInput) {
@@ -7899,11 +8085,25 @@ if (layerSettingsApplyButton) {
   });
 }
 
+if (renderSettingsCloseButton) {
+  renderSettingsCloseButton.addEventListener("click", () => {
+    closeRenderSettingsMenu();
+  });
+}
+
+if (renderSettingsApplyButton) {
+  renderSettingsApplyButton.addEventListener("click", () => {
+    applyRenderSettingsDraft();
+    closeRenderSettingsMenu();
+  });
+}
+
 if (modalBackdrop) {
   modalBackdrop.addEventListener("click", () => {
     closeSettingsMenu();
     closeExportFallbackMenu();
     closeLayerSettingsModal();
+    closeRenderSettingsMenu();
   });
 }
 
@@ -7978,6 +8178,58 @@ if (settingsOutlineColorInput) {
     if (!state.settingsDraft) return;
     state.settingsDraft.outlineColor = sanitizeColorValue(event.target.value, state.settingsDraft.outlineColor);
     syncSettingsMenu();
+  });
+}
+
+for (const button of renderDepthModeButtons) {
+  button.addEventListener("click", () => {
+    if (!state.renderSettingsDraft) return;
+    const nextMode = sanitizeRenderDepthMode(button.dataset.renderDepthMode, state.renderSettingsDraft.depthEffect.mode);
+    state.renderSettingsDraft.depthEffect.mode = nextMode;
+    state.renderSettingsDraft.depthEffect.enabled = nextMode !== "off";
+    syncRenderSettingsMenu();
+  });
+}
+
+if (renderDepthStrengthDecrease) {
+  renderDepthStrengthDecrease.addEventListener("click", () => {
+    if (!state.renderSettingsDraft || !state.renderSettingsDraft.depthEffect.enabled) return;
+    state.renderSettingsDraft.depthEffect.strength = sanitizeRenderDepthStrength(
+      state.renderSettingsDraft.depthEffect.strength - 0.01,
+      state.renderSettingsDraft.depthEffect.strength
+    );
+    syncRenderSettingsMenu();
+  });
+}
+
+if (renderDepthStrengthIncrease) {
+  renderDepthStrengthIncrease.addEventListener("click", () => {
+    if (!state.renderSettingsDraft || !state.renderSettingsDraft.depthEffect.enabled) return;
+    state.renderSettingsDraft.depthEffect.strength = sanitizeRenderDepthStrength(
+      state.renderSettingsDraft.depthEffect.strength + 0.01,
+      state.renderSettingsDraft.depthEffect.strength
+    );
+    syncRenderSettingsMenu();
+  });
+}
+
+if (renderDepthStrengthValue) {
+  renderDepthStrengthValue.addEventListener("input", () => {
+    if (!state.renderSettingsDraft || !state.renderSettingsDraft.depthEffect.enabled) return;
+    if (renderDepthStrengthValue.value.trim() === "") return;
+    state.renderSettingsDraft.depthEffect.strength = sanitizeRenderDepthStrength(
+      renderDepthStrengthValue.value,
+      state.renderSettingsDraft.depthEffect.strength
+    );
+  });
+
+  renderDepthStrengthValue.addEventListener("change", () => {
+    if (!state.renderSettingsDraft || !state.renderSettingsDraft.depthEffect.enabled) return;
+    state.renderSettingsDraft.depthEffect.strength = sanitizeRenderDepthStrength(
+      renderDepthStrengthValue.value,
+      state.renderSettingsDraft.depthEffect.strength
+    );
+    syncRenderSettingsMenu();
   });
 }
 
@@ -8211,6 +8463,14 @@ window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       e.preventDefault();
       closeSettingsMenu();
+    }
+    return;
+  }
+
+  if (isRenderSettingsMenuOpen()) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeRenderSettingsMenu();
     }
     return;
   }

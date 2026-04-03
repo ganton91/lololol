@@ -512,9 +512,13 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `Bottom to Top`, `Left to Right`, and `Right to Left` now paint real first-pass canvas output too, using the active direction's own local-primary axis, front boundary, and mirrored/non-mirrored horizontal mapping
   - that shared directional painter currently resolves visibility in a simplified rasterized projection grid, choosing the nearest visible layer per projected column and z band before painting the result into the pane canvas
   - `Plan` remains a separate painter, because it is not the same kind of output as the directional elevation panes
+- The render workspace now also has a first real depth-aware shading pass:
+  - the left-panel `Render Settings` button is no longer just a placeholder; it now opens a modal with reference-like `Depth Effect` controls (`Shadow`, `Fog`, `Off`) plus `Depth Strength`
+  - those render settings now persist in the project workspace snapshot/import-export path instead of living only in transient UI state
+  - the directional render painter now shades visible fills by depth offset relative to the nearest visible depth, using the active render-settings mode and strength rather than a hardcoded look
+  - `Plan` still stays on its simpler fill path for now; the shared plan/documentation unification is still a later step
 - The next locked implementation order for the render pipeline is now:
-  1. add depth-aware shading on top of the current directional visibility/grid path
-  2. add global outlines that recognize silhouettes and depth transitions instead of simple flat strokes
-  3. add the more advanced outline/section-aware behavior after that foundation is in place
-  4. later move `Plan` onto the same shared documentation/render path too, instead of keeping it as a permanently separate painter, once the stronger `Z`/volume solver is ready
-  5. after the render/documentation logic is visually and structurally stable, add a higher-resolution offscreen raster backing path for on-screen panes too, more like the `Reference` view system, so later zoom/pan can behave like a raster image editor without making us lock the wrong render path too early
+  1. add global outlines that recognize silhouettes and depth transitions instead of simple flat strokes
+  2. add the more advanced outline/section-aware behavior after that foundation is in place
+  3. later move `Plan` onto the same shared documentation/render path too, instead of keeping it as a permanently separate painter, once the stronger `Z`/volume solver is ready
+  4. after the render/documentation logic is visually and structurally stable, add a higher-resolution offscreen raster backing path for on-screen panes too, more like the `Reference` view system, so later zoom/pan can behave like a raster image editor without making us lock the wrong render path too early

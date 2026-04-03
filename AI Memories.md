@@ -490,4 +490,6 @@ Layer order controls draw order. The active layer receives new geometry when the
   - that modal reorder path now mirrors the left panel more literally, with separate drawing and layer indicator updaters using the same `toIndex === fromIndex` no-op suppression pattern
   - the modal scroll body now keeps a slightly larger bottom buffer so the final drawing-level `drag-insert-after` line stays visible above the action buttons instead of clipping at the very bottom edge
   - each drawing group's inner layer stack also keeps extra bottom padding so the last layer-row insertion line has breathing room before the group edge
+  - the modal now uses a single top headings row that shows only `Height`, `Start`, and `End`; the repeated per-drawing headings row and the old inner `Layer` heading row have both been removed to free up space
+  - that single top headings row now keeps extra bottom margin so `Height / Start / End` does not sit too tightly against the first drawing card
 - The next implementation step should be to make the render workspace itself consume those committed `Render Box` records for initial placeholder outputs and deeper render behavior.

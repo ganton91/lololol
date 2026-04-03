@@ -1753,6 +1753,7 @@ function renderLayerSettingsModal() {
   const drawings = Array.isArray(draft?.drawings) ? draft.drawings : [];
   layerSettingsEmptyState.classList.toggle("hidden", drawings.length > 0);
   if (!drawings.length) return;
+  layerSettingsColumnHeadings.classList.remove("hidden");
 
   const activeDrag = state.layerSettingsPointerDrag;
   for (const group of drawings) {
@@ -1873,15 +1874,6 @@ function renderLayerSettingsModal() {
 
     const layerList = document.createElement("div");
     layerList.className = "layer-settings-drawing-layers";
-
-    const innerHeadings = document.createElement("div");
-    innerHeadings.className = "layer-settings-column-headings layer-settings-column-headings-inner";
-    ["", "Layer", "Height", "Start", "End"].forEach((labelText) => {
-      const label = document.createElement("span");
-      label.textContent = labelText;
-      innerHeadings.appendChild(label);
-    });
-    layerList.appendChild(innerHeadings);
 
     group.items.forEach((item) => {
       const row = document.createElement("div");

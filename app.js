@@ -81,6 +81,7 @@ const settingsCornersButtons = Array.from(document.querySelectorAll("[data-setti
 const renderDepthModeButtons = Array.from(document.querySelectorAll("[data-render-depth-mode]"));
 
 const defaultOutlineStrokeColor = "#0f172a";
+const hiddenOutlineVertexColor = "#9ca3af";
 const PROJECT_FILE_APP_ID = "millimetre";
 const PROJECT_FILE_VERSION = 1;
 const DEFAULT_PROJECT_FILE_NAME = "millimetre-project.json";
@@ -1956,6 +1957,7 @@ function createProjectFilePayload() {
         id: shape.id,
         layerId: shape.layerId,
         geometry: deepCopyGeometry(shape.geometry),
+        vertexOutlineEligibility: deepCopyVertexOutlineEligibility(shape.vertexOutlineEligibility),
       })),
       renders: state.renders.map((render) => cloneRenderRecord(render)),
       activeDrawingId: state.activeDrawingId,
@@ -2120,7 +2122,9 @@ function normalizeImportedShapeRecords(shapes, layerIds) {
       throw createProjectImportError("Unsupported project file: shape references a missing layer.");
     }
 
-    const shapeRecord = createShapeRecord(layerId, shape.geometry, id);
+    const shapeRecord = createShapeRecord(layerId, shape.geometry, id, {
+      vertexOutlineEligibility: shape.vertexOutlineEligibility,
+    });
     if (!shapeRecord) {
       throw createProjectImportError("Unsupported project file: shape geometry is invalid.");
     }
@@ -4210,6 +4214,76 @@ function deepCopyGeometry(geometry) {
   return geometry.map((polygon) => polygon.map((ring) => ring.map((point) => [point[0], point[1]])));
 }
 
+function deepCopyVertexOutlineEligibility(vertexOutlineEligibility) {
+  return Array.isArray(vertexOutlineEligibility)
+    ? vertexOutlineEligibility.map((polygon) =>
+        Array.isArray(polygon) ? polygon.map((ring) => (Array.isArray(ring) ? ring.map((value) => value !== false) : [])) : []
+      )
+    : [];
+}
+
+function createUniformVertexOutlineEligibility(geometry, outlineEligible = true) {
+  return geometry.map((polygon) => polygon.map((ring) => ring.map(() => outlineEligible !== false)));
+}
+
+function normalizeVertexOutlineEligibility(geometry, vertexOutlineEligibility = null, fallback = true) {
+  return geometry.map((polygon, polygonIndex) =>
+    polygon.map((ring, ringIndex) =>
+      ring.map((_, pointIndex) => {
+        const value = vertexOutlineEligibility?.[polygonIndex]?.[ringIndex]?.[pointIndex];
+        if (value === false) return false;
+        if (value === true) return true;
+        return fallback !== false;
+      })
+    )
+  );
+}
+
+function getVertexOutlineEligibilityAt(vertexOutlineEligibility, polygonIndex, ringIndex, pointIndex, fallback = true) {
+  const value = vertexOutlineEligibility?.[polygonIndex]?.[ringIndex]?.[pointIndex];
+  if (value === false) return false;
+  if (value === true) return true;
+  return fallback !== false;
+}
+
+function getOutlineVertexKey(point) {
+  return `${scaleCoordinateToClipperInt(point[0])}:${scaleCoordinateToClipperInt(point[1])}`;
+}
+
+function collectIneligibleVertexKeys(sourceShapeRecords = []) {
+  const keys = new Set();
+  if (!Array.isArray(sourceShapeRecords)) return keys;
+
+  sourceShapeRecords.forEach((shapeRecord) => {
+    if (!shapeRecord?.geometry) return;
+    forEachRing(shapeRecord.geometry, (ring, polygonIndex, ringIndex) => {
+      ring.forEach((point, pointIndex) => {
+        if (getVertexOutlineEligibilityAt(shapeRecord.vertexOutlineEligibility, polygonIndex, ringIndex, pointIndex, true)) return;
+        keys.add(getOutlineVertexKey(point));
+      });
+    });
+  });
+
+  return keys;
+}
+
+function createVertexOutlineEligibilityFromSources(geometry, sourceShapeRecords = null, fallback = true) {
+  if (!Array.isArray(sourceShapeRecords) || !sourceShapeRecords.length) {
+    return createUniformVertexOutlineEligibility(geometry, fallback);
+  }
+
+  const ineligibleKeys = collectIneligibleVertexKeys(sourceShapeRecords);
+  if (!ineligibleKeys.size) return createUniformVertexOutlineEligibility(geometry, fallback);
+
+  return geometry.map((polygon) =>
+    polygon.map((ring) => ring.map((point) => !ineligibleKeys.has(getOutlineVertexKey(point))))
+  );
+}
+
+function getDefaultOutlineEligibilityForShapeType(shapeType = state.shapeType) {
+  return shapeType !== "ellipse";
+}
+
 function quantizeCoordinate(value) {
   return Math.round(value * geometryPrecisionFactor) / geometryPrecisionFactor;
 }
@@ -4579,24 +4653,45 @@ function traceGeometryPath(targetCtx, geometry) {
   });
 }
 
-function drawGeometryVertices(targetCtx, geometry, radius = vertexMarkerRadiusPx / state.camera.zoom) {
-  forEachRing(geometry, (ring) => {
-    for (const point of ring) {
+function drawGeometryVertices(
+  targetCtx,
+  geometry,
+  radius = vertexMarkerRadiusPx / state.camera.zoom,
+  vertexOutlineEligibility = null,
+  eligibilityFilter = null
+) {
+  forEachRing(geometry, (ring, polygonIndex, ringIndex) => {
+    for (let pointIndex = 0; pointIndex < ring.length; pointIndex += 1) {
+      const point = ring[pointIndex];
+      const outlineEligible = getVertexOutlineEligibilityAt(
+        vertexOutlineEligibility,
+        polygonIndex,
+        ringIndex,
+        pointIndex,
+        true
+      );
+      if (eligibilityFilter !== null && outlineEligible !== eligibilityFilter) continue;
       targetCtx.moveTo(point[0] + radius, point[1]);
       targetCtx.arc(point[0], point[1], radius, 0, Math.PI * 2);
     }
   });
 }
 
-function createShapeRecord(layerId, geometry, id = null) {
+function createShapeRecord(layerId, geometry, id = null, options = {}) {
   const cleanGeometry = sanitizeGeometry(geometry);
   if (!cleanGeometry.length) return null;
+  const defaultOutlineEligible = options.defaultOutlineEligible !== false;
 
   return {
     id: id || "shape-" + state.nextShapeId++,
     layerId,
     geometry: cleanGeometry,
     bounds: getGeometryBounds(cleanGeometry),
+    vertexOutlineEligibility: normalizeVertexOutlineEligibility(
+      cleanGeometry,
+      options.vertexOutlineEligibility,
+      defaultOutlineEligible
+    ),
   };
 }
 
@@ -4606,6 +4701,7 @@ function cloneShape(shape) {
     layerId: shape.layerId,
     geometry: deepCopyGeometry(shape.geometry),
     bounds: { ...shape.bounds },
+    vertexOutlineEligibility: deepCopyVertexOutlineEligibility(shape.vertexOutlineEligibility),
   };
 }
 
@@ -4779,12 +4875,17 @@ function cloneDraftPoint(point) {
   return point ? { x: point.x, y: point.y } : null;
 }
 
-function setDraftShapeFromGeometry(geometry) {
+function setDraftShapeFromGeometry(geometry, options = {}) {
   const cleanGeometry = sanitizeGeometry(geometry);
   state.draftShape = {
     geometry: cleanGeometry,
     bounds: getGeometryBounds(cleanGeometry),
     small: !cleanGeometry.length,
+    vertexOutlineEligibility: normalizeVertexOutlineEligibility(
+      cleanGeometry,
+      options.vertexOutlineEligibility,
+      options.defaultOutlineEligible !== false
+    ),
   };
 }
 
@@ -4810,7 +4911,7 @@ function cancelSelectionInteraction() {
 
 function rebuildSquareBrushDraftShape() {
   const draftGeometry = buildSquareBrushStrokeDraftGeometry(state.brushPoints, state.drawSize);
-  setDraftShapeFromGeometry(draftGeometryToWorld(draftGeometry));
+  setDraftShapeFromGeometry(draftGeometryToWorld(draftGeometry), { defaultOutlineEligible: true });
 }
 
 function rememberSquareBrushPoint(point) {
@@ -4863,16 +4964,19 @@ function makeDraftShape(a, b) {
       geometry,
       bounds: getGeometryBounds(geometry),
       small: strip.length <= minDrawableDraftExtent,
+      vertexOutlineEligibility: createUniformVertexOutlineEligibility(geometry, true),
     };
   }
 
   const rect = normalizeRect(start, end);
-  const draftGeometry = state.shapeType === "ellipse" ? createEllipseGeometry(rect) : createRectGeometry(rect);
+  const isEllipse = state.shapeType === "ellipse";
+  const draftGeometry = isEllipse ? createEllipseGeometry(rect) : createRectGeometry(rect);
   const geometry = draftGeometryToWorld(draftGeometry);
   return {
     geometry,
     bounds: getGeometryBounds(geometry),
     small: rect.w <= minDrawableDraftExtent || rect.h <= minDrawableDraftExtent,
+    vertexOutlineEligibility: createUniformVertexOutlineEligibility(geometry, !isEllipse),
   };
 }
 
@@ -5226,11 +5330,33 @@ function createLayerShapeRecordsFromGeometry(layerId, geometry) {
   return nextShapes;
 }
 
+function createLayerShapeRecordsFromSourceGeometry(layerId, geometry, sourceShapeRecords = null, fallback = true) {
+  const multipolygon = sanitizeGeometry(geometry);
+  const nextShapes = [];
+
+  for (const polygon of multipolygon) {
+    const polygonGeometry = [polygon];
+    const shape = createShapeRecord(layerId, polygonGeometry, null, {
+      vertexOutlineEligibility: createVertexOutlineEligibilityFromSources(polygonGeometry, sourceShapeRecords, fallback),
+      defaultOutlineEligible: fallback,
+    });
+    if (shape) nextShapes.push(shape);
+  }
+
+  nextShapes.sort((a, b) => {
+    const order = a.bounds.y - b.bounds.y;
+    if (order !== 0) return order;
+    return a.bounds.x - b.bounds.x;
+  });
+
+  return nextShapes;
+}
+
 function buildUnionShapes(layerId, sourceShapes) {
   if (!sourceShapes.length) return [];
   const unionGeometry = unionGeometryList(sourceShapes.map((shape) => shape.geometry));
   const simplifiedGeometry = simplifyGeometryCollinear(unionGeometry);
-  return createLayerShapeRecordsFromGeometry(layerId, simplifiedGeometry);
+  return createLayerShapeRecordsFromSourceGeometry(layerId, simplifiedGeometry, sourceShapes, true);
 }
 
 function replaceLayerShapes(layerId, nextLayerShapes) {
@@ -5248,7 +5374,7 @@ function insertShapeToLayer(layerId, shape) {
   rebuildLayerShapes(layerId);
 }
 
-function subtractGeometryFromLayer(layerId, subtractionGeometry) {
+function subtractGeometryFromLayer(layerId, subtractionGeometry, subtractionVertexOutlineEligibility = null) {
   const layerShapes = state.shapes.filter((shape) => shape.layerId === layerId);
   if (!layerShapes.length) return;
 
@@ -5258,8 +5384,24 @@ function subtractGeometryFromLayer(layerId, subtractionGeometry) {
     subtractionGeometry
   );
   const simplifiedGeometry = simplifyGeometryCollinear(nextGeometry);
+  const subtractionSourceGeometry = sanitizeGeometry(subtractionGeometry);
+  const subtractionSourceShapes = subtractionSourceGeometry.length
+    ? [
+        {
+          geometry: subtractionSourceGeometry,
+          vertexOutlineEligibility: normalizeVertexOutlineEligibility(
+            subtractionSourceGeometry,
+            subtractionVertexOutlineEligibility,
+            true
+          ),
+        },
+      ]
+    : [];
 
-  replaceLayerShapes(layerId, createLayerShapeRecordsFromGeometry(layerId, simplifiedGeometry));
+  replaceLayerShapes(
+    layerId,
+    createLayerShapeRecordsFromSourceGeometry(layerId, simplifiedGeometry, [...layerShapes, ...subtractionSourceShapes], true)
+  );
 
   if (affectsSelection) clearSelectionForLayer(layerId);
 }
@@ -5905,6 +6047,7 @@ function duplicateDrawing(drawingId) {
       layerId: layerIdMap.get(shape.layerId),
       geometry: cloneGeometry(shape.geometry),
       bounds: cloneBounds(shape.bounds),
+      vertexOutlineEligibility: deepCopyVertexOutlineEligibility(shape.vertexOutlineEligibility),
     }));
 
   const drawingIndex = state.drawingsUi.findIndex((entry) => entry.id === drawing.id);
@@ -6042,6 +6185,7 @@ function duplicateLayer(layerId) {
       layerId: duplicatedLayerId,
       geometry: cloneGeometry(shape.geometry),
       bounds: cloneBounds(shape.bounds),
+      vertexOutlineEligibility: deepCopyVertexOutlineEligibility(shape.vertexOutlineEligibility),
     }));
 
   state.shapes.push(...duplicatedShapes);
@@ -6883,7 +7027,12 @@ function drawLayerMerged(layer, options = {}) {
 
     if (shouldRenderCorners) {
       ctx.beginPath();
-      drawGeometryVertices(ctx, shape.geometry, vertexRadius);
+      drawGeometryVertices(ctx, shape.geometry, vertexRadius, shape.vertexOutlineEligibility, false);
+      ctx.fillStyle = hiddenOutlineVertexColor;
+      ctx.fill();
+
+      ctx.beginPath();
+      drawGeometryVertices(ctx, shape.geometry, vertexRadius, shape.vertexOutlineEligibility, true);
       ctx.fillStyle = effectiveOutlineColor;
       ctx.fill();
     }
@@ -7936,9 +8085,16 @@ function finishDrag(e) {
     } else if (state.draftShape && !state.draftShape.small) {
       materializeActiveDraftAngleCandidateOnCommit();
       if (state.drawOperation === "subtract") {
-        subtractGeometryFromLayer(state.activeLayerId, state.draftShape.geometry);
+        subtractGeometryFromLayer(
+          state.activeLayerId,
+          state.draftShape.geometry,
+          state.draftShape.vertexOutlineEligibility
+        );
       } else {
-        const shape = createShapeRecord(state.activeLayerId, state.draftShape.geometry);
+        const shape = createShapeRecord(state.activeLayerId, state.draftShape.geometry, null, {
+          vertexOutlineEligibility: state.draftShape.vertexOutlineEligibility,
+          defaultOutlineEligible: getDefaultOutlineEligibilityForShapeType(),
+        });
         if (shape) insertShapeToLayer(state.activeLayerId, shape);
       }
       renderLayersPanel();

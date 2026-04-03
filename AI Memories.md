@@ -512,4 +512,9 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `Bottom to Top`, `Left to Right`, and `Right to Left` now paint real first-pass canvas output too, using the active direction's own local-primary axis, front boundary, and mirrored/non-mirrored horizontal mapping
   - that shared directional painter currently resolves visibility in a simplified rasterized projection grid, choosing the nearest visible layer per projected column and z band before painting the result into the pane canvas
   - `Plan` remains a separate painter, because it is not the same kind of output as the directional elevation panes
-- The next implementation step should be to layer real section-cut behavior and section-button-driven pane requests on top of the same normalized render-request model before export work is expanded further.
+- The next locked implementation order for the render pipeline is now:
+  1. add depth-aware shading on top of the current directional visibility/grid path
+  2. add global outlines that recognize silhouettes and depth transitions instead of simple flat strokes
+  3. add the more advanced outline/section-aware behavior after that foundation is in place
+  4. later move `Plan` onto the same shared documentation/render path too, instead of keeping it as a permanently separate painter, once the stronger `Z`/volume solver is ready
+  5. after the render/documentation logic is visually and structurally stable, add a higher-resolution offscreen raster backing path for on-screen panes too, more like the `Reference` view system, so later zoom/pan can behave like a raster image editor without making us lock the wrong render path too early

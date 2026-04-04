@@ -1040,6 +1040,10 @@ function cloneRenderSyncFit(value = null) {
   return sanitizeSettingsToggle(value, DEFAULT_RENDER_SYNC_FIT);
 }
 
+function cloneRenderLayoutPreset(value = null) {
+  return sanitizeRenderLayoutPreset(value, 1);
+}
+
 function getRenderDirectionLabel(direction) {
   switch (direction) {
     case "bottomToTop":
@@ -1241,6 +1245,8 @@ function cloneRenderRecord(render) {
     id: render.id,
     name: render.name,
     visible: render.visible !== false,
+    layoutPreset: cloneRenderLayoutPreset(render.layoutPreset),
+    paneDirectionProfiles: cloneRenderPaneDirectionProfiles(render.paneDirectionProfiles),
     syncFit: cloneRenderSyncFit(render.syncFit),
     boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
     volume: cloneRenderVolumeSettings(render.volume),
@@ -1420,14 +1426,34 @@ function getRenderPaneDirection(slotIndex) {
   return normalizeRenderPaneDirection(directions?.[slotIndex], DEFAULT_RENDER_PANE_DIRECTIONS[slotIndex] || DEFAULT_RENDER_PANE_DIRECTIONS[0]);
 }
 
+function syncRenderWorkspaceStateFromRecord(renderRecord = getActiveRenderRecord()) {
+  if (!renderRecord) return false;
+
+  const nextLayoutPreset = cloneRenderLayoutPreset(renderRecord.layoutPreset);
+  const nextPaneDirectionProfiles = cloneRenderPaneDirectionProfiles(renderRecord.paneDirectionProfiles);
+  const layoutChanged = state.renderLayoutPreset !== nextLayoutPreset;
+  const profilesChanged =
+    JSON.stringify(state.renderPaneDirectionProfiles) !== JSON.stringify(nextPaneDirectionProfiles);
+
+  state.renderLayoutPreset = nextLayoutPreset;
+  state.renderPaneDirectionProfiles = nextPaneDirectionProfiles;
+  renderRecord.layoutPreset = nextLayoutPreset;
+  renderRecord.paneDirectionProfiles = cloneRenderPaneDirectionProfiles(nextPaneDirectionProfiles);
+  renderRecord.syncFit = cloneRenderSyncFit(renderRecord.syncFit);
+  return layoutChanged || profilesChanged;
+}
+
 function setRenderPaneDirection(slotIndex, direction) {
   if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= DEFAULT_RENDER_PANE_DIRECTIONS.length) return false;
+  const activeRender = getActiveRenderRecord();
+  if (!activeRender) return false;
   const nextDirection = normalizeRenderPaneDirection(direction, DEFAULT_RENDER_PANE_DIRECTIONS[slotIndex]);
   if (getRenderPaneDirection(slotIndex) === nextDirection) return false;
   const preset = sanitizeRenderLayoutPreset(state.renderLayoutPreset, 1);
   const nextProfiles = cloneRenderPaneDirectionProfiles(state.renderPaneDirectionProfiles);
   nextProfiles[preset][slotIndex] = nextDirection;
   state.renderPaneDirectionProfiles = nextProfiles;
+  activeRender.paneDirectionProfiles = cloneRenderPaneDirectionProfiles(nextProfiles);
   renderWorkspaceUi();
   return true;
 }
@@ -3157,8 +3183,13 @@ function syncRenderWorkspaceShell() {
 }
 
 function renderWorkspaceUi() {
-  state.renderLayoutPreset = sanitizeRenderLayoutPreset(state.renderLayoutPreset, 1);
-  state.renderPaneDirectionProfiles = cloneRenderPaneDirectionProfiles(state.renderPaneDirectionProfiles);
+  const activeRender = getActiveRenderRecord();
+  if (activeRender) {
+    syncRenderWorkspaceStateFromRecord(activeRender);
+  } else {
+    state.renderLayoutPreset = sanitizeRenderLayoutPreset(state.renderLayoutPreset, 1);
+    state.renderPaneDirectionProfiles = cloneRenderPaneDirectionProfiles(state.renderPaneDirectionProfiles);
+  }
   renderWorkspaceSwitcher();
   syncRenderWorkspaceShell();
   renderRenderWorkspaceOutputs();
@@ -3305,10 +3336,16 @@ function normalizeImportedLayerRecords(layers, drawingIds) {
   });
 }
 
-function normalizeImportedRenderRecords(renders) {
+function normalizeImportedRenderRecords(renders, workspaceFallback = null) {
   if (!Array.isArray(renders)) {
     throw createProjectImportError("Unsupported project file: invalid render records.");
   }
+
+  const fallbackLayoutPreset = cloneRenderLayoutPreset(workspaceFallback?.renderLayoutPreset);
+  const fallbackPaneDirectionProfiles = cloneRenderPaneDirectionProfiles(
+    workspaceFallback?.renderPaneDirectionProfiles,
+    workspaceFallback?.renderPaneDirections
+  );
 
   const seenIds = new Set();
   return renders.map((render, index) => {
@@ -3332,6 +3369,11 @@ function normalizeImportedRenderRecords(renders) {
           ? render.name.trim()
           : `Rbox ${index + 1}`,
       visible: render.visible !== false,
+      layoutPreset: cloneRenderLayoutPreset(render.layoutPreset ?? fallbackLayoutPreset),
+      paneDirectionProfiles: cloneRenderPaneDirectionProfiles(
+        render.paneDirectionProfiles,
+        fallbackPaneDirectionProfiles[cloneRenderLayoutPreset(render.layoutPreset ?? fallbackLayoutPreset)]
+      ),
       syncFit: cloneRenderSyncFit(render.syncFit),
       boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
       volume: cloneRenderVolumeSettings(render.volume),
@@ -3426,7 +3468,7 @@ function normalizeImportedProjectFile(payload) {
   const layers = normalizeImportedLayerRecords(payload.document.layers, drawingIds);
   const layerIds = new Set(layers.map((layer) => layer.id));
   const shapes = normalizeImportedShapeRecords(payload.document.shapes, layerIds);
-  const renders = normalizeImportedRenderRecords(payload.document.renders);
+  const renders = normalizeImportedRenderRecords(payload.document.renders, payload.workspace);
   const renderIds = new Set(renders.map((render) => render.id));
   const draftAngle = normalizeImportedDraftAngleState(payload.draftAngle);
   const activeWorkspaceTab = cloneActiveWorkspaceTab(payload.workspace.activeWorkspaceTab, renderIds);
@@ -4531,10 +4573,14 @@ function createRenderRecord(options = {}) {
   const id = "render-" + state.nextRenderId;
   const fallbackName = "Rbox " + state.nextRenderId;
   state.nextRenderId += 1;
+  const layoutPreset = cloneRenderLayoutPreset(options.layoutPreset);
+  const paneDirectionProfiles = cloneRenderPaneDirectionProfiles(options.paneDirectionProfiles);
   return {
     id,
     name: typeof options.name === "string" && options.name.trim() ? options.name.trim() : fallbackName,
     visible: options.visible !== false,
+    layoutPreset,
+    paneDirectionProfiles,
     syncFit: cloneRenderSyncFit(options.syncFit),
     boxGeometry: cloneRenderBoxGeometry(options.boxGeometry),
     volume: cloneRenderVolumeSettings(options.volume),
@@ -7389,6 +7435,8 @@ function duplicateRender(renderId) {
   const duplicate = createRenderRecord({
     name: `${getRenderTabLabel(sourceRender)} copy`,
     visible: sourceRender.visible !== false,
+    layoutPreset: sourceRender.layoutPreset,
+    paneDirectionProfiles: sourceRender.paneDirectionProfiles,
     syncFit: sourceRender.syncFit === true,
     boxGeometry: sourceRender.boxGeometry,
     volume: sourceRender.volume,
@@ -9932,9 +9980,12 @@ if (addRenderBtn) {
 
 for (const button of renderLayoutButtons) {
   button.addEventListener("click", () => {
+    const activeRender = getActiveRenderRecord();
+    if (!activeRender) return;
     const nextPreset = sanitizeRenderLayoutPreset(button.dataset.renderLayout, state.renderLayoutPreset);
     if (state.renderLayoutPreset === nextPreset) return;
     state.renderLayoutPreset = nextPreset;
+    activeRender.layoutPreset = nextPreset;
     renderWorkspaceUi();
   });
 }

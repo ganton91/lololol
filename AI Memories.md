@@ -281,9 +281,9 @@ The current authoring panel behavior is:
 - Symptom: when boolean-unioning shapes that intersect at non-orthogonal angles (e.g. a diagonal stroke crossing an axis-aligned stroke), Clipper's integer arithmetic placed intersection vertices up to 1 Clipper unit (1e-8 world units) off the original edge. With epsilon=0 the collinear simplifier did not remove these, leaving visible spurious vertex markers on what should be a clean straight edge.
 - Fix: changed `clipperSimplifyCollinearEpsilon` from `0` to `1` in `app.js` (line 139). The simplifier now removes near-collinear intermediate vertices within 1 Clipper unit, which is imperceptible (1e-8 world units) and does not affect geometry visible at any zoom level or affect alignment between layers.
 
-## Current Tasks
+## Current Task
 
-### Current Task 2: Renders Subsystem
+### Current Task 1: Renders Subsystem
 
 - Task: design the application's new `Renders` subsystem from scratch, with `Render` / `Render Box` naming, global layer render properties, a `Main` tab plus per-render tabs, and a first rollout that focuses on UI before the deeper rendering engine.
 - Status: implementation is active. The UI shell, persistence scaffolding, `Rbox` authoring flow, layer/render settings editors, and the first real render-output/documentation path are now in place, but the subsystem is still not complete because `Plan` has not yet been unified onto the same documentation path and `DXF` export is not open yet.

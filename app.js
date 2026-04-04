@@ -103,7 +103,7 @@ const DEFAULT_LAYER_SETTINGS_UI_MEMORY = Object.freeze({
 });
 const DEFAULT_RENDER_DEPTH_EFFECT = Object.freeze({
   enabled: true,
-  strength: 0.05,
+  strength: 100,
   mode: "shadow",
 });
 const DEFAULT_RENDER_OUTLINE_EFFECT = Object.freeze({
@@ -350,7 +350,7 @@ function sanitizeRenderDepthMode(mode, fallback = DEFAULT_RENDER_DEPTH_EFFECT.mo
 function sanitizeRenderDepthStrength(value, fallback = DEFAULT_RENDER_DEPTH_EFFECT.strength) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) return fallback;
-  return Math.max(0.01, Math.min(100, Math.round(numericValue * 100) / 100));
+  return Math.max(0, Math.min(100, Math.round(numericValue * 100) / 100));
 }
 
 function sanitizeRenderOutlineThickness(value, fallback = DEFAULT_RENDER_OUTLINE_EFFECT.thickness) {
@@ -382,6 +382,11 @@ function cloneRenderSettings(settings = state.renderSettings) {
     depthEffect: cloneRenderDepthEffect(settings?.depthEffect),
     outlineEffect: cloneRenderOutlineEffect(settings?.outlineEffect),
   };
+}
+
+function formatRenderDepthStrength(value) {
+  const normalized = sanitizeRenderDepthStrength(value, DEFAULT_RENDER_DEPTH_EFFECT.strength);
+  return Number.isInteger(normalized) ? String(normalized) : normalized.toFixed(2).replace(/\.?0+$/, "");
 }
 
 function cloneSettings(settings = state.settings) {
@@ -745,7 +750,7 @@ function syncRenderSettingsMenu() {
   if (renderDepthStrengthIncrease) renderDepthStrengthIncrease.disabled = !depthControlsEnabled;
   if (renderDepthStrengthValue) {
     renderDepthStrengthValue.disabled = !depthControlsEnabled;
-    renderDepthStrengthValue.value = state.renderSettingsDraft.depthEffect.strength.toFixed(2);
+    renderDepthStrengthValue.value = formatRenderDepthStrength(state.renderSettingsDraft.depthEffect.strength);
   }
 
   for (const button of renderOutlineButtons) {
@@ -1569,22 +1574,36 @@ function rgbChannelsToHex(r, g, b) {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
-function applyRenderDepthShading(color, depthOffsetSteps, renderSettings = state.renderSettings) {
+function applyRenderDepthShading(color, depthStrengthRatio, renderSettings = state.renderSettings) {
   const depthEffect = cloneRenderDepthEffect(renderSettings?.depthEffect);
   const baseColor = sanitizeColorValue(color, "#93c5fd");
   if (!depthEffect.enabled || depthEffect.mode === "off") return baseColor;
-  if (!Number.isFinite(depthOffsetSteps) || depthOffsetSteps <= 0) return baseColor;
+  if (!Number.isFinite(depthStrengthRatio) || depthStrengthRatio <= 0) return baseColor;
 
   const baseRgb = hexToRgbChannels(baseColor);
   const overlayRgb = depthEffect.mode === "fog" ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
-  const stepAlpha = Math.max(0, depthEffect.strength) / 100;
-  const alpha = Math.max(0, Math.min(0.95, depthOffsetSteps * stepAlpha));
+  const maxAlpha = Math.max(0, Math.min(1, depthEffect.strength / 100));
+  const alpha = Math.max(0, Math.min(1, depthStrengthRatio * maxAlpha));
   const mixChannel = (base, overlay) => Math.round(base * (1 - alpha) + overlay * alpha);
   return rgbChannelsToHex(
     mixChannel(baseRgb.r, overlayRgb.r),
     mixChannel(baseRgb.g, overlayRgb.g),
     mixChannel(baseRgb.b, overlayRgb.b)
   );
+}
+
+function getDirectionalDepthStrengthRatio(depthMm, nearestVisibleDepthMm, farthestVisibleDepthMm, frontBoundary = "min") {
+  if (![depthMm, nearestVisibleDepthMm, farthestVisibleDepthMm].every(Number.isFinite)) return 0;
+  const depthRangeMm =
+    frontBoundary === "max"
+      ? nearestVisibleDepthMm - farthestVisibleDepthMm
+      : farthestVisibleDepthMm - nearestVisibleDepthMm;
+  if (!(depthRangeMm > 1e-6)) return 0;
+  const depthOffsetMm =
+    frontBoundary === "max"
+      ? nearestVisibleDepthMm - depthMm
+      : depthMm - nearestVisibleDepthMm;
+  return Math.max(0, Math.min(1, depthOffsetMm / depthRangeMm));
 }
 
 function getDirectionalAxisSpanMm(frame, axisId) {
@@ -2039,6 +2058,7 @@ function buildDirectionalVectorDocumentation(foundation) {
   const cells = Array.from({ length: bandCount }, () => Array(slabCount).fill(null));
   let paintedCellCount = 0;
   let nearestVisibleDepthMm = directionConfig?.frontBoundary === "max" ? -Infinity : Infinity;
+  let farthestVisibleDepthMm = directionConfig?.frontBoundary === "max" ? Infinity : -Infinity;
 
   for (let bandIndex = 0; bandIndex < bandCount; bandIndex += 1) {
     const zHighMm = zBreaksDesc[bandIndex];
@@ -2069,40 +2089,50 @@ function buildDirectionalVectorDocumentation(foundation) {
       paintedCellCount += 1;
       if (directionConfig?.frontBoundary === "max") {
         nearestVisibleDepthMm = Math.max(nearestVisibleDepthMm, winner.depthStartMm, winner.depthMidMm, winner.depthEndMm);
+        farthestVisibleDepthMm = Math.min(farthestVisibleDepthMm, winner.depthStartMm, winner.depthMidMm, winner.depthEndMm);
       } else {
         nearestVisibleDepthMm = Math.min(nearestVisibleDepthMm, winner.depthStartMm, winner.depthMidMm, winner.depthEndMm);
+        farthestVisibleDepthMm = Math.max(farthestVisibleDepthMm, winner.depthStartMm, winner.depthMidMm, winner.depthEndMm);
       }
     }
   }
 
   if (!paintedCellCount) return null;
   if (!Number.isFinite(nearestVisibleDepthMm)) nearestVisibleDepthMm = 0;
-
-  const depthUnitMm = Math.max(1, primarySpanMm / 320);
+  if (!Number.isFinite(farthestVisibleDepthMm)) farthestVisibleDepthMm = nearestVisibleDepthMm;
   const projectedPrimitives = [];
 
   for (let bandIndex = 0; bandIndex < bandCount; bandIndex += 1) {
     for (let slabIndex = 0; slabIndex < slabCount; slabIndex += 1) {
       const cell = cells[bandIndex][slabIndex];
       if (!cell) continue;
-      const depthOffsetStart =
-        directionConfig?.frontBoundary === "max"
-          ? (nearestVisibleDepthMm - cell.depthStartMm) / depthUnitMm
-          : (cell.depthStartMm - nearestVisibleDepthMm) / depthUnitMm;
-      const depthOffsetMid =
-        directionConfig?.frontBoundary === "max"
-          ? (nearestVisibleDepthMm - cell.depthMm) / depthUnitMm
-          : (cell.depthMm - nearestVisibleDepthMm) / depthUnitMm;
-      const depthOffsetEnd =
-        directionConfig?.frontBoundary === "max"
-          ? (nearestVisibleDepthMm - cell.depthEndMm) / depthUnitMm
-          : (cell.depthEndMm - nearestVisibleDepthMm) / depthUnitMm;
+      const depthStrengthRatioStart =
+        getDirectionalDepthStrengthRatio(
+          cell.depthStartMm,
+          nearestVisibleDepthMm,
+          farthestVisibleDepthMm,
+          directionConfig?.frontBoundary
+        );
+      const depthStrengthRatioMid =
+        getDirectionalDepthStrengthRatio(
+          cell.depthMm,
+          nearestVisibleDepthMm,
+          farthestVisibleDepthMm,
+          directionConfig?.frontBoundary
+        );
+      const depthStrengthRatioEnd =
+        getDirectionalDepthStrengthRatio(
+          cell.depthEndMm,
+          nearestVisibleDepthMm,
+          farthestVisibleDepthMm,
+          directionConfig?.frontBoundary
+        );
       projectedPrimitives.push({
         ...cell,
         geometry: createDocumentationRectGeometry(cell.x1, cell.y1, cell.x2, cell.y2),
-        shadedColor: applyRenderDepthShading(cell.fillColor, depthOffsetMid, state.renderSettings),
-        shadedColorStart: applyRenderDepthShading(cell.fillColor, depthOffsetStart, state.renderSettings),
-        shadedColorEnd: applyRenderDepthShading(cell.fillColor, depthOffsetEnd, state.renderSettings),
+        shadedColor: applyRenderDepthShading(cell.fillColor, depthStrengthRatioMid, state.renderSettings),
+        shadedColorStart: applyRenderDepthShading(cell.fillColor, depthStrengthRatioStart, state.renderSettings),
+        shadedColorEnd: applyRenderDepthShading(cell.fillColor, depthStrengthRatioEnd, state.renderSettings),
       });
     }
   }
@@ -8972,7 +9002,7 @@ if (renderDepthStrengthDecrease) {
   renderDepthStrengthDecrease.addEventListener("click", () => {
     if (!state.renderSettingsDraft || !state.renderSettingsDraft.depthEffect.enabled) return;
     state.renderSettingsDraft.depthEffect.strength = sanitizeRenderDepthStrength(
-      state.renderSettingsDraft.depthEffect.strength - 0.01,
+      state.renderSettingsDraft.depthEffect.strength - 1,
       state.renderSettingsDraft.depthEffect.strength
     );
     syncRenderSettingsMenu();
@@ -9021,7 +9051,7 @@ if (renderDepthStrengthIncrease) {
   renderDepthStrengthIncrease.addEventListener("click", () => {
     if (!state.renderSettingsDraft || !state.renderSettingsDraft.depthEffect.enabled) return;
     state.renderSettingsDraft.depthEffect.strength = sanitizeRenderDepthStrength(
-      state.renderSettingsDraft.depthEffect.strength + 0.01,
+      state.renderSettingsDraft.depthEffect.strength + 1,
       state.renderSettingsDraft.depthEffect.strength
     );
     syncRenderSettingsMenu();

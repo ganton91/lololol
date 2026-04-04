@@ -517,7 +517,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The render workspace now also has a first real depth-aware shading pass:
   - the left-panel `Render Settings` button is no longer just a placeholder; it now opens a modal with reference-like `Depth Effect` controls (`Shadow`, `Fog`, `Off`) plus `Depth Strength`
   - those render settings now persist in the project workspace snapshot/import-export path instead of living only in transient UI state
-  - the directional render painter now shades visible fills by depth offset relative to the nearest visible depth, using the active render-settings mode and strength rather than a hardcoded look
+  - the directional render painter now shades visible fills by normalizing each visible point across the current pane's nearest-to-farthest visible depth range, and `Depth Strength` now means the maximum tint amount applied at that farthest visible point (`100` = full black/white endpoint tint, `50` = half-strength endpoint tint)
   - `Plan` still stays on its simpler fill path for now; the shared plan/documentation unification is still a later step
   - a future refinement idea that should be kept in mind: keep the same global `nearest visible depth` model, but change the shading curve from a constant linear step-per-depth-step into a diminishing falloff so the first depth gaps darken more strongly and the farther-back gaps add progressively less darkening, instead of every depth step contributing the same amount forever
 - A new per-vertex outline-eligibility foundation now exists in the main geometry model:

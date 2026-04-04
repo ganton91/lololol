@@ -1648,34 +1648,14 @@ function collectDirectionalDocumentationComponents(foundation) {
   const primarySpanMm = getDirectionalAxisSpanMm(request?.frame, request?.directionConfig?.primaryAxis);
   const components = [];
 
-  intersectingEntries.forEach((entry, entryIndex) => {
+  intersectingEntries.forEach((entry) => {
     entry.localSourceComponents.forEach((sourceComponent, sourceIndex) => {
       const projectedGeometry = projectDirectionalGeometry(sourceComponent.localGeometry, request, primarySpanMm);
       if (!projectedGeometry.length) return;
 
       const projectedBounds = getGeometryBounds(projectedGeometry);
-      const eligibleVertexPrimaryKeys = new Set();
-      forEachRing(projectedGeometry, (ring, polygonIndex, ringIndex) => {
-        for (let pointIndex = 0; pointIndex < ring.length; pointIndex += 1) {
-          if (
-            !getVertexOutlineEligibilityAt(
-              sourceComponent.vertexOutlineEligibility,
-              polygonIndex,
-              ringIndex,
-              pointIndex,
-              true
-            )
-          ) {
-            continue;
-          }
-          eligibleVertexPrimaryKeys.add(getDocumentationCoordinateKey(ring[pointIndex][0]));
-        }
-      });
 
       components.push({
-        entry,
-        entryIndex,
-        sourceIndex,
         componentKey: `${entry.layerId}:${sourceComponent.sourceShapeKey}:${sourceIndex}`,
         layerId: entry.layerId,
         sourceShapeKey: sourceComponent.sourceShapeKey,
@@ -1687,7 +1667,6 @@ function collectDirectionalDocumentationComponents(foundation) {
         projectedBounds,
         projectedEdges: collectProjectedGeometryEdges(projectedGeometry),
         vertexOutlineEligibility: deepCopyVertexOutlineEligibility(sourceComponent.vertexOutlineEligibility),
-        eligibleVertexPrimaryKeys,
       });
     });
   });
@@ -2034,7 +2013,7 @@ function buildDirectionalVectorDocumentation(foundation) {
     const x1 = primaryBreaks[slabIndex];
     const x2 = primaryBreaks[slabIndex + 1];
     if (x2 - x1 <= 1e-6) {
-      slabSamples.push({ x1, x2, xMid: x1, samples: [] });
+      slabSamples.push({ x1, x2, samples: [] });
       continue;
     }
     const xMid = quantizeCoordinate((x1 + x2) * 0.5);
@@ -2050,7 +2029,7 @@ function buildDirectionalVectorDocumentation(foundation) {
         ...profile,
       });
     });
-    slabSamples.push({ x1, x2, xMid, samples });
+    slabSamples.push({ x1, x2, samples });
   }
 
   const maxZ = zBreaksDesc[0];
@@ -2153,11 +2132,9 @@ function buildDirectionalVectorDocumentation(foundation) {
     maxZ,
     zSpanMm,
     primaryBreaks,
-    zBreaksDesc,
     yEdges,
     cells,
     paintedCellCount,
-    nearestVisibleDepthMm,
     projectedPrimitives,
     massBoundarySegments,
     depthTransitionSegments,

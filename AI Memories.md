@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-04-03
+- Last updated: 2026-04-04
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -36,6 +36,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
   - `id`
   - `layerId`
   - `geometry`
+  - `vertexOutlineEligibility`
   - `bounds`
 - Boolean union, subtraction, and overlap/intersection checks are handled through `clipper2-ts`.
 - The boolean boundary is wrapped by an in-file Clipper adapter layer that preserves the app's nested `[[outer, hole1...]]` multipolygon model.
@@ -80,7 +81,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - The draft canvas (`Grid` + draft-plane axes) is now rendered only while `Draw` is active, and in the current arrangement it is drawn above the visible layer geometry so its readability can take priority during drafting.
 - Layer rendering now has settings-controlled outline and corner-marker visibility.
 - When `Outline` is enabled, each visible layer shape is stroked with the configured outline color.
-- When `Corners` is enabled, each stored polygon vertex is rendered as a marker using that same outline color.
+- When `Corners` is enabled, outline-eligible vertices render as markers in the current outline color, while outline-ineligible vertices render in a mid gray so vertex provenance stays visible during editing.
 - `Corners` is functionally dependent on `Outline`: when `Outline` is off, corner markers do not render.
 - In `Draw`, the active layer is a deliberate exception: its outline and corner markers always render with the preview blue emphasis even if the general `Outline` or `Corners` settings are off, and that emphasized pass sits back on top of the draft canvas for readability.
 - Selection highlighting is drawn by tracing the selected shape geometries.
@@ -115,6 +116,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
   - current `shapeType`
   - current size controls (`drawSize` and `stripCellWidth`)
   - `layerSectionCollapsed`
+  - `renderSettings`
   - `settings`
   - `draftOrigin`
   - `camera`
@@ -173,6 +175,7 @@ Layer order controls draw order. The active layer receives new geometry when the
 - `Stroke Rect` width is expressed in whole grid cells, its generated strip width is always an exact multiple of one cell, and its centerline snapping is parity-aware: odd cell widths snap on half-cell centerline families while even cell widths snap on full grid intersections.
 - `Stroke Rect` can be drawn at arbitrary drafting angles while preserving its cell-multiple width and parity-aware snapping.
 - `Stroke Rect` supports sticky `Shift` axis lock behavior during an active draw: holding `Shift` constrains the strip direction to the draft-space `X` or `Y` axis for the current hold.
+- New shapes now also receive per-vertex outline-eligibility metadata at creation time: ellipse approximation vertices default to outline-ineligible, while authored straight/corner tools default to outline-eligible.
 - `Square Brush` size is expressed in whole grid cells and its preview is centered on the snapped pointer position.
 - `Square Brush` snapping is parity-aware: odd cell widths snap the brush center to cell centers, while even cell widths snap the brush center to grid intersections.
 - `Square Brush` records and rebuilds its path from snapped center point to snapped center point, using square-sweep geometry instead of dab-by-dab stamping.
@@ -333,10 +336,10 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The old bottom-left instructional hint panel inside the canvas shell has been removed completely, including its markup and styling.
 - The canvas background now uses a warmer off-white canvas tone, while the grid keeps the app's own line widths and transparency-style hierarchy using darker light-theme strokes derived from the same palette rather than a single opaque color.
 
-### Current Task 2: Renders Subsystem Planning
+### Current Task 2: Renders Subsystem
 
 - Task: design the application's new `Renders` subsystem from scratch, with `Render` / `Render Box` naming, global layer render properties, a `Main` tab plus per-render tabs, and a first rollout that focuses on UI before the deeper rendering engine.
-- Status: planning and early implementation are active. The non-visual state/persistence scaffolding, the first visible `Main` / `Rbox` workspace shell, and the first `Render Box` authoring flow on the `Main` canvas are now implemented, but real render output behavior still does not exist yet.
+- Status: implementation is active. The UI shell, persistence scaffolding, `Rbox` authoring flow, layer/render settings editors, and the first real render-output/documentation path are now in place, but the subsystem is still not complete because `Plan` has not yet been unified onto the same documentation path and `DXF` export is not open yet.
 
 #### Locked Decisions
 
@@ -373,9 +376,9 @@ Layer order controls draw order. The active layer receives new geometry when the
 
 #### Immediate Focus
 
-- The first implementation step should be to document and lock the `Renders` data model v1 before any UI or rendering code is built, because that model is the foundation for the rest of the subsystem.
-- Break the render-system work into staged implementation steps instead of attempting the whole subsystem in one pass.
-- Start with the UI shell for `Main` / `Render` tabs, render cards, and render-box management before building the full pane rendering pipeline.
+- The immediate next step is to move `Plan` onto the same shared documentation/render path already used by the directional panes, so the render subsystem stops carrying two different output models.
+- Immediately after that, open real `DXF` export from that same shared documentation object so dimensions can be validated against the exact render output rather than against a separate export-only path.
+- After `Plan` and `DXF` are on the shared documentation model, continue into stronger section-aware/documentation-aware behavior before later zoom-oriented raster-backing polish.
 
 #### Progress
 
@@ -447,12 +450,11 @@ Layer order controls draw order. The active layer receives new geometry when the
   - dynamic `Rbox` tabs driven by `state.renders`
   - a render workspace panel shell that opens when an `Rbox` tab becomes active
 - The bottom workspace switcher has now been tightened to use the external reference's light-theme visual language more literally, including its white surface, line color, muted/text values, active fill, and floating shadow.
-- The current render workspace shell is intentionally placeholder-only:
-  - it now uses the external reference's `View` workspace interface much more literally as the base shell, including the layout controls, popout button, pane export buttons, and per-pane direction selector clusters
-  - the `1 Side`, `2 Sides`, and `4 Sides` layout controls should already work at the shell level so the pane count/grid layout matches the external reference even before real render content exists
-  - those shell controls are currently allowed to stay visually present but behaviorless until the later render-engine steps wire them up
-  - it does not yet display real render outputs
-  - it does not yet display final render-engine output
+- The current render workspace shell is no longer placeholder-only:
+  - it uses the external reference's `View` workspace interface much more literally as the base shell, including the layout controls, popout button, pane export buttons, and per-pane direction selector clusters
+  - the `1 Side`, `2 Sides`, and `4 Sides` layout controls already work at the shell/grid-layout level
+  - it now does display real render outputs in the panes, even though the full render/documentation/export stack is still incomplete
+  - export buttons are still visually present but intentionally disabled until the shared documentation/export layer is opened
 - The left panel now includes a dedicated `Renders` section with:
   - a `Renders` section header that matches the app's own `Drawings` section pattern
   - `Rbox` cards styled from the same top-level card system as `Drawings`
@@ -479,7 +481,7 @@ Layer order controls draw order. The active layer receives new geometry when the
   - pressing `Escape` deactivates the active `Rbox` and closes the transform mode without rewriting the user's underlying base tool choice
 - The left panel now has a fixed bottom `Layer Settings` trigger outside the scroll area, and that trigger opens a dedicated render-layer modal instead of placing the editor inside the scrolling panel content.
 - That fixed `Layer Settings` trigger is now styled as a centered floating button rather than a full-width footer bar, while the footer surface itself blends back into the left-panel background without a separator line.
-- The same footer area now also includes a matching `Render Settings` button placeholder beside `Layer Settings`; it currently shares the same hover/press treatment but has no wired behavior yet.
+- The same footer area now also includes a matching `Render Settings` button beside `Layer Settings`; it now opens a dedicated render-settings modal instead of acting as a placeholder.
 - Those two footer buttons are now sized down to fit side by side within the current left-panel width without clipping.
 - The first `Layer Settings` modal pass now follows the external reference much more literally while still omitting the fields we intentionally excluded:
   - drawings are grouped separately inside the modal
@@ -505,12 +507,12 @@ Layer order controls draw order. The active layer receives new geometry when the
 - The render workspace now also has a first real Phase 2 painter pass on top of that foundation:
   - `Top to Bottom` and `Plan` panes now paint real first-pass canvas output instead of only summary copy whenever an active `Rbox` has intersecting render-enabled geometry
   - the `Plan` painter currently draws clipped local geometry directly in the `Rbox` frame with the layer fill colors
-  - the `Top to Bottom` painter currently draws a simplified projected x/z documentation view derived from the clipped local geometry and each layer's `baseElevationMm` / `heightMm`
+  - the first `Top to Bottom` painter started as a simplified projected x/z documentation view derived from the clipped local geometry and each layer's `baseElevationMm` / `heightMm`
   - export buttons are still intentionally disabled, because the canvas/export builder layer is not finished yet
 - The render workspace now also has a first real Phase 3 directional generalization pass:
   - the non-plan panes now share one common directional painter instead of a one-off `Top to Bottom` implementation
   - `Bottom to Top`, `Left to Right`, and `Right to Left` now paint real first-pass canvas output too, using the active direction's own local-primary axis, front boundary, and mirrored/non-mirrored horizontal mapping
-  - that shared directional painter currently resolves visibility in a simplified rasterized projection grid, choosing the nearest visible layer per projected column and z band before painting the result into the pane canvas
+  - that shared directional painter no longer uses the old temporary raster/grid-derived boundary path; it now builds from a shared vector documentation object and only rasterizes at the final preview-display stage
   - `Plan` remains a separate painter, because it is not the same kind of output as the directional elevation panes
 - The render workspace now also has a first real depth-aware shading pass:
   - the left-panel `Render Settings` button is no longer just a placeholder; it now opens a modal with reference-like `Depth Effect` controls (`Shadow`, `Fog`, `Off`) plus `Depth Strength`
@@ -523,8 +525,18 @@ Layer order controls draw order. The active layer receives new geometry when the
   - ellipse approximation vertices default to `false`, while authored straight/corner tools default to `true`
   - in the main canvas, `false` vertices render in a mid gray while `true` vertices keep the normal outline color, so provenance is visible during editing
   - that metadata now survives clone/duplicate/import-export/move paths and is also propagated through current layer rebuild / boolean flows with coordinate-based provenance matching
-- The next locked implementation order for the render pipeline is now:
-  1. add global outlines that recognize silhouettes and depth transitions instead of simple flat strokes
-  2. add the more advanced outline/section-aware behavior after that foundation is in place
-  3. later move `Plan` onto the same shared documentation/render path too, instead of keeping it as a permanently separate painter, once the stronger `Z`/volume solver is ready
+- The directional panes now also have a first working global render-outline pass:
+  - `Render Settings` now include outline `On / Off`, outline color, and outline width
+  - the directional outline is currently built from three sources together: mass/silhouette boundaries, depth-transition boundaries, and eligible-vertex breaks
+  - eligible vertices only contribute outline breaks when they sit on the visible front profile of the same component, so hidden same-layer vertices are no longer allowed to force lines through the front surface
+  - the current directional outline logic is global and depth-aware; it does not intentionally create seams between same-depth surfaces, and deterministic layer/drawing order remains only the tie-breaker when two visible candidates land at the same depth
+- The non-plan directional panes have now moved off the old raster/grid-derived boundary path onto a shared vector documentation path:
+  - each directional pane now builds a documentation object from the clipped `Rbox` scene using projected component geometry, exact primary breakpoints, exact `Z` bands from layer elevations, and visible-surface winner selection
+  - the visible fill/shading logic now comes from that documentation object instead of from the old temporary column/row render grid
+  - the current on-screen fill preview is still rasterized at the end for display, but it is rasterized from the new vector documentation object through an offscreen paint buffer so the pane remains preview-friendly without changing the underlying source-of-truth model
+  - this means the current directional panes are now documentation-first even though the browser still displays them through canvas pixels
+- The current locked next order for the render pipeline is now:
+  1. move `Plan` onto the same shared documentation/render path instead of keeping it on its older separate painter
+  2. open real `DXF` export from that same shared documentation object so dimensions can be validated against the exact render output
+  3. expand into stronger section-aware/documentation-aware behavior after the shared documentation path is stable across both side views and `Plan`
   4. after the render/documentation logic is visually and structurally stable, add a higher-resolution offscreen raster backing path for on-screen panes too, more like the `Reference` view system, so later zoom/pan can behave like a raster image editor without making us lock the wrong render path too early

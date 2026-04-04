@@ -1310,43 +1310,52 @@ function getLayerSourceShapesForRender(layerId) {
 
 function compileRenderScene() {
   const entries = [];
+  const drawingsInUiOrder = state.drawingsUi.slice();
+  const drawingOrderIndexById = new Map(drawingsInUiOrder.map((drawing, index) => [drawing.id, index]));
 
-  state.drawingsUi.forEach((drawing, drawingOrderIndex) => {
-    const drawingLayers = getLayersForDrawing(drawing.id);
-    drawingLayers.forEach((layer, layerOrderIndex) => {
-      const renderSettings = cloneLayerRenderSettings(layer.render);
-      if (renderSettings.enabled === false) return;
+  drawingsInUiOrder
+    .slice()
+    .reverse()
+    .forEach((drawing) => {
+      const drawingOrderIndex = drawingOrderIndexById.get(drawing.id) ?? 0;
+      const drawingLayers = getLayersForDrawingInStorageOrder(drawing.id);
+      const layerCount = drawingLayers.length;
 
-      const sourceShapesWorld = getLayerSourceShapesForRender(layer.id);
-      const geometryWorld = sourceShapesWorld.length ? unionGeometryList(sourceShapesWorld.map((shape) => shape.geometry)) : [];
-      if (!geometryWorld.length) return;
+      drawingLayers.forEach((layer, storageOrderIndex) => {
+        const layerOrderIndex = Math.max(0, layerCount - 1 - storageOrderIndex);
+        const renderSettings = cloneLayerRenderSettings(layer.render);
+        if (renderSettings.enabled === false) return;
 
-      const boundsWorld = getGeometryBounds(geometryWorld);
-      const areaWorld = getGeometryArea(geometryWorld);
-      const baseElevationMm = quantizeCoordinate(renderSettings.baseElevationMm);
-      const heightMm = Math.max(0, quantizeCoordinate(renderSettings.heightMm));
-      const topElevationMm = quantizeCoordinate(baseElevationMm + heightMm);
+        const sourceShapesWorld = getLayerSourceShapesForRender(layer.id);
+        const geometryWorld = sourceShapesWorld.length ? unionGeometryList(sourceShapesWorld.map((shape) => shape.geometry)) : [];
+        if (!geometryWorld.length) return;
 
-      entries.push({
-        drawingId: drawing.id,
-        drawingName: drawing.name,
-        drawingOrderIndex,
-        layerId: layer.id,
-        layerName: layer.name,
-        layerOrderIndex,
-        stackOrderIndex: entries.length,
-        fillColor: layer.fillColor,
-        geometryWorld,
-        sourceShapesWorld,
-        boundsWorld,
-        areaWorld,
-        baseElevationMm,
-        heightMm,
-        topElevationMm,
-        role: renderSettings.role,
+        const boundsWorld = getGeometryBounds(geometryWorld);
+        const areaWorld = getGeometryArea(geometryWorld);
+        const baseElevationMm = quantizeCoordinate(renderSettings.baseElevationMm);
+        const heightMm = Math.max(0, quantizeCoordinate(renderSettings.heightMm));
+        const topElevationMm = quantizeCoordinate(baseElevationMm + heightMm);
+
+        entries.push({
+          drawingId: drawing.id,
+          drawingName: drawing.name,
+          drawingOrderIndex,
+          layerId: layer.id,
+          layerName: layer.name,
+          layerOrderIndex,
+          stackOrderIndex: entries.length,
+          fillColor: layer.fillColor,
+          geometryWorld,
+          sourceShapesWorld,
+          boundsWorld,
+          areaWorld,
+          baseElevationMm,
+          heightMm,
+          topElevationMm,
+          role: renderSettings.role,
+        });
       });
     });
-  });
 
   const elevationRange =
     entries.length > 0

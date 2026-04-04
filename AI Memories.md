@@ -529,7 +529,7 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `Render Settings` now include outline `On / Off`, outline color, and outline width
   - the directional outline is currently built from three sources together: mass/silhouette boundaries, depth-transition boundaries, and eligible-vertex breaks
   - eligible vertices only contribute outline breaks when they sit on the visible front profile of the same component, so hidden same-layer vertices are no longer allowed to force lines through the front surface
-  - the current directional outline logic is global and depth-aware; it does not intentionally create seams between same-depth surfaces, and deterministic layer/drawing order remains only the tie-breaker when two visible candidates land at the same depth
+  - the current directional outline logic is global and depth-aware; it does not intentionally create seams between same-depth surfaces, and when two visible candidates land at the same depth the current `Layer Settings` order is the tie-breaker, with the higher drawing/layer in that order winning the common rendered area
 - The non-plan directional panes have now moved off the old raster/grid-derived boundary path onto a shared vector documentation path:
   - each directional pane now builds a documentation object from the clipped `Rbox` scene using projected component geometry, exact primary breakpoints, exact `Z` bands from layer elevations, and visible-surface winner selection
   - the visible fill/shading logic now comes from that documentation object instead of from the old temporary column/row render grid

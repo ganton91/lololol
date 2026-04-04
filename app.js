@@ -26,6 +26,7 @@ const settingsMenu = document.getElementById("settingsMenu");
 const exportFallbackMenu = document.getElementById("exportFallbackMenu");
 const layerSettingsModal = document.getElementById("layerSettingsModal");
 const renderSettingsModal = document.getElementById("renderSettingsModal");
+const renderBoxPropertiesModal = document.getElementById("renderBoxPropertiesModal");
 const settingsCloseButton = document.getElementById("settingsCloseButton");
 const settingsApplyButton = document.getElementById("settingsApplyButton");
 const exportFallbackCloseButton = document.getElementById("exportFallbackCloseButton");
@@ -33,6 +34,12 @@ const layerSettingsCloseButton = document.getElementById("layerSettingsCloseButt
 const layerSettingsApplyButton = document.getElementById("layerSettingsApplyButton");
 const renderSettingsCloseButton = document.getElementById("renderSettingsCloseButton");
 const renderSettingsApplyButton = document.getElementById("renderSettingsApplyButton");
+const renderBoxPropertiesTarget = document.getElementById("renderBoxPropertiesTarget");
+const renderBoxPropertiesHeightInput = document.getElementById("renderBoxPropertiesHeightInput");
+const renderBoxPropertiesStartInput = document.getElementById("renderBoxPropertiesStartInput");
+const renderBoxPropertiesEndInput = document.getElementById("renderBoxPropertiesEndInput");
+const renderBoxPropertiesCloseButton = document.getElementById("renderBoxPropertiesCloseButton");
+const renderBoxPropertiesApplyButton = document.getElementById("renderBoxPropertiesApplyButton");
 const renderDepthStrengthDecrease = document.getElementById("renderDepthStrengthDecrease");
 const renderDepthStrengthIncrease = document.getElementById("renderDepthStrengthIncrease");
 const renderDepthStrengthValue = document.getElementById("renderDepthStrengthValue");
@@ -96,6 +103,10 @@ const DEFAULT_RENDER_PANE_DIRECTION_PROFILES = Object.freeze({
   1: Object.freeze([...DEFAULT_RENDER_PANE_DIRECTIONS]),
   2: Object.freeze([...DEFAULT_RENDER_PANE_DIRECTIONS]),
   4: Object.freeze([...DEFAULT_RENDER_PANE_DIRECTIONS]),
+});
+const DEFAULT_RENDER_VOLUME = Object.freeze({
+  baseElevationMm: 0,
+  heightMm: 0,
 });
 const DEFAULT_LAYER_RENDER = Object.freeze({
   enabled: true,
@@ -218,6 +229,7 @@ const state = {
     outlineEffect: { ...DEFAULT_RENDER_OUTLINE_EFFECT },
   },
   renderSettingsDraft: null,
+  renderBoxPropertiesDraft: null,
   layerSettingsDraft: null,
   layerSettingsUi: {
     collapsedByDrawingId: {},
@@ -746,6 +758,10 @@ function isRenderSettingsMenuOpen() {
   return !!renderSettingsModal && !renderSettingsModal.classList.contains("hidden");
 }
 
+function isRenderBoxPropertiesModalOpen() {
+  return !!renderBoxPropertiesModal && !renderBoxPropertiesModal.classList.contains("hidden");
+}
+
 function syncRenderSettingsMenu() {
   if (!state.renderSettingsDraft || !renderSettingsModal) return;
 
@@ -785,6 +801,49 @@ function syncRenderSettingsMenu() {
       )
     );
     renderOutlineWidthInput.disabled = !state.renderSettingsDraft.outlineEffect.enabled;
+  }
+}
+
+function createRenderBoxPropertiesDraft(renderId) {
+  const renderRecord = getRenderById(renderId);
+  if (!renderRecord) return null;
+  const volume = cloneRenderVolumeSettings(renderRecord.volume);
+  return {
+    renderId: renderRecord.id,
+    name: getRenderTabLabel(renderRecord),
+    baseElevationMm: volume.baseElevationMm,
+    heightMm: volume.heightMm,
+  };
+}
+
+function getRenderBoxPropertiesEndMm(draft = state.renderBoxPropertiesDraft) {
+  if (!draft) return 0;
+  return quantizeCoordinate(draft.baseElevationMm + draft.heightMm);
+}
+
+function syncRenderBoxPropertiesModal() {
+  if (!state.renderBoxPropertiesDraft || !renderBoxPropertiesModal) return;
+
+  const displayUnitId = state.settings.displayUnit;
+  const lengthStep = getLengthInputStep(displayUnitId);
+
+  if (renderBoxPropertiesTarget) {
+    renderBoxPropertiesTarget.textContent = state.renderBoxPropertiesDraft.name;
+  }
+
+  if (renderBoxPropertiesHeightInput) {
+    renderBoxPropertiesHeightInput.step = lengthStep;
+    renderBoxPropertiesHeightInput.value = formatLengthInputValue(state.renderBoxPropertiesDraft.heightMm, displayUnitId);
+  }
+
+  if (renderBoxPropertiesStartInput) {
+    renderBoxPropertiesStartInput.step = lengthStep;
+    renderBoxPropertiesStartInput.value = formatLengthInputValue(state.renderBoxPropertiesDraft.baseElevationMm, displayUnitId);
+  }
+
+  if (renderBoxPropertiesEndInput) {
+    renderBoxPropertiesEndInput.step = lengthStep;
+    renderBoxPropertiesEndInput.value = formatLengthInputValue(getRenderBoxPropertiesEndMm(), displayUnitId);
   }
 }
 
@@ -933,6 +992,20 @@ function cloneRenderSectionSettings(sectionSettings = null) {
     z: cloneRenderSectionEntries(sectionSettings?.z),
     x: cloneRenderSectionEntries(sectionSettings?.x),
     y: cloneRenderSectionEntries(sectionSettings?.y),
+  };
+}
+
+function cloneRenderVolumeSettings(volume = null) {
+  return {
+    baseElevationMm: Number.isFinite(Number(volume?.baseElevationMm))
+      ? quantizeCoordinate(Number(volume.baseElevationMm))
+      : DEFAULT_RENDER_VOLUME.baseElevationMm,
+    heightMm: Math.max(
+      0,
+      Number.isFinite(Number(volume?.heightMm))
+        ? quantizeCoordinate(Number(volume.heightMm))
+        : DEFAULT_RENDER_VOLUME.heightMm
+    ),
   };
 }
 
@@ -1163,6 +1236,7 @@ function cloneRenderRecord(render) {
     name: render.name,
     visible: render.visible !== false,
     boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
+    volume: cloneRenderVolumeSettings(render.volume),
     sectionSettings: cloneRenderSectionSettings(render.sectionSettings),
   };
 }
@@ -1182,6 +1256,31 @@ function getRenderBoxSummary(render) {
 function getRenderSectionSummary(render) {
   const sections = cloneRenderSectionSettings(render?.sectionSettings);
   return `Sections Z ${sections.z.length} | X ${sections.x.length} | Y ${sections.y.length}`;
+}
+
+function getRenderVolumeStartMm(render) {
+  return cloneRenderVolumeSettings(render?.volume).baseElevationMm;
+}
+
+function getRenderVolumeHeightMm(render) {
+  return cloneRenderVolumeSettings(render?.volume).heightMm;
+}
+
+function getRenderVolumeEndMm(render) {
+  const volume = cloneRenderVolumeSettings(render?.volume);
+  return quantizeCoordinate(volume.baseElevationMm + volume.heightMm);
+}
+
+function getRenderVolumeRange(render) {
+  const volume = cloneRenderVolumeSettings(render?.volume);
+  const startMm = volume.baseElevationMm;
+  const endMm = quantizeCoordinate(volume.baseElevationMm + volume.heightMm);
+  return {
+    baseElevationMm: startMm,
+    heightMm: volume.heightMm,
+    endMm,
+    hasExplicitRange: volume.heightMm > 1e-6,
+  };
 }
 
 function getActiveRenderRecord() {
@@ -1406,6 +1505,7 @@ function resolveRenderPaneRequest(renderRecord, slotIndex) {
   const directionConfig = getRenderDirectionConfig(direction);
   const frame = getRenderBoxLocalFrame(renderRecord);
   const clipGeometryWorld = frame ? [[frame.boxGeometry.map((point) => [point.x, point.y])]] : [];
+  const volumeRange = getRenderVolumeRange(renderRecord);
 
   return {
     slotIndex,
@@ -1413,6 +1513,7 @@ function resolveRenderPaneRequest(renderRecord, slotIndex) {
     direction,
     directionConfig,
     frame,
+    volumeRange,
     clipGeometryWorld,
     clipBoundsWorld: clipGeometryWorld.length ? getGeometryBounds(clipGeometryWorld) : { x: 0, y: 0, w: 0, h: 0 },
   };
@@ -1434,9 +1535,18 @@ function buildRenderPaneFoundation(renderRecord, slotIndex, compiledScene = comp
 
   const intersectingEntries = [];
   let clippedAreaWorld = 0;
+  const explicitVolumeRange = request.volumeRange?.hasExplicitRange ? request.volumeRange : null;
 
   compiledScene.entries.forEach((entry) => {
     if (!boundsTouch(entry.boundsWorld, request.clipBoundsWorld)) return;
+
+    const clippedBaseElevationMm = explicitVolumeRange
+      ? Math.max(entry.baseElevationMm, explicitVolumeRange.baseElevationMm)
+      : entry.baseElevationMm;
+    const clippedTopElevationMm = explicitVolumeRange
+      ? Math.min(entry.topElevationMm, explicitVolumeRange.endMm)
+      : entry.topElevationMm;
+    if (clippedTopElevationMm <= clippedBaseElevationMm + 1e-6) return;
 
     const clippedGeometryWorld = executeClipperBoolean(ClipType.Intersection, entry.geometryWorld, request.clipGeometryWorld);
     if (!clippedGeometryWorld.length) return;
@@ -1479,14 +1589,22 @@ function buildRenderPaneFoundation(renderRecord, slotIndex, compiledScene = comp
       localSourceComponents,
       localBounds,
       clippedAreaWorld: clippedEntryArea,
+      clippedBaseElevationMm: quantizeCoordinate(clippedBaseElevationMm),
+      clippedTopElevationMm: quantizeCoordinate(clippedTopElevationMm),
+      clippedHeightMm: quantizeCoordinate(clippedTopElevationMm - clippedBaseElevationMm),
     });
   });
 
   const elevationRangeMm =
-    intersectingEntries.length > 0
+    explicitVolumeRange
       ? {
-          minMm: Math.min(...intersectingEntries.map((entry) => entry.baseElevationMm)),
-          maxMm: Math.max(...intersectingEntries.map((entry) => entry.topElevationMm)),
+          minMm: explicitVolumeRange.baseElevationMm,
+          maxMm: explicitVolumeRange.endMm,
+        }
+      : intersectingEntries.length > 0
+      ? {
+          minMm: Math.min(...intersectingEntries.map((entry) => entry.clippedBaseElevationMm)),
+          maxMm: Math.max(...intersectingEntries.map((entry) => entry.clippedTopElevationMm)),
         }
       : { minMm: 0, maxMm: 0 };
 
@@ -1516,6 +1634,7 @@ function buildRenderPanePlaceholderLines(foundation) {
       lines: [
         "No render-enabled layer geometry intersects this Rbox yet.",
         `Scene ${compiledScene.layerCount} layers | Box ${formatLengthWithUnit(request.frame.widthMm)} × ${formatLengthWithUnit(request.frame.heightMm)}`,
+        `Z ${formatLengthWithUnit(foundation.elevationRangeMm.minMm)} → ${formatLengthWithUnit(foundation.elevationRangeMm.maxMm)}`,
       ],
     };
   }
@@ -1716,8 +1835,8 @@ function collectDirectionalDocumentationComponents(foundation) {
         layerId: entry.layerId,
         sourceShapeKey: sourceComponent.sourceShapeKey,
         fillColor: sanitizeColorValue(entry.fillColor, "#93c5fd"),
-        baseElevationMm: entry.baseElevationMm,
-        topElevationMm: entry.topElevationMm,
+        baseElevationMm: entry.clippedBaseElevationMm,
+        topElevationMm: entry.clippedTopElevationMm,
         stackOrderIndex: entry.stackOrderIndex,
         projectedGeometry,
         projectedBounds,
@@ -1885,8 +2004,8 @@ function collectDirectionalZBreakpoints(foundation) {
   addBreakpoint(maxZ);
   addBreakpoint(minZ);
   intersectingEntries.forEach((entry) => {
-    addBreakpoint(entry.topElevationMm);
-    addBreakpoint(entry.baseElevationMm);
+    addBreakpoint(entry.clippedTopElevationMm);
+    addBreakpoint(entry.clippedBaseElevationMm);
   });
 
   const sorted = Array.from(breakpointMap.values()).sort((a, b) => b - a);
@@ -2769,6 +2888,7 @@ function normalizeImportedRenderRecords(renders) {
           : `Rbox ${index + 1}`,
       visible: render.visible !== false,
       boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
+      volume: cloneRenderVolumeSettings(render.volume),
       sectionSettings: cloneRenderSectionSettings(render.sectionSettings),
     };
   });
@@ -2999,6 +3119,7 @@ function resetProjectInteractionState() {
   state.pendingRenderBox = null;
   state.renderLayoutPreset = 1;
   state.renderPaneDirectionProfiles = cloneRenderPaneDirectionProfiles(DEFAULT_RENDER_PANE_DIRECTION_PROFILES);
+  state.renderBoxPropertiesDraft = null;
   state.spacePressed = false;
   state.shiftPressed = false;
 
@@ -3686,6 +3807,7 @@ function isAnyModalOpen() {
     (!!settingsMenu && !settingsMenu.classList.contains("hidden")) ||
     (!!exportFallbackMenu && !exportFallbackMenu.classList.contains("hidden")) ||
     (!!layerSettingsModal && !layerSettingsModal.classList.contains("hidden")) ||
+    (!!renderBoxPropertiesModal && !renderBoxPropertiesModal.classList.contains("hidden")) ||
     (!!renderSettingsModal && !renderSettingsModal.classList.contains("hidden"))
   );
 }
@@ -3700,6 +3822,7 @@ function openSettingsMenu() {
 
   closeExportFallbackMenu();
   closeLayerSettingsModal();
+  closeRenderBoxPropertiesModal();
   closeRenderSettingsMenu();
   state.settingsDraft = cloneSettings(state.settings);
   syncSettingsMenu();
@@ -3719,6 +3842,7 @@ function openExportFallbackMenu() {
   if (!exportFallbackMenu) return;
   closeSettingsMenu();
   closeLayerSettingsModal();
+  closeRenderBoxPropertiesModal();
   closeRenderSettingsMenu();
   exportFallbackMenu.classList.remove("hidden");
   syncModalBackdropVisibility();
@@ -3735,6 +3859,7 @@ function openLayerSettingsModal() {
 
   closeSettingsMenu();
   closeExportFallbackMenu();
+  closeRenderBoxPropertiesModal();
   closeRenderSettingsMenu();
   state.layerSettingsDraft = createLayerSettingsDraft();
   layerSettingsModal.classList.remove("hidden");
@@ -3760,6 +3885,7 @@ function openRenderSettingsMenu() {
   closeSettingsMenu();
   closeExportFallbackMenu();
   closeLayerSettingsModal();
+  closeRenderBoxPropertiesModal();
   state.renderSettingsDraft = cloneRenderSettings(state.renderSettings);
   syncRenderSettingsMenu();
   renderSettingsModal.classList.remove("hidden");
@@ -3772,6 +3898,48 @@ function closeRenderSettingsMenu() {
   renderSettingsModal.classList.add("hidden");
   state.renderSettingsDraft = null;
   syncModalBackdropVisibility();
+}
+
+function openRenderBoxPropertiesModal(renderId) {
+  if (!renderBoxPropertiesModal) return;
+
+  const draft = createRenderBoxPropertiesDraft(renderId);
+  if (!draft) return;
+
+  closeSettingsMenu();
+  closeExportFallbackMenu();
+  closeLayerSettingsModal();
+  closeRenderSettingsMenu();
+  state.renderBoxPropertiesDraft = draft;
+  syncRenderBoxPropertiesModal();
+  renderBoxPropertiesModal.classList.remove("hidden");
+  syncModalBackdropVisibility();
+}
+
+function closeRenderBoxPropertiesModal() {
+  if (!renderBoxPropertiesModal) return;
+
+  renderBoxPropertiesModal.classList.add("hidden");
+  state.renderBoxPropertiesDraft = null;
+  syncModalBackdropVisibility();
+}
+
+function applyRenderBoxPropertiesDraft() {
+  const draft = state.renderBoxPropertiesDraft;
+  if (!draft) return;
+
+  const renderRecord = getRenderById(draft.renderId);
+  if (!renderRecord) return;
+
+  renderRecord.volume = cloneRenderVolumeSettings({
+    baseElevationMm: draft.baseElevationMm,
+    heightMm: draft.heightMm,
+  });
+  state.renderBoxPropertiesDraft = createRenderBoxPropertiesDraft(renderRecord.id);
+  syncRenderBoxPropertiesModal();
+  renderLayersPanel();
+  renderWorkspaceUi();
+  render();
 }
 
 function applySettingsDraft() {
@@ -3922,6 +4090,7 @@ function createRenderRecord(options = {}) {
     name: typeof options.name === "string" && options.name.trim() ? options.name.trim() : fallbackName,
     visible: options.visible !== false,
     boxGeometry: cloneRenderBoxGeometry(options.boxGeometry),
+    volume: cloneRenderVolumeSettings(options.volume),
     sectionSettings: cloneRenderSectionSettings(options.sectionSettings),
   };
 }
@@ -6606,8 +6775,18 @@ function renderLayersPanel() {
         secondaryMeta.className = "render-card-meta-secondary";
         secondaryMeta.textContent = getRenderSectionSummary(renderRecord);
 
+        const propertiesButton = document.createElement("button");
+        propertiesButton.className = "render-card-action-button";
+        propertiesButton.type = "button";
+        propertiesButton.textContent = "Rbox Properties";
+        propertiesButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          openRenderBoxPropertiesModal(renderRecord.id);
+        });
+
         children.appendChild(meta);
         children.appendChild(secondaryMeta);
+        children.appendChild(propertiesButton);
 
         card.appendChild(grip);
         card.appendChild(main);
@@ -6764,6 +6943,7 @@ function duplicateRender(renderId) {
     name: `${getRenderTabLabel(sourceRender)} copy`,
     visible: sourceRender.visible !== false,
     boxGeometry: sourceRender.boxGeometry,
+    volume: sourceRender.volume,
     sectionSettings: sourceRender.sectionSettings,
   });
 
@@ -6843,6 +7023,9 @@ function deleteRenderById(renderId) {
   if (state.activeRenderId === renderId) {
     state.activeRenderId = null;
     state.renderTransformDrag = null;
+  }
+  if (state.renderBoxPropertiesDraft?.renderId === renderId) {
+    closeRenderBoxPropertiesModal();
   }
 
   if (state.activeWorkspaceTab?.kind === "render" && state.activeWorkspaceTab.renderId === renderId) {
@@ -8948,11 +9131,47 @@ if (renderSettingsApplyButton) {
   });
 }
 
+if (renderBoxPropertiesCloseButton) {
+  renderBoxPropertiesCloseButton.addEventListener("click", () => {
+    closeRenderBoxPropertiesModal();
+  });
+}
+
+if (renderBoxPropertiesApplyButton) {
+  renderBoxPropertiesApplyButton.addEventListener("click", () => {
+    if (!state.renderBoxPropertiesDraft) return;
+
+    const displayUnitId = state.settings.displayUnit;
+    const parsedHeightMm = renderBoxPropertiesHeightInput
+      ? parseLayerSettingsLengthInput(renderBoxPropertiesHeightInput.value, displayUnitId)
+      : null;
+    const parsedStartMm = renderBoxPropertiesStartInput
+      ? parseLayerSettingsLengthInput(renderBoxPropertiesStartInput.value, displayUnitId)
+      : null;
+    const parsedEndMm = renderBoxPropertiesEndInput
+      ? parseLayerSettingsLengthInput(renderBoxPropertiesEndInput.value, displayUnitId)
+      : null;
+
+    if (parsedHeightMm !== null) {
+      state.renderBoxPropertiesDraft.heightMm = Math.max(0, parsedHeightMm);
+    }
+    if (parsedStartMm !== null) {
+      state.renderBoxPropertiesDraft.baseElevationMm = parsedStartMm;
+    } else if (parsedEndMm !== null) {
+      state.renderBoxPropertiesDraft.baseElevationMm = quantizeCoordinate(parsedEndMm - state.renderBoxPropertiesDraft.heightMm);
+    }
+
+    applyRenderBoxPropertiesDraft();
+    closeRenderBoxPropertiesModal();
+  });
+}
+
 if (modalBackdrop) {
   modalBackdrop.addEventListener("click", () => {
     closeSettingsMenu();
     closeExportFallbackMenu();
     closeLayerSettingsModal();
+    closeRenderBoxPropertiesModal();
     closeRenderSettingsMenu();
   });
 }
@@ -9127,6 +9346,45 @@ if (renderDepthStrengthValue) {
     );
     syncRenderSettingsMenu();
   });
+}
+
+if (renderBoxPropertiesHeightInput) {
+  renderBoxPropertiesHeightInput.addEventListener("input", () => {
+    if (!state.renderBoxPropertiesDraft) return;
+    const parsedHeightMm = parseLayerSettingsLengthInput(renderBoxPropertiesHeightInput.value, state.settings.displayUnit);
+    if (parsedHeightMm === null) return;
+    state.renderBoxPropertiesDraft.heightMm = Math.max(0, parsedHeightMm);
+    syncRenderBoxPropertiesModal();
+  });
+
+  renderBoxPropertiesHeightInput.addEventListener("change", syncRenderBoxPropertiesModal);
+  renderBoxPropertiesHeightInput.addEventListener("blur", syncRenderBoxPropertiesModal);
+}
+
+if (renderBoxPropertiesStartInput) {
+  renderBoxPropertiesStartInput.addEventListener("input", () => {
+    if (!state.renderBoxPropertiesDraft) return;
+    const parsedStartMm = parseLayerSettingsLengthInput(renderBoxPropertiesStartInput.value, state.settings.displayUnit);
+    if (parsedStartMm === null) return;
+    state.renderBoxPropertiesDraft.baseElevationMm = parsedStartMm;
+    syncRenderBoxPropertiesModal();
+  });
+
+  renderBoxPropertiesStartInput.addEventListener("change", syncRenderBoxPropertiesModal);
+  renderBoxPropertiesStartInput.addEventListener("blur", syncRenderBoxPropertiesModal);
+}
+
+if (renderBoxPropertiesEndInput) {
+  renderBoxPropertiesEndInput.addEventListener("input", () => {
+    if (!state.renderBoxPropertiesDraft) return;
+    const parsedEndMm = parseLayerSettingsLengthInput(renderBoxPropertiesEndInput.value, state.settings.displayUnit);
+    if (parsedEndMm === null) return;
+    state.renderBoxPropertiesDraft.baseElevationMm = quantizeCoordinate(parsedEndMm - state.renderBoxPropertiesDraft.heightMm);
+    syncRenderBoxPropertiesModal();
+  });
+
+  renderBoxPropertiesEndInput.addEventListener("change", syncRenderBoxPropertiesModal);
+  renderBoxPropertiesEndInput.addEventListener("blur", syncRenderBoxPropertiesModal);
 }
 
 shapeSelect.addEventListener("change", (e) => {
@@ -9366,6 +9624,14 @@ window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       e.preventDefault();
       closeRenderSettingsMenu();
+    }
+    return;
+  }
+
+  if (isRenderBoxPropertiesModalOpen()) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeRenderBoxPropertiesModal();
     }
     return;
   }

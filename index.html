@@ -421,6 +421,25 @@
         color: var(--muted);
       }
 
+      .render-card-action-button {
+        width: 100%;
+        margin-top: 4px;
+        padding: 9px 10px;
+        border: 1px solid var(--ui-line);
+        border-radius: 12px;
+        background: var(--ui-surface);
+        color: var(--ui-text);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: 140ms ease;
+      }
+
+      .render-card-action-button:hover {
+        background: var(--ui-surface-strong);
+        border-color: var(--ui-line-strong);
+      }
+
       .drawing-subsection {
         display: flex;
         flex-direction: column;
@@ -2128,6 +2147,45 @@
       <div class="calibration-actions">
         <button class="ghost-button modal-action-button" id="renderSettingsCloseButton" type="button">Close</button>
         <button class="ghost-button modal-action-button" id="renderSettingsApplyButton" type="button">Apply</button>
+      </div>
+    </div>
+
+    <div
+      class="menu-panel modal-panel hidden"
+      id="renderBoxPropertiesModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="renderBoxPropertiesHeading"
+    >
+      <div class="tool-heading" id="renderBoxPropertiesHeading">Rbox Properties</div>
+      <p class="modal-copy" id="renderBoxPropertiesTarget">Rbox 1</p>
+
+      <div class="settings-group">
+        <div class="menu-section">
+          <div class="menu-title">Height</div>
+          <div class="menu-actions stepper-actions">
+            <input class="stepper-value stepper-input" id="renderBoxPropertiesHeightInput" type="number" min="0" step="0.01" value="0" />
+          </div>
+        </div>
+
+        <div class="menu-section">
+          <div class="menu-title">Start</div>
+          <div class="menu-actions stepper-actions">
+            <input class="stepper-value stepper-input" id="renderBoxPropertiesStartInput" type="number" step="0.01" value="0" />
+          </div>
+        </div>
+
+        <div class="menu-section">
+          <div class="menu-title">End</div>
+          <div class="menu-actions stepper-actions">
+            <input class="stepper-value stepper-input" id="renderBoxPropertiesEndInput" type="number" step="0.01" value="0" />
+          </div>
+        </div>
+      </div>
+
+      <div class="calibration-actions">
+        <button class="ghost-button modal-action-button" id="renderBoxPropertiesCloseButton" type="button">Close</button>
+        <button class="ghost-button modal-action-button" id="renderBoxPropertiesApplyButton" type="button">Apply</button>
       </div>
     </div>
 

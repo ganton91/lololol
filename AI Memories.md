@@ -407,6 +407,7 @@ Layer order controls draw order. The active layer receives new geometry when the
   - `name`
   - `visible`
   - `boxGeometry`: ordered world-space corner points for the committed `Render Box`, stored in quantized millimeter coordinates so Draft Plane orientation is preserved after commit
+  - `volume`: per-render vertical extent settings with `baseElevationMm` and `heightMm`, so each `Rbox` can later act as a full render prism instead of only a 2D footprint
   - `sectionSettings`: `{ z: [], x: [], y: [] }` reserved for future render-local section definitions
 - `Render` tabs should be driven one-to-one by committed render records.
 - `Render Box` authoring now happens through a dedicated `Rbox` draw tool inside the existing `Draw` tool family.
@@ -481,6 +482,13 @@ Layer order controls draw order. The active layer receives new geometry when the
   - draw-only pointer previews and ruler previews should stay hidden while `Rbox` transform mode is active
   - the active `Rbox` is currently move-only
   - pressing `Escape` deactivates the active `Rbox` and closes the transform mode without rewriting the user's underlying base tool choice
+- Each `Rbox` card now also has an `Rbox Properties` button in its lower area, and that button opens a dedicated modal for per-render `Height`, `Start`, and `End`
+- Those `Rbox Properties` values now persist directly on the render record itself and survive duplicate/import/export, even though the render engine does not use that vertical render-prism extent yet
+- The non-plan directional render foundation now also respects the `Rbox` vertical range:
+  - when an `Rbox` has a positive `Height`, side renders clip layer prisms against that `Start → End` range in `Z` instead of borrowing the visible height only from the intersecting layer scene
+  - that same explicit `Rbox` `Start → End` range now becomes the displayed vertical extent of the side render, so empty space above or below the geometry can exist inside the rendered prism
+  - when an `Rbox` still has `Height = 0`, the current behavior intentionally falls back to the old auto-height mode so older/default render boxes do not collapse into a zero-height render
+  - a likely future refinement is to replace that implicit `Height = 0` fallback with an explicit `Clip to Geometry` render-volume option, probably default-on, so auto-height clipping becomes a named mode instead of being hidden behind zero height
 - The left panel now has a fixed bottom `Layer Settings` trigger outside the scroll area, and that trigger opens a dedicated render-layer modal instead of placing the editor inside the scrolling panel content.
 - That fixed `Layer Settings` trigger is now styled as a centered floating button rather than a full-width footer bar, while the footer surface itself blends back into the left-panel background without a separator line.
 - The same footer area now also includes a matching `Render Settings` button beside `Layer Settings`; it now opens a dedicated render-settings modal instead of acting as a placeholder.

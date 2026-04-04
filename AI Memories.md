@@ -239,6 +239,7 @@ The current authoring panel behavior is:
 - Locked layers do not accept edits.
 - The `Drawings` add button creates a real new drawing with a default layer inside it and makes that drawing/layer active.
 - The nested `Layers` add button creates a real new layer inside the current drawing.
+- A newly added layer now inserts directly above the current active layer in that drawing instead of always being created at the very top of the stack.
 - Drawing drag reorder updates actual canvas paint order across drawings.
 - Layer drag reorder updates actual paint order within the drawing, and layer drag can also move a layer into another drawing or merge it into another layer while preserving the target layer's properties.
 

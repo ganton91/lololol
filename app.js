@@ -7458,7 +7458,13 @@ function moveLayerToDrawingTop(layerId, targetDrawingId) {
 function addLayer(drawingId = getPrimaryDrawingUi().id) {
   const drawing = getDrawingUiById(drawingId) || getPrimaryDrawingUi();
   const layer = createLayerRecord(drawing.id);
-  state.layers.push(layer);
+  const activeLayer = getActiveLayer();
+  const activeLayerIndex = state.layers.findIndex((entry) => entry.id === activeLayer?.id);
+  if (activeLayerIndex >= 0) {
+    state.layers.splice(activeLayerIndex + 1, 0, layer);
+  } else {
+    state.layers.push(layer);
+  }
   drawing.layersSectionCollapsed = false;
   setActiveDrawingById(drawing.id, { layerId: layer.id });
   clearSelection();

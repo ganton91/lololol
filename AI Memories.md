@@ -20,7 +20,10 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 
 ### UI Structure
 
-- `index.html` contains the canvas, toolbar, zoom controls, live workplane status readout, hint area, and layers panel.
+- `index.html` contains the fixed `millimétré` top bar, the left-side `Drawings` panel, the canvas shell, the bottom workspace/tab switcher, and the app's centered modal shells.
+- The top bar currently includes the brand shell, `Settings`, `Export`, and `Import` controls, visual-only `Undo` / `Redo` placeholders, and compact live status readouts for grid/workplane state on the right.
+- The old floating layers widget is gone; the primary authoring sidebar is now a left-side `Drawings` panel with nested card-based `Layers`.
+- The canvas shell now includes four drafting rulers plus all four corner blocks around an inset live viewport.
 - `index.html` now also contains a centered settings modal shell with a backdrop for unit, snapping, and canvas edge/corner display configuration.
 - `index.html` now also contains an export-download notice modal that shares the same centered modal language and shared backdrop behavior.
 - `app.js` reads those DOM elements and drives the whole interaction loop.
@@ -147,6 +150,14 @@ Each layer currently has:
 
 Layer order controls draw order. The active layer receives new geometry when the user draws.
 
+The current authoring panel behavior is:
+
+- only one drawing is active/expanded at a time
+- the app maintains one active layer inside that active drawing
+- drawing cards support rename, duplicate, hide/show, delete, and drag reorder
+- layer cards support rename, duplicate, hide/show, delete, drag reorder, cross-drawing move, and merge-on-drop into another layer
+- layer deletion preserves at least one layer per drawing, and drawing deletion preserves a valid fallback active drawing/layer
+
 ### Tools And Interaction
 
 - `Draw`: creates rectangle, ellipse, strip, or square-brush geometry with left click, and subtracts with the same geometry modes using right click.
@@ -226,6 +237,10 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Draft rulers now format labels in the active display unit rather than as raw cell indices, and they use adaptive label thinning/collision avoidance so labels stay readable at far zoom.
 - Hidden layers are not rendered.
 - Locked layers do not accept edits.
+- The `Drawings` add button creates a real new drawing with a default layer inside it and makes that drawing/layer active.
+- The nested `Layers` add button creates a real new layer inside the current drawing.
+- Drawing drag reorder updates actual canvas paint order across drawings.
+- Layer drag reorder updates actual paint order within the drawing, and layer drag can also move a layer into another drawing or merge it into another layer while preserving the target layer's properties.
 
 ## Dependency Notes
 
@@ -267,74 +282,6 @@ Layer order controls draw order. The active layer receives new geometry when the
 - Fix: changed `clipperSimplifyCollinearEpsilon` from `0` to `1` in `app.js` (line 139). The simplifier now removes near-collinear intermediate vertices within 1 Clipper unit, which is imperceptible (1e-8 world units) and does not affect geometry visible at any zoom level or affect alignment between layers.
 
 ## Current Tasks
-
-### Current Task 1: Interface Implementation
-
-- Task: continue building and polishing the application's interface around the current `millimétré` shell, drawings panel, canvas shell, and interaction patterns already implemented in the app.
-- Status: interface implementation remains active. We are closer to the target shell now, but there is still meaningful work left before this track is complete. The previous `Renders`-workspace task is no longer the current tracked task here.
-
-#### Source Of Truth
-
-- Use the current app files, especially `index.html` and `app.js`, as the source of truth for ongoing interface work.
-- If an external example file is needed for comparison, treat it as temporary research input rather than as a permanent naming source.
-
-#### Interface Scope
-
-- Rework and polish the app shell around the current interface direction already established in the project.
-- The target interface now includes:
-  - top bar
-  - left-side panel structure
-  - canvas shell
-  - floating tools
-  - floating side panels
-  - bottom view/tab switcher
-  - modal and properties panel shells
-- The immediate focus is interface layout, component structure, naming, and interaction scaffolding before deeper feature-complete behavior.
-
-#### Interface Direction Locked In
-
-- Keep the current visual hierarchy and spatial organization coherent while we continue refining the interface.
-- Keep the project compatible with plain browser deployment from `index.html` and native browser JavaScript without introducing a build step.
-- Preserve the current app's real geometry and drafting behavior unless a UI change explicitly requires a behavioral integration.
-- When temporary migration names are still present, rename them toward permanent app-native naming as the interface stabilizes.
-
-#### Progress
-
-- The active task has been reset from the old `Renders` planning track to interface implementation.
-- The real dimensions / units task is no longer an active tracked task; its accepted outcome now lives in the permanent sections above.
-- The current app shell now includes the `millimétré` top bar with the current button order, brand styling, separator, translucent surface treatment, and hover behavior.
-- The `Settings`, `Export`, and `Import` buttons in the top bar are now wired to real behavior; `Undo` and `Redo` remain visual-only placeholders.
-- The settings modal now uses a single `Settings` heading with extra breathing room before the rows.
-- The canvas sizing logic now measures the actual visible canvas area below the new fixed header row so the drawing surface still renders correctly under the updated app shell.
-- The canvas shell now includes four-sided drafting rulers around the live canvas viewport plus all four corner blocks, with the inner drawing viewport inset inside that frame.
-- Ruler ticks and labels are now drawn from the app's live camera pan, zoom, and grid intervals instead of static DOM marks, and the ruler canvases resize together with the main drawing canvas.
-- The right side of the top bar now includes compact live status readouts for grid/workplane state instead of showing them inside the floating canvas toolbar.
-- The old floating layers widget has been replaced by a left-side panel shell with a `Drawings` section.
-- The left panel now renders a `Drawing 1` container with nested `Layers` cards and the new card-based visual hierarchy.
-- Layer cards now span the full width of the nested layers list instead of sitting inside an extra left indent.
-- Layer cards now show inline duplicate / visibility / delete icons plus an `Opacity` slider row, and the active layer expands while inactive layers stay collapsed.
-- Each layer card now shows a small clickable circular fill-color swatch between the drag handle and the layer name, and that swatch remains visible even when the layer card is collapsed.
-- The layer object-count and opacity rows now span the full layer-card width, starting from the drag-handle edge instead of the name column.
-- Layer drag can now move a layer into a different drawing by dropping it onto another drawing card; the moved layer becomes the top layer in the target drawing, and if the source drawing would become empty it automatically keeps a fallback empty layer.
-- Layer drag now also supports merge-on-drop over another layer card: hovering the middle of a target layer card shows the same soft neutral hover state, and dropping unions the source layer geometry into the target layer while preserving the target layer's properties and deleting the source layer.
-- Each layer card now shows a total area row above the object count, and that area is formatted in the active `Display Unit` squared (`mm²`, `cm²`, or `m²`).
-- The settings modal now includes `Outline` and `Corners` rows below `Cell Size`; `Outline` has `On/Off` plus a circular color swatch, while `Corners` has `On/Off` only and is disabled whenever `Outline` is off.
-- The canvas render stack is now split into always-visible terracotta `World` axes plus a draft-canvas layer (`Grid` + draft-plane axes) that is shown only in `Draw`; the draft canvas renders above the regular layer geometry, and the active layer's emphasized outline/corners are re-drawn above that draft canvas.
-- The panel now follows an active-drawing model: only one drawing is active/expanded at a time, and the app keeps a single active layer inside that active drawing.
-- The main `Drawings` add button now creates a real new drawing with a default layer inside it and makes that drawing/layer active.
-- Drawing header controls now work for duplicate, hide/show, and delete; duplicating a drawing clones its layers and stored shapes, hiding a drawing suppresses its layers from render/select/snap, and deleting a drawing removes its layers/shapes while preserving a valid fallback active drawing/layer.
-- The nested `Layers` add button creates real app layers in the current drawing container, and layer deletion now preserves at least one layer per drawing.
-- Drawing drag-reordering now works with the same custom left-panel pointer drag model used by layers, using insertion markers and updating actual canvas paint order across drawings.
-- The last-card insertion marker spacing for drawing drag has been tuned separately so the drop line below the final drawing matches the layer-list behavior more closely.
-- Layer drag-reordering inside the nested `Layers` list now uses a custom pointer drag interaction with insertion markers and commit-on-drop behavior, without a separate floating preview card.
-- The drag reorder logic translates the visible top-to-bottom layer order in the left panel back into the app's underlying drawing/render order so the panel stack and canvas paint order stay aligned.
-- Clicking the expanded drawing name now swaps the label into the same inline rename input pattern used by layers; blur or `Enter` commits, while `Escape` cancels and restores the previous name.
-- Clicking the active layer name now swaps the label into an inline rename input that auto-focuses; `Enter` or blur commits the new name, while `Escape` cancels and restores the previous name.
-- Current duplicate behavior clones layers/drawings into the same world position with new ids and cloned geometry; there is no confirmed cross-layer or cross-drawing boolean merge bug from that flow, but exact overlap can visually resemble a shared result until one copy is moved or edited.
-- Layer cards no longer show the `Vector-authored layer` subtitle on normal unlocked layers; the secondary subtitle row now appears only for genuinely locked layers.
-- The layer-card object count now refreshes immediately after committed draw/subtract operations and after committed geometry rebuilds caused by moving selected shapes.
-- The old bottom-left instructional hint panel inside the canvas shell has been removed completely, including its markup and styling.
-- The canvas background now uses a warmer off-white canvas tone, while the grid keeps the app's own line widths and transparency-style hierarchy using darker light-theme strokes derived from the same palette rather than a single opaque color.
 
 ### Current Task 2: Renders Subsystem
 

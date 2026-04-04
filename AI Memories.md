@@ -449,6 +449,7 @@ Layer order controls draw order. The active layer receives new geometry when the
   - one always-visible `Main` tab
   - dynamic `Rbox` tabs driven by `state.renders`
   - a render workspace panel shell that opens when an `Rbox` tab becomes active
+  - the pane-direction choices are now remembered per workspace layout slide (`1 Side`, `2 Sides`, `4 Sides`) instead of sharing one global selector state across all three layouts
 - The bottom workspace switcher has now been tightened to use the external reference's light-theme visual language more literally, including its white surface, line color, muted/text values, active fill, and floating shadow.
 - The current render workspace shell is no longer placeholder-only:
   - it uses the external reference's `View` workspace interface much more literally as the base shell, including the layout controls, popout button, pane export buttons, and per-pane direction selector clusters
@@ -503,6 +504,7 @@ Layer order controls draw order. The active layer receives new geometry when the
   - each pane now resolves a normalized render request against the active `Rbox`, including direction metadata and the `Rbox` local frame
   - the workspace now computes real `Rbox` intersection awareness per pane by clipping render-enabled layer geometry against the committed render box
   - pane titles and selector-button active states now update from runtime pane-direction state instead of staying static in the markup
+  - that pane-direction state is now stored per layout slide, so changing a pane in `1 Side` no longer rewrites the matching slot in `2 Sides` or `4 Sides`
   - pane placeholder surfaces now show live derived summaries such as intersecting render-layer count, box dimensions, and elevation range for the active render box
   - export buttons are intentionally disabled for now until the later phases add actual canvas/export output builders
 - The render workspace now also has a first real Phase 2 painter pass on top of that foundation:

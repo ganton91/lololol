@@ -91,6 +91,12 @@ const DEFAULT_PROJECT_FILE_NAME = "millimetre-project.json";
 const DEFAULT_ACTIVE_WORKSPACE_TAB = Object.freeze({ kind: "main" });
 const STANDARD_RENDER_DIRECTIONS = Object.freeze(["topToBottom", "bottomToTop", "leftToRight", "rightToLeft", "plan"]);
 const DEFAULT_RENDER_PANE_DIRECTIONS = Object.freeze(["topToBottom", "bottomToTop", "leftToRight", "rightToLeft"]);
+const STANDARD_RENDER_LAYOUT_PRESETS = Object.freeze([1, 2, 4]);
+const DEFAULT_RENDER_PANE_DIRECTION_PROFILES = Object.freeze({
+  1: Object.freeze([...DEFAULT_RENDER_PANE_DIRECTIONS]),
+  2: Object.freeze([...DEFAULT_RENDER_PANE_DIRECTIONS]),
+  4: Object.freeze([...DEFAULT_RENDER_PANE_DIRECTIONS]),
+});
 const DEFAULT_LAYER_RENDER = Object.freeze({
   enabled: true,
   baseElevationMm: 0,
@@ -152,7 +158,11 @@ const state = {
   renderTransformDrag: null,
   activeWorkspaceTab: { ...DEFAULT_ACTIVE_WORKSPACE_TAB },
   renderLayoutPreset: 1,
-  renderPaneDirections: [...DEFAULT_RENDER_PANE_DIRECTIONS],
+  renderPaneDirectionProfiles: {
+    1: [...DEFAULT_RENDER_PANE_DIRECTIONS],
+    2: [...DEFAULT_RENDER_PANE_DIRECTIONS],
+    4: [...DEFAULT_RENDER_PANE_DIRECTIONS],
+  },
   nextDrawingId: 2,
   editingDrawingId: null,
   editingDrawingNameDraft: "",
@@ -936,6 +946,21 @@ function normalizeRenderPaneDirections(directions = null) {
   );
 }
 
+function sanitizeRenderLayoutPreset(value, fallback = 1) {
+  const numericValue = Number(value);
+  return STANDARD_RENDER_LAYOUT_PRESETS.includes(numericValue) ? numericValue : fallback;
+}
+
+function cloneRenderPaneDirectionProfiles(profiles = null, fallbackDirections = null) {
+  const fallbackProfile = normalizeRenderPaneDirections(fallbackDirections);
+  const source = isPlainObject(profiles) ? profiles : null;
+  return {
+    1: normalizeRenderPaneDirections(source?.[1] ?? source?.["1"] ?? fallbackProfile),
+    2: normalizeRenderPaneDirections(source?.[2] ?? source?.["2"] ?? fallbackProfile),
+    4: normalizeRenderPaneDirections(source?.[4] ?? source?.["4"] ?? fallbackProfile),
+  };
+}
+
 function getRenderDirectionLabel(direction) {
   switch (direction) {
     case "bottomToTop":
@@ -1284,16 +1309,19 @@ function setActiveWorkspaceTab(workspaceTab) {
 }
 
 function getRenderPaneDirection(slotIndex) {
-  return normalizeRenderPaneDirection(state.renderPaneDirections?.[slotIndex], DEFAULT_RENDER_PANE_DIRECTIONS[slotIndex] || DEFAULT_RENDER_PANE_DIRECTIONS[0]);
+  const preset = sanitizeRenderLayoutPreset(state.renderLayoutPreset, 1);
+  const directions = cloneRenderPaneDirectionProfiles(state.renderPaneDirectionProfiles)[preset];
+  return normalizeRenderPaneDirection(directions?.[slotIndex], DEFAULT_RENDER_PANE_DIRECTIONS[slotIndex] || DEFAULT_RENDER_PANE_DIRECTIONS[0]);
 }
 
 function setRenderPaneDirection(slotIndex, direction) {
   if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= DEFAULT_RENDER_PANE_DIRECTIONS.length) return false;
   const nextDirection = normalizeRenderPaneDirection(direction, DEFAULT_RENDER_PANE_DIRECTIONS[slotIndex]);
   if (getRenderPaneDirection(slotIndex) === nextDirection) return false;
-  const nextDirections = normalizeRenderPaneDirections(state.renderPaneDirections);
-  nextDirections[slotIndex] = nextDirection;
-  state.renderPaneDirections = nextDirections;
+  const preset = sanitizeRenderLayoutPreset(state.renderLayoutPreset, 1);
+  const nextProfiles = cloneRenderPaneDirectionProfiles(state.renderPaneDirectionProfiles);
+  nextProfiles[preset][slotIndex] = nextDirection;
+  state.renderPaneDirectionProfiles = nextProfiles;
   renderWorkspaceUi();
   return true;
 }
@@ -2565,7 +2593,8 @@ function syncRenderWorkspaceShell() {
 }
 
 function renderWorkspaceUi() {
-  state.renderPaneDirections = normalizeRenderPaneDirections(state.renderPaneDirections);
+  state.renderLayoutPreset = sanitizeRenderLayoutPreset(state.renderLayoutPreset, 1);
+  state.renderPaneDirectionProfiles = cloneRenderPaneDirectionProfiles(state.renderPaneDirectionProfiles);
   renderWorkspaceSwitcher();
   syncRenderWorkspaceShell();
   renderRenderWorkspaceOutputs();
@@ -2614,6 +2643,8 @@ function createProjectFilePayload() {
       drawSize: sanitizeProjectSizeControl(state.drawSize, 1),
       stripCellWidth: sanitizeProjectSizeControl(state.stripCellWidth, 1),
       activeWorkspaceTab: cloneActiveWorkspaceTab(state.activeWorkspaceTab, renderIds),
+      renderLayoutPreset: sanitizeRenderLayoutPreset(state.renderLayoutPreset, 1),
+      renderPaneDirectionProfiles: cloneRenderPaneDirectionProfiles(state.renderPaneDirectionProfiles),
       layerSectionCollapsed: state.layerSectionCollapsed === true,
       layerSettingsUi: cloneLayerSettingsUiMemory(state.layerSettingsUi, state.drawingsUi.map((drawing) => drawing.id)),
       renderSettings: cloneRenderSettings(state.renderSettings),
@@ -2887,6 +2918,11 @@ function normalizeImportedProjectFile(payload) {
       drawSize: sanitizeProjectSizeControl(payload.workspace.drawSize, 1),
       stripCellWidth: sanitizeProjectSizeControl(payload.workspace.stripCellWidth, 1),
       activeWorkspaceTab,
+      renderLayoutPreset: sanitizeRenderLayoutPreset(payload.workspace.renderLayoutPreset, 1),
+      renderPaneDirectionProfiles: cloneRenderPaneDirectionProfiles(
+        payload.workspace.renderPaneDirectionProfiles,
+        payload.workspace.renderPaneDirections
+      ),
       layerSectionCollapsed: payload.workspace.layerSectionCollapsed === true,
       layerSettingsUi,
       renderSettings: cloneRenderSettings(payload.workspace.renderSettings),
@@ -2961,7 +2997,8 @@ function resetProjectInteractionState() {
   state.activeRenderId = null;
   state.renderTransformDrag = null;
   state.pendingRenderBox = null;
-  state.renderPaneDirections = [...DEFAULT_RENDER_PANE_DIRECTIONS];
+  state.renderLayoutPreset = 1;
+  state.renderPaneDirectionProfiles = cloneRenderPaneDirectionProfiles(DEFAULT_RENDER_PANE_DIRECTION_PROFILES);
   state.spacePressed = false;
   state.shiftPressed = false;
 
@@ -2988,6 +3025,8 @@ function applyImportedProject(normalizedProject, importedFileName = DEFAULT_PROJ
   state.nextRenderId = normalizedProject.document.nextRenderId;
   state.activeWorkspaceTab = cloneActiveWorkspaceTab(normalizedProject.workspace.activeWorkspaceTab, new Set(state.renders.map((render) => render.id)));
   state.activeRenderId = null;
+  state.renderLayoutPreset = sanitizeRenderLayoutPreset(normalizedProject.workspace.renderLayoutPreset, 1);
+  state.renderPaneDirectionProfiles = cloneRenderPaneDirectionProfiles(normalizedProject.workspace.renderPaneDirectionProfiles);
   state.settings = cloneSettings(normalizedProject.workspace.settings);
   state.renderSettings = cloneRenderSettings(normalizedProject.workspace.renderSettings);
   state.layerSettingsUi = cloneLayerSettingsUiMemory(
@@ -9181,8 +9220,7 @@ if (addRenderBtn) {
 
 for (const button of renderLayoutButtons) {
   button.addEventListener("click", () => {
-    const nextPreset = Number(button.dataset.renderLayout);
-    if (nextPreset !== 1 && nextPreset !== 2 && nextPreset !== 4) return;
+    const nextPreset = sanitizeRenderLayoutPreset(button.dataset.renderLayout, state.renderLayoutPreset);
     if (state.renderLayoutPreset === nextPreset) return;
     state.renderLayoutPreset = nextPreset;
     renderWorkspaceUi();

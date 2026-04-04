@@ -518,6 +518,11 @@ Layer order controls draw order. The active layer receives new geometry when the
   - the directional render painter now shades visible fills by depth offset relative to the nearest visible depth, using the active render-settings mode and strength rather than a hardcoded look
   - `Plan` still stays on its simpler fill path for now; the shared plan/documentation unification is still a later step
   - a future refinement idea that should be kept in mind: keep the same global `nearest visible depth` model, but change the shading curve from a constant linear step-per-depth-step into a diminishing falloff so the first depth gaps darken more strongly and the farther-back gaps add progressively less darkening, instead of every depth step contributing the same amount forever
+- A new per-vertex outline-eligibility foundation now exists in the main geometry model:
+  - each stored shape now carries `vertexOutlineEligibility` alongside its geometry
+  - ellipse approximation vertices default to `false`, while authored straight/corner tools default to `true`
+  - in the main canvas, `false` vertices render in a mid gray while `true` vertices keep the normal outline color, so provenance is visible during editing
+  - that metadata now survives clone/duplicate/import-export/move paths and is also propagated through current layer rebuild / boolean flows with coordinate-based provenance matching
 - The next locked implementation order for the render pipeline is now:
   1. add global outlines that recognize silhouettes and depth transitions instead of simple flat strokes
   2. add the more advanced outline/section-aware behavior after that foundation is in place

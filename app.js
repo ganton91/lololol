@@ -36,6 +36,8 @@ const renderSettingsApplyButton = document.getElementById("renderSettingsApplyBu
 const renderDepthStrengthDecrease = document.getElementById("renderDepthStrengthDecrease");
 const renderDepthStrengthIncrease = document.getElementById("renderDepthStrengthIncrease");
 const renderDepthStrengthValue = document.getElementById("renderDepthStrengthValue");
+const renderOutlineColorInput = document.getElementById("renderOutlineColorInput");
+const renderOutlineWidthInput = document.getElementById("renderOutlineWidth");
 const settingsCellSizeInput = document.getElementById("settingsCellSizeInput");
 const settingsOutlineColorInput = document.getElementById("settingsOutlineColorInput");
 const settingsOutlineSwatch = document.getElementById("settingsOutlineSwatch");
@@ -79,6 +81,7 @@ const settingsAlignSnapButtons = Array.from(document.querySelectorAll("[data-set
 const settingsOutlineButtons = Array.from(document.querySelectorAll("[data-settings-outline-enabled]"));
 const settingsCornersButtons = Array.from(document.querySelectorAll("[data-settings-corners-enabled]"));
 const renderDepthModeButtons = Array.from(document.querySelectorAll("[data-render-depth-mode]"));
+const renderOutlineButtons = Array.from(document.querySelectorAll("[data-render-outline]"));
 
 const defaultOutlineStrokeColor = "#0f172a";
 const hiddenOutlineVertexColor = "#9ca3af";
@@ -103,8 +106,14 @@ const DEFAULT_RENDER_DEPTH_EFFECT = Object.freeze({
   strength: 0.05,
   mode: "shadow",
 });
+const DEFAULT_RENDER_OUTLINE_EFFECT = Object.freeze({
+  enabled: true,
+  thickness: 2,
+  color: "#111827",
+});
 const DEFAULT_RENDER_SETTINGS = Object.freeze({
   depthEffect: DEFAULT_RENDER_DEPTH_EFFECT,
+  outlineEffect: DEFAULT_RENDER_OUTLINE_EFFECT,
 });
 const DEFAULT_SETTINGS = Object.freeze({
   displayUnit: "m",
@@ -196,6 +205,7 @@ const state = {
   settingsDraft: null,
   renderSettings: {
     depthEffect: { ...DEFAULT_RENDER_DEPTH_EFFECT },
+    outlineEffect: { ...DEFAULT_RENDER_OUTLINE_EFFECT },
   },
   renderSettingsDraft: null,
   layerSettingsDraft: null,
@@ -343,6 +353,12 @@ function sanitizeRenderDepthStrength(value, fallback = DEFAULT_RENDER_DEPTH_EFFE
   return Math.max(0.01, Math.min(100, Math.round(numericValue * 100) / 100));
 }
 
+function sanitizeRenderOutlineThickness(value, fallback = DEFAULT_RENDER_OUTLINE_EFFECT.thickness) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return fallback;
+  return Math.max(1, Math.min(12, Math.round(numericValue)));
+}
+
 function cloneRenderDepthEffect(effect = null) {
   const fallbackMode = effect?.enabled === false ? "off" : DEFAULT_RENDER_DEPTH_EFFECT.mode;
   const mode = sanitizeRenderDepthMode(effect?.mode, fallbackMode);
@@ -353,9 +369,18 @@ function cloneRenderDepthEffect(effect = null) {
   };
 }
 
+function cloneRenderOutlineEffect(effect = null) {
+  return {
+    enabled: sanitizeSettingsToggle(effect?.enabled, DEFAULT_RENDER_OUTLINE_EFFECT.enabled),
+    thickness: sanitizeRenderOutlineThickness(effect?.thickness, DEFAULT_RENDER_OUTLINE_EFFECT.thickness),
+    color: sanitizeColorValue(effect?.color, DEFAULT_RENDER_OUTLINE_EFFECT.color),
+  };
+}
+
 function cloneRenderSettings(settings = state.renderSettings) {
   return {
     depthEffect: cloneRenderDepthEffect(settings?.depthEffect),
+    outlineEffect: cloneRenderOutlineEffect(settings?.outlineEffect),
   };
 }
 
@@ -721,6 +746,30 @@ function syncRenderSettingsMenu() {
   if (renderDepthStrengthValue) {
     renderDepthStrengthValue.disabled = !depthControlsEnabled;
     renderDepthStrengthValue.value = state.renderSettingsDraft.depthEffect.strength.toFixed(2);
+  }
+
+  for (const button of renderOutlineButtons) {
+    const active = button.dataset.renderOutline === (state.renderSettingsDraft.outlineEffect.enabled ? "on" : "off");
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+
+  if (renderOutlineColorInput) {
+    renderOutlineColorInput.value = sanitizeColorValue(
+      state.renderSettingsDraft.outlineEffect.color,
+      DEFAULT_RENDER_OUTLINE_EFFECT.color
+    );
+    renderOutlineColorInput.disabled = !state.renderSettingsDraft.outlineEffect.enabled;
+  }
+
+  if (renderOutlineWidthInput) {
+    renderOutlineWidthInput.value = String(
+      sanitizeRenderOutlineThickness(
+        state.renderSettingsDraft.outlineEffect.thickness,
+        DEFAULT_RENDER_OUTLINE_EFFECT.thickness
+      )
+    );
+    renderOutlineWidthInput.disabled = !state.renderSettingsDraft.outlineEffect.enabled;
   }
 }
 
@@ -1250,6 +1299,10 @@ function getLayerMergedGeometryForRender(layerId) {
   return unionGeometryList(layerShapes.map((shape) => shape.geometry));
 }
 
+function getLayerSourceShapesForRender(layerId) {
+  return state.shapes.filter((shape) => shape.layerId === layerId).map((shape) => cloneShape(shape));
+}
+
 function compileRenderScene() {
   const entries = [];
 
@@ -1259,7 +1312,8 @@ function compileRenderScene() {
       const renderSettings = cloneLayerRenderSettings(layer.render);
       if (renderSettings.enabled === false) return;
 
-      const geometryWorld = getLayerMergedGeometryForRender(layer.id);
+      const sourceShapesWorld = getLayerSourceShapesForRender(layer.id);
+      const geometryWorld = sourceShapesWorld.length ? unionGeometryList(sourceShapesWorld.map((shape) => shape.geometry)) : [];
       if (!geometryWorld.length) return;
 
       const boundsWorld = getGeometryBounds(geometryWorld);
@@ -1278,6 +1332,7 @@ function compileRenderScene() {
         stackOrderIndex: entries.length,
         fillColor: layer.fillColor,
         geometryWorld,
+        sourceShapesWorld,
         boundsWorld,
         areaWorld,
         baseElevationMm,
@@ -1349,10 +1404,37 @@ function buildRenderPaneFoundation(renderRecord, slotIndex, compiledScene = comp
     const clippedEntryArea = getGeometryArea(clippedGeometryWorld);
     clippedAreaWorld += clippedEntryArea;
 
+    const localSourceComponents = [];
+    entry.sourceShapesWorld.forEach((sourceShape) => {
+      if (!boundsTouch(sourceShape.bounds, request.clipBoundsWorld)) return;
+
+      const clippedSourceGeometryWorld = executeClipperBoolean(ClipType.Intersection, sourceShape.geometry, request.clipGeometryWorld);
+      if (!clippedSourceGeometryWorld.length) return;
+
+      const clippedSourceEligibility = createVertexOutlineEligibilityFromSources(
+        clippedSourceGeometryWorld,
+        [sourceShape],
+        true
+      );
+      const localSourceGeometry = transformGeometry(clippedSourceGeometryWorld, (point) =>
+        worldPointToRenderLocal(point, request.frame)
+      );
+
+      localSourceGeometry.forEach((polygon, polygonIndex) => {
+        localSourceComponents.push({
+          sourceShapeId: sourceShape.id,
+          sourceShapeKey: `${entry.layerId}:${sourceShape.id}:${polygonIndex}`,
+          localGeometry: [polygon],
+          vertexOutlineEligibility: [clippedSourceEligibility[polygonIndex] || []],
+        });
+      });
+    });
+
     intersectingEntries.push({
       ...entry,
       clippedGeometryWorld,
       localGeometry,
+      localSourceComponents,
       localBounds,
       clippedAreaWorld: clippedEntryArea,
     });
@@ -1510,181 +1592,729 @@ function getDirectionalAxisSpanMm(frame, axisId) {
   return axisId === "localY" ? frame.heightMm : frame.widthMm;
 }
 
-function buildDirectionalProjectionColumns(localGeometry, request, targetColumns = 320) {
+function projectDirectionalLocalPoint(point, request, primarySpanMm) {
   const directionConfig = request?.directionConfig;
-  const primarySpanMm = getDirectionalAxisSpanMm(request?.frame, directionConfig?.primaryAxis);
-  const depthSpanMm = getDirectionalAxisSpanMm(request?.frame, directionConfig?.depthAxis);
-  if (!Array.isArray(localGeometry) || !localGeometry.length || primarySpanMm <= 1e-6 || depthSpanMm <= 1e-6) return [];
-
-  const maskCanvas = document.createElement("canvas");
-  const maskWidth = Math.max(64, Math.min(960, Math.round(targetColumns)));
-  const maskHeight = Math.max(64, Math.min(960, Math.round((depthSpanMm / primarySpanMm) * maskWidth)));
-  maskCanvas.width = maskWidth;
-  maskCanvas.height = maskHeight;
-  const maskContext = maskCanvas.getContext("2d");
-  if (!maskContext) return Array(maskWidth).fill(null);
-
-  const rasterGeometry = transformGeometry(localGeometry, (point) => ({
-    x:
-      (((directionConfig?.primaryAxis === "localY" ? point.y : point.x) || 0) / primarySpanMm) * Math.max(1, maskWidth - 1),
-    y: (((directionConfig?.depthAxis === "localY" ? point.y : point.x) || 0) / depthSpanMm) * Math.max(1, maskHeight - 1),
-  }));
-
-  maskContext.clearRect(0, 0, maskWidth, maskHeight);
-  maskContext.beginPath();
-  traceGeometryPath(maskContext, rasterGeometry);
-  maskContext.fillStyle = "#000";
-  maskContext.fill("evenodd");
-
-  const alpha = maskContext.getImageData(0, 0, maskWidth, maskHeight).data;
-  const columns = Array(maskWidth).fill(null);
-
-  for (let column = 0; column < maskWidth; column += 1) {
-    let nearestRow = -1;
-
-    if (directionConfig?.frontBoundary === "max") {
-      for (let row = maskHeight - 1; row >= 0; row -= 1) {
-        if (alpha[(row * maskWidth + column) * 4 + 3] > 0) {
-          nearestRow = row;
-          break;
-        }
-      }
-    } else {
-      for (let row = 0; row < maskHeight; row += 1) {
-        if (alpha[(row * maskWidth + column) * 4 + 3] > 0) {
-          nearestRow = row;
-          break;
-        }
-      }
-    }
-
-    if (nearestRow === -1) continue;
-    const projectedColumnIndex = directionConfig?.mirrorPrimary ? maskWidth - 1 - column : column;
-    columns[projectedColumnIndex] = {
-      depthStep: nearestRow,
-      depthMm: quantizeCoordinate((nearestRow / Math.max(1, maskHeight - 1)) * depthSpanMm),
-    };
-  }
-
-  return columns;
+  const primaryValue = (directionConfig?.primaryAxis === "localY" ? point.y : point.x) || 0;
+  const depthValue = (directionConfig?.depthAxis === "localY" ? point.y : point.x) || 0;
+  return {
+    x: directionConfig?.mirrorPrimary ? primarySpanMm - primaryValue : primaryValue,
+    y: depthValue,
+  };
 }
 
-function buildDirectionalRenderGrid(foundation, targetColumns = 320) {
-  const { request, intersectingEntries, elevationRangeMm } = foundation;
-  const directionConfig = request?.directionConfig;
-  const primarySpanMm = getDirectionalAxisSpanMm(request?.frame, directionConfig?.primaryAxis);
-  if (primarySpanMm <= 1e-6) return null;
+function getDocumentationCoordinateKey(value) {
+  return String(scaleCoordinateToClipperInt(value));
+}
 
-  const minZ = Math.min(0, elevationRangeMm?.minMm ?? 0);
-  const maxZ = Math.max(minZ + 1, elevationRangeMm?.maxMm ?? minZ + 1);
-  const zSpan = Math.max(1, maxZ - minZ);
-  const columnCount = Math.max(64, Math.min(480, Math.round(targetColumns)));
-  const rowCount = Math.max(64, Math.min(320, Math.round((zSpan / primarySpanMm) * columnCount)));
-  const grid = Array.from({ length: rowCount }, () => Array(columnCount).fill(null));
-  let paintedCellCount = 0;
+function isSameDirectionalDepth(a, b, epsilon = 1e-6) {
+  return Math.abs((Number(a) || 0) - (Number(b) || 0)) <= epsilon;
+}
 
+function projectDirectionalGeometry(geometry, request, primarySpanMm) {
+  return transformGeometry(geometry, (point) => projectDirectionalLocalPoint(point, request, primarySpanMm));
+}
+
+function collectProjectedGeometryEdges(projectedGeometry) {
+  const edges = [];
+  forEachRing(projectedGeometry, (ring) => {
+    for (let pointIndex = 0; pointIndex < ring.length; pointIndex += 1) {
+      const start = ring[pointIndex];
+      const end = ring[(pointIndex + 1) % ring.length];
+      const minX = Math.min(start[0], end[0]);
+      const maxX = Math.max(start[0], end[0]);
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const vertical = Math.abs(dx) <= 1e-9;
+      const slope = vertical ? null : dy / dx;
+      const intercept = vertical ? null : start[1] - slope * start[0];
+      edges.push({
+        x1: start[0],
+        y1: start[1],
+        x2: end[0],
+        y2: end[1],
+        minX,
+        maxX,
+        vertical,
+        slope,
+        intercept,
+      });
+    }
+  });
+  return edges;
+}
+
+function collectDirectionalDocumentationComponents(foundation) {
+  const { request, intersectingEntries } = foundation;
+  const primarySpanMm = getDirectionalAxisSpanMm(request?.frame, request?.directionConfig?.primaryAxis);
+  const components = [];
+
+  intersectingEntries.forEach((entry, entryIndex) => {
+    entry.localSourceComponents.forEach((sourceComponent, sourceIndex) => {
+      const projectedGeometry = projectDirectionalGeometry(sourceComponent.localGeometry, request, primarySpanMm);
+      if (!projectedGeometry.length) return;
+
+      const projectedBounds = getGeometryBounds(projectedGeometry);
+      const eligibleVertexPrimaryKeys = new Set();
+      forEachRing(projectedGeometry, (ring, polygonIndex, ringIndex) => {
+        for (let pointIndex = 0; pointIndex < ring.length; pointIndex += 1) {
+          if (
+            !getVertexOutlineEligibilityAt(
+              sourceComponent.vertexOutlineEligibility,
+              polygonIndex,
+              ringIndex,
+              pointIndex,
+              true
+            )
+          ) {
+            continue;
+          }
+          eligibleVertexPrimaryKeys.add(getDocumentationCoordinateKey(ring[pointIndex][0]));
+        }
+      });
+
+      components.push({
+        entry,
+        entryIndex,
+        sourceIndex,
+        componentKey: `${entry.layerId}:${sourceComponent.sourceShapeKey}:${sourceIndex}`,
+        layerId: entry.layerId,
+        sourceShapeKey: sourceComponent.sourceShapeKey,
+        fillColor: sanitizeColorValue(entry.fillColor, "#93c5fd"),
+        baseElevationMm: entry.baseElevationMm,
+        topElevationMm: entry.topElevationMm,
+        stackOrderIndex: entry.stackOrderIndex,
+        projectedGeometry,
+        projectedBounds,
+        projectedEdges: collectProjectedGeometryEdges(projectedGeometry),
+        vertexOutlineEligibility: deepCopyVertexOutlineEligibility(sourceComponent.vertexOutlineEligibility),
+        eligibleVertexPrimaryKeys,
+      });
+    });
+  });
+
+  return {
+    primarySpanMm,
+    components,
+  };
+}
+
+function computeProjectedEdgeCrossoverPrimary(edgeA, edgeB) {
+  if (!edgeA || !edgeB || edgeA.vertical || edgeB.vertical) return null;
+  if (Math.abs(edgeA.slope - edgeB.slope) <= 1e-9) return null;
+
+  const overlapMin = Math.max(edgeA.minX, edgeB.minX);
+  const overlapMax = Math.min(edgeA.maxX, edgeB.maxX);
+  if (overlapMax - overlapMin <= 1e-6) return null;
+
+  const crossX = (edgeB.intercept - edgeA.intercept) / (edgeA.slope - edgeB.slope);
+  if (!Number.isFinite(crossX)) return null;
+  if (crossX <= overlapMin + 1e-6 || crossX >= overlapMax - 1e-6) return null;
+  return quantizeCoordinate(crossX);
+}
+
+function collectDirectionalPrimaryBreakpoints(components, primarySpanMm) {
+  const breakpointMap = new Map();
+  const addBreakpoint = (value) => {
+    const clamped = Math.max(0, Math.min(primarySpanMm, quantizeCoordinate(value)));
+    const key = getDocumentationCoordinateKey(clamped);
+    if (!breakpointMap.has(key)) breakpointMap.set(key, clamped);
+  };
+
+  addBreakpoint(0);
+  addBreakpoint(primarySpanMm);
+
+  components.forEach((component) => {
+    forEachRing(component.projectedGeometry, (ring) => {
+      ring.forEach((point) => addBreakpoint(point[0]));
+    });
+  });
+
+  const allEdges = components.flatMap((component) =>
+    component.projectedEdges.map((edge) => ({
+      ...edge,
+      componentKey: component.componentKey,
+    }))
+  );
+
+  for (let index = 0; index < allEdges.length; index += 1) {
+    const edgeA = allEdges[index];
+    for (let compareIndex = index + 1; compareIndex < allEdges.length; compareIndex += 1) {
+      const edgeB = allEdges[compareIndex];
+      if (edgeA.componentKey === edgeB.componentKey) continue;
+      const crossX = computeProjectedEdgeCrossoverPrimary(edgeA, edgeB);
+      if (crossX === null) continue;
+      addBreakpoint(crossX);
+    }
+  }
+
+  const sorted = Array.from(breakpointMap.values()).sort((a, b) => a - b);
+  const merged = [];
+  sorted.forEach((value) => {
+    const previous = merged[merged.length - 1];
+    if (previous !== undefined && Math.abs(previous - value) <= 1e-6) return;
+    merged.push(value);
+  });
+  return merged.length >= 2 ? merged : [0, primarySpanMm];
+}
+
+function sampleProjectedGeometryDepthIntervals(projectedGeometry, primaryMm) {
+  const intersections = [];
+  if (!Array.isArray(projectedGeometry) || !projectedGeometry.length) return intersections;
+
+  forEachRing(projectedGeometry, (ring) => {
+    for (let pointIndex = 0; pointIndex < ring.length; pointIndex += 1) {
+      const start = ring[pointIndex];
+      const end = ring[(pointIndex + 1) % ring.length];
+      const minX = Math.min(start[0], end[0]);
+      const maxX = Math.max(start[0], end[0]);
+      const dx = end[0] - start[0];
+      if (Math.abs(dx) <= 1e-9) continue;
+      if (primaryMm < minX || primaryMm >= maxX) continue;
+      const t = (primaryMm - start[0]) / dx;
+      const depth = quantizeCoordinate(start[1] + (end[1] - start[1]) * t);
+      intersections.push(depth);
+    }
+  });
+
+  intersections.sort((a, b) => a - b);
+  const intervals = [];
+  for (let index = 0; index + 1 < intersections.length; index += 2) {
+    const start = intersections[index];
+    const end = intersections[index + 1];
+    if (end - start <= 1e-6) continue;
+    intervals.push([start, end]);
+  }
+  return intervals;
+}
+
+function sampleDirectionalComponentFrontDepth(component, primaryMm, frontBoundary = "min") {
+  const intervals = sampleProjectedGeometryDepthIntervals(component?.projectedGeometry, primaryMm);
+  if (!intervals.length) return null;
+  return frontBoundary === "max" ? intervals[intervals.length - 1][1] : intervals[0][0];
+}
+
+function sampleDirectionalComponentFrontProfile(component, x1, x2, frontBoundary = "min") {
+  const span = Math.max(0, x2 - x1);
+  const inset = span > 1e-6 ? Math.min(span * 0.25, Math.max(1e-4, span * 0.05)) : 0;
+  const sampleLeftX = quantizeCoordinate(span > 1e-6 ? x1 + inset : x1);
+  const sampleRightX = quantizeCoordinate(span > 1e-6 ? x2 - inset : x2);
+  const sampleMidX = quantizeCoordinate((x1 + x2) * 0.5);
+  const depthStartMm =
+    sampleDirectionalComponentFrontDepth(component, sampleLeftX, frontBoundary) ??
+    sampleDirectionalComponentFrontDepth(component, sampleMidX, frontBoundary);
+  const depthMidMm =
+    sampleDirectionalComponentFrontDepth(component, sampleMidX, frontBoundary) ??
+    depthStartMm ??
+    sampleDirectionalComponentFrontDepth(component, sampleRightX, frontBoundary);
+  const depthEndMm =
+    sampleDirectionalComponentFrontDepth(component, sampleRightX, frontBoundary) ??
+    depthMidMm ??
+    depthStartMm;
+  if (![depthStartMm, depthMidMm, depthEndMm].every(Number.isFinite)) return null;
+  return {
+    depthStartMm: quantizeCoordinate(depthStartMm),
+    depthMidMm: quantizeCoordinate(depthMidMm),
+    depthEndMm: quantizeCoordinate(depthEndMm),
+  };
+}
+
+function isDirectionalVertexOnFrontProfile(component, vertexPrimaryMm, vertexDepthMm, frontBoundary = "min") {
+  const bounds = component?.projectedBounds;
+  if (!bounds || bounds.w <= 1e-6) return false;
+
+  const epsilon = Math.max(1e-4, Math.min(0.25, bounds.w * 0.01));
+  const sampleXs = [];
+  const leftX = vertexPrimaryMm - epsilon;
+  const rightX = vertexPrimaryMm + epsilon;
+  if (leftX > bounds.x + 1e-6) sampleXs.push(leftX);
+  if (rightX < bounds.x + bounds.w - 1e-6) sampleXs.push(rightX);
+  if (!sampleXs.length) sampleXs.push(vertexPrimaryMm);
+
+  return sampleXs.some((sampleX) => {
+    const frontDepthMm = sampleDirectionalComponentFrontDepth(component, sampleX, frontBoundary);
+    return Number.isFinite(frontDepthMm) && isSameDirectionalDepth(frontDepthMm, vertexDepthMm, Math.max(1e-4, epsilon * 2));
+  });
+}
+
+function collectDirectionalZBreakpoints(foundation) {
+  const { intersectingEntries, elevationRangeMm } = foundation;
+  const maxZ = Math.max(1, quantizeCoordinate(elevationRangeMm?.maxMm ?? 0));
+  const minZ = Math.min(0, quantizeCoordinate(elevationRangeMm?.minMm ?? 0));
+  const breakpointMap = new Map();
+  const addBreakpoint = (value) => {
+    const normalized = quantizeCoordinate(value);
+    const key = getDocumentationCoordinateKey(normalized);
+    if (!breakpointMap.has(key)) breakpointMap.set(key, normalized);
+  };
+
+  addBreakpoint(maxZ);
+  addBreakpoint(minZ);
   intersectingEntries.forEach((entry) => {
-    const projectedColumns = buildDirectionalProjectionColumns(entry.localGeometry, request, columnCount);
-    if (!projectedColumns.some(Boolean)) return;
+    addBreakpoint(entry.topElevationMm);
+    addBreakpoint(entry.baseElevationMm);
+  });
 
-    let rowStart = Math.floor(((maxZ - entry.topElevationMm) / zSpan) * rowCount);
-    let rowEnd = Math.ceil(((maxZ - entry.baseElevationMm) / zSpan) * rowCount) - 1;
-    rowStart = Math.max(0, Math.min(rowCount - 1, rowStart));
-    rowEnd = Math.max(0, Math.min(rowCount - 1, rowEnd));
-    if (rowEnd < rowStart) rowEnd = rowStart;
+  const sorted = Array.from(breakpointMap.values()).sort((a, b) => b - a);
+  return sorted.length >= 2 ? sorted : [maxZ, minZ];
+}
 
-    const fillColor = sanitizeColorValue(entry.fillColor, "#93c5fd");
-    projectedColumns.forEach((column, columnIndex) => {
-      if (!column) return;
+function chooseDirectionalVisibleSample(samples, zHighMm, zLowMm, frontBoundary = "min") {
+  let winner = null;
 
-      for (let rowIndex = rowStart; rowIndex <= rowEnd; rowIndex += 1) {
-        const existing = grid[rowIndex][columnIndex];
-        const depthDelta = existing ? column.depthStep - existing.depthStep : 0;
-        const isCloser =
-          !existing ||
-          (directionConfig?.frontBoundary === "min" ? depthDelta < 0 : depthDelta > 0) ||
-          (depthDelta === 0 && entry.stackOrderIndex >= existing.stackOrderIndex);
-        if (!isCloser) continue;
-        if (!existing) paintedCellCount += 1;
-        grid[rowIndex][columnIndex] = {
-          color: fillColor,
-          depthStep: column.depthStep,
-          depthMm: column.depthMm,
-          stackOrderIndex: entry.stackOrderIndex,
-        };
+  samples.forEach((sample) => {
+    const component = sample.component;
+    const overlapsBand = component.topElevationMm > zLowMm + 1e-6 && component.baseElevationMm < zHighMm - 1e-6;
+    if (!overlapsBand) return;
+    if (!winner) {
+      winner = sample;
+      return;
+    }
+
+    const depthDelta = sample.depthMidMm - winner.depthMidMm;
+    const isCloser = frontBoundary === "max" ? depthDelta > 1e-6 : depthDelta < -1e-6;
+    if (isCloser) {
+      winner = sample;
+      return;
+    }
+
+    if (Math.abs(depthDelta) > 1e-6) return;
+
+    const orderDelta = sample.component.stackOrderIndex - winner.component.stackOrderIndex;
+    if (orderDelta > 0) {
+      winner = sample;
+      return;
+    }
+
+    if (orderDelta < 0) return;
+
+    if (sample.component.componentKey > winner.component.componentKey) winner = sample;
+  });
+
+  return winner;
+}
+
+function collectDirectionalEligibleVertexBoundaryLayers(components, frontBoundary = "min") {
+  const boundaryMap = new Map();
+
+  components.forEach((component) => {
+    forEachRing(component.projectedGeometry, (ring, polygonIndex, ringIndex) => {
+      for (let pointIndex = 0; pointIndex < ring.length; pointIndex += 1) {
+        if (
+          !getVertexOutlineEligibilityAt(
+            component.vertexOutlineEligibility,
+            polygonIndex,
+            ringIndex,
+            pointIndex,
+            true
+          )
+        ) {
+          continue;
+        }
+        const point = ring[pointIndex];
+        if (!isDirectionalVertexOnFrontProfile(component, point[0], point[1], frontBoundary)) {
+          continue;
+        }
+        const primaryKey = getDocumentationCoordinateKey(point[0]);
+        let boundaryInfo = boundaryMap.get(primaryKey);
+        if (!boundaryInfo) {
+          boundaryInfo = {
+            componentKeys: new Set(),
+          };
+          boundaryMap.set(primaryKey, boundaryInfo);
+        }
+        boundaryInfo.componentKeys.add(component.componentKey);
       }
     });
+  });
+
+  return boundaryMap;
+}
+
+function createDocumentationRectGeometry(x1, y1, x2, y2) {
+  return [
+    [
+      [
+        [x1, y1],
+        [x2, y1],
+        [x2, y2],
+        [x1, y2],
+      ],
+    ],
+  ];
+}
+
+function collectDirectionalDocumentationBoundarySegments(documentation, shouldDrawBoundary) {
+  const segments = [];
+  if (!documentation || !Array.isArray(documentation.cells) || !documentation.cells.length) return segments;
+
+  const { cells, primaryBreaks, yEdges } = documentation;
+  const bandCount = cells.length;
+  const slabCount = cells[0]?.length || 0;
+  if (!bandCount || !slabCount) return segments;
+
+  const cellAt = (bandIndex, slabIndex) =>
+    bandIndex >= 0 && bandIndex < bandCount && slabIndex >= 0 && slabIndex < slabCount ? cells[bandIndex][slabIndex] : null;
+  const addSegment = (x1, y1, x2, y2) => {
+    segments.push({ x1, y1, x2, y2 });
+  };
+  const evaluateSide = (bandIndex, slabIndex, neighborBandIndex, neighborSlabIndex, x1, y1, x2, y2) => {
+    const cell = cellAt(bandIndex, slabIndex);
+    if (!cell) return;
+    const neighbor = cellAt(neighborBandIndex, neighborSlabIndex);
+    if (!shouldDrawBoundary(cell, neighbor)) return;
+    addSegment(x1, y1, x2, y2);
+  };
+
+  for (let bandIndex = 0; bandIndex < bandCount; bandIndex += 1) {
+    for (let slabIndex = 0; slabIndex < slabCount; slabIndex += 1) {
+      const cell = cells[bandIndex][slabIndex];
+      if (!cell) continue;
+
+      const x1 = primaryBreaks[slabIndex];
+      const x2 = primaryBreaks[slabIndex + 1];
+      const y1 = yEdges[bandIndex];
+      const y2 = yEdges[bandIndex + 1];
+
+      evaluateSide(bandIndex, slabIndex, bandIndex - 1, slabIndex, x1, y1, x2, y1);
+      evaluateSide(bandIndex, slabIndex, bandIndex, slabIndex + 1, x2, y1, x2, y2);
+      evaluateSide(bandIndex, slabIndex, bandIndex + 1, slabIndex, x2, y2, x1, y2);
+      evaluateSide(bandIndex, slabIndex, bandIndex, slabIndex - 1, x1, y2, x1, y1);
+    }
+  }
+
+  return mergeOrthogonalSegments(segments);
+}
+
+function buildDirectionalDocumentationVertexSegments(documentation) {
+  const segments = [];
+  if (!documentation?.cells?.length) return segments;
+
+  const { cells, primaryBreaks, yEdges, eligibleVertexBoundaryLayers } = documentation;
+  const bandCount = cells.length;
+  const slabCount = cells[0]?.length || 0;
+
+  for (let boundaryIndex = 1; boundaryIndex < primaryBreaks.length - 1; boundaryIndex += 1) {
+    const boundaryInfo = eligibleVertexBoundaryLayers.get(getDocumentationCoordinateKey(primaryBreaks[boundaryIndex]));
+    if (!boundaryInfo?.componentKeys?.size) continue;
+    const boundaryX = primaryBreaks[boundaryIndex];
+
+    for (let bandIndex = 0; bandIndex < bandCount; bandIndex += 1) {
+      const leftCell = boundaryIndex - 1 >= 0 ? cells[bandIndex][boundaryIndex - 1] : null;
+      const rightCell = boundaryIndex < slabCount ? cells[bandIndex][boundaryIndex] : null;
+      if (!leftCell || !rightCell) continue;
+      if (leftCell.componentKey !== rightCell.componentKey) continue;
+      if (!boundaryInfo.componentKeys.has(leftCell.componentKey)) continue;
+      if (isSameDirectionalDepth(leftCell.depthEndMm, rightCell.depthStartMm)) continue;
+      segments.push({
+        x1: boundaryX,
+        y1: yEdges[bandIndex],
+        x2: boundaryX,
+        y2: yEdges[bandIndex + 1],
+      });
+    }
+  }
+
+  return mergeOrthogonalSegments(segments);
+}
+
+function buildDirectionalVectorDocumentation(foundation) {
+  const { request } = foundation;
+  const directionConfig = request?.directionConfig;
+  const { primarySpanMm, components } = collectDirectionalDocumentationComponents(foundation);
+  if (!components.length || primarySpanMm <= 1e-6) return null;
+
+  const primaryBreaks = collectDirectionalPrimaryBreakpoints(components, primarySpanMm);
+  const zBreaksDesc = collectDirectionalZBreakpoints(foundation);
+  const slabCount = Math.max(0, primaryBreaks.length - 1);
+  const bandCount = Math.max(0, zBreaksDesc.length - 1);
+  if (!slabCount || !bandCount) return null;
+
+  const slabSamples = [];
+  for (let slabIndex = 0; slabIndex < slabCount; slabIndex += 1) {
+    const x1 = primaryBreaks[slabIndex];
+    const x2 = primaryBreaks[slabIndex + 1];
+    if (x2 - x1 <= 1e-6) {
+      slabSamples.push({ x1, x2, xMid: x1, samples: [] });
+      continue;
+    }
+    const xMid = quantizeCoordinate((x1 + x2) * 0.5);
+    const samples = [];
+    components.forEach((component) => {
+      if (!boundsTouch(component.projectedBounds, { x: xMid, y: component.projectedBounds.y, w: 0, h: component.projectedBounds.h }, 1e-6)) {
+        return;
+      }
+      const profile = sampleDirectionalComponentFrontProfile(component, x1, x2, directionConfig?.frontBoundary);
+      if (!profile) return;
+      samples.push({
+        component,
+        ...profile,
+      });
+    });
+    slabSamples.push({ x1, x2, xMid, samples });
+  }
+
+  const maxZ = zBreaksDesc[0];
+  const minZ = zBreaksDesc[zBreaksDesc.length - 1];
+  const zSpanMm = Math.max(1, maxZ - minZ);
+  const yEdges = zBreaksDesc.map((zMm) => quantizeCoordinate(maxZ - zMm));
+  const cells = Array.from({ length: bandCount }, () => Array(slabCount).fill(null));
+  let paintedCellCount = 0;
+  let nearestVisibleDepthMm = directionConfig?.frontBoundary === "max" ? -Infinity : Infinity;
+
+  for (let bandIndex = 0; bandIndex < bandCount; bandIndex += 1) {
+    const zHighMm = zBreaksDesc[bandIndex];
+    const zLowMm = zBreaksDesc[bandIndex + 1];
+    for (let slabIndex = 0; slabIndex < slabCount; slabIndex += 1) {
+      const slab = slabSamples[slabIndex];
+      const winner = chooseDirectionalVisibleSample(slab.samples, zHighMm, zLowMm, directionConfig?.frontBoundary);
+      if (!winner) continue;
+
+      const cell = {
+        layerId: winner.component.layerId,
+        sourceShapeKey: winner.component.sourceShapeKey,
+        componentKey: winner.component.componentKey,
+        fillColor: winner.component.fillColor,
+        depthMm: winner.depthMidMm,
+        depthStartMm: winner.depthStartMm,
+        depthEndMm: winner.depthEndMm,
+        stackOrderIndex: winner.component.stackOrderIndex,
+        x1: slab.x1,
+        x2: slab.x2,
+        y1: yEdges[bandIndex],
+        y2: yEdges[bandIndex + 1],
+        zHighMm,
+        zLowMm,
+      };
+
+      cells[bandIndex][slabIndex] = cell;
+      paintedCellCount += 1;
+      if (directionConfig?.frontBoundary === "max") {
+        nearestVisibleDepthMm = Math.max(nearestVisibleDepthMm, winner.depthStartMm, winner.depthMidMm, winner.depthEndMm);
+      } else {
+        nearestVisibleDepthMm = Math.min(nearestVisibleDepthMm, winner.depthStartMm, winner.depthMidMm, winner.depthEndMm);
+      }
+    }
+  }
+
+  if (!paintedCellCount) return null;
+  if (!Number.isFinite(nearestVisibleDepthMm)) nearestVisibleDepthMm = 0;
+
+  const depthUnitMm = Math.max(1, primarySpanMm / 320);
+  const projectedPrimitives = [];
+
+  for (let bandIndex = 0; bandIndex < bandCount; bandIndex += 1) {
+    for (let slabIndex = 0; slabIndex < slabCount; slabIndex += 1) {
+      const cell = cells[bandIndex][slabIndex];
+      if (!cell) continue;
+      const depthOffsetStart =
+        directionConfig?.frontBoundary === "max"
+          ? (nearestVisibleDepthMm - cell.depthStartMm) / depthUnitMm
+          : (cell.depthStartMm - nearestVisibleDepthMm) / depthUnitMm;
+      const depthOffsetMid =
+        directionConfig?.frontBoundary === "max"
+          ? (nearestVisibleDepthMm - cell.depthMm) / depthUnitMm
+          : (cell.depthMm - nearestVisibleDepthMm) / depthUnitMm;
+      const depthOffsetEnd =
+        directionConfig?.frontBoundary === "max"
+          ? (nearestVisibleDepthMm - cell.depthEndMm) / depthUnitMm
+          : (cell.depthEndMm - nearestVisibleDepthMm) / depthUnitMm;
+      projectedPrimitives.push({
+        ...cell,
+        geometry: createDocumentationRectGeometry(cell.x1, cell.y1, cell.x2, cell.y2),
+        shadedColor: applyRenderDepthShading(cell.fillColor, depthOffsetMid, state.renderSettings),
+        shadedColorStart: applyRenderDepthShading(cell.fillColor, depthOffsetStart, state.renderSettings),
+        shadedColorEnd: applyRenderDepthShading(cell.fillColor, depthOffsetEnd, state.renderSettings),
+      });
+    }
+  }
+
+  const eligibleVertexBoundaryLayers = collectDirectionalEligibleVertexBoundaryLayers(
+    components,
+    directionConfig?.frontBoundary
+  );
+  const massBoundarySegments = collectDirectionalDocumentationBoundarySegments(
+    { cells, primaryBreaks, yEdges },
+    (cell, neighbor) => !!cell && !neighbor
+  );
+  const depthTransitionSegments = collectDirectionalDocumentationBoundarySegments(
+    { cells, primaryBreaks, yEdges },
+    (cell, neighbor) => !!cell && !!neighbor && cell.componentKey !== neighbor.componentKey && !isSameDirectionalDepth(cell.depthMm, neighbor.depthMm)
+  );
+  const vertexBoundarySegments = buildDirectionalDocumentationVertexSegments({
+    cells,
+    primaryBreaks,
+    yEdges,
+    eligibleVertexBoundaryLayers,
   });
 
   return {
     primarySpanMm,
     minZ,
     maxZ,
-    zSpan,
-    columnCount,
-    rowCount,
+    zSpanMm,
+    primaryBreaks,
+    zBreaksDesc,
+    yEdges,
+    cells,
     paintedCellCount,
-    grid,
+    nearestVisibleDepthMm,
+    projectedPrimitives,
+    massBoundarySegments,
+    depthTransitionSegments,
+    vertexBoundarySegments,
   };
 }
 
-function getDirectionalGridNearestVisibleDepthStep(grid, frontBoundary = "min") {
-  let nearestDepthStep = frontBoundary === "min" ? Infinity : -Infinity;
-  if (!Array.isArray(grid) || !grid.length) return 0;
-
-  grid.forEach((row) => {
-    row.forEach((cell) => {
-      if (!cell || !Number.isFinite(cell.depthStep)) return;
-      if (frontBoundary === "min") {
-        if (cell.depthStep < nearestDepthStep) nearestDepthStep = cell.depthStep;
-      } else if (cell.depthStep > nearestDepthStep) {
-        nearestDepthStep = cell.depthStep;
-      }
-    });
+function strokeDirectionalDocumentationSegments(context, segments, color, thickness, scale) {
+  if (!Array.isArray(segments) || !segments.length) return;
+  context.save();
+  context.beginPath();
+  segments.forEach((segment) => {
+    context.moveTo(segment.x1, segment.y1);
+    context.lineTo(segment.x2, segment.y2);
   });
-
-  return Number.isFinite(nearestDepthStep) ? nearestDepthStep : 0;
+  context.strokeStyle = sanitizeColorValue(color, DEFAULT_RENDER_OUTLINE_EFFECT.color);
+  context.lineWidth = Math.max(1, Number(thickness) || DEFAULT_RENDER_OUTLINE_EFFECT.thickness) / Math.max(1e-6, scale);
+  context.lineCap = "square";
+  context.lineJoin = "miter";
+  context.stroke();
+  context.restore();
 }
 
-function buildDirectionalRenderGridRuns(grid, styleResolver = (cell) => cell?.color || null) {
-  const runs = [];
-  if (!Array.isArray(grid) || !grid.length) return runs;
+function paintDirectionalDocumentationFills(context, documentation, originX, originY, scale) {
+  if (!documentation?.projectedPrimitives?.length) return;
 
-  grid.forEach((row, rowIndex) => {
-    let runStart = -1;
-    let runStyle = null;
+  const dpr = window.devicePixelRatio || 1;
+  const targetWidthPx = Math.max(1, Math.round(documentation.primarySpanMm * scale * dpr));
+  const targetHeightPx = Math.max(1, Math.round(documentation.zSpanMm * scale * dpr));
+  const maxTargetPx = 8192;
+  const clampFactor = Math.min(1, maxTargetPx / Math.max(targetWidthPx, targetHeightPx));
+  const paintWidthPx = Math.max(1, Math.round(targetWidthPx * clampFactor));
+  const paintHeightPx = Math.max(1, Math.round(targetHeightPx * clampFactor));
 
-    for (let columnIndex = 0; columnIndex <= row.length; columnIndex += 1) {
-      const cell = columnIndex < row.length ? row[columnIndex] : null;
-      const cellStyle = cell ? styleResolver(cell) : null;
+  const fillCanvas = document.createElement("canvas");
+  fillCanvas.width = paintWidthPx;
+  fillCanvas.height = paintHeightPx;
+  const fillContext = fillCanvas.getContext("2d");
+  if (!fillContext) return;
 
-      if (runStart === -1 && cellStyle) {
-        runStart = columnIndex;
-        runStyle = cellStyle;
-        continue;
-      }
+  fillContext.clearRect(0, 0, paintWidthPx, paintHeightPx);
+  fillContext.imageSmoothingEnabled = false;
 
-      if (runStart !== -1 && cellStyle === runStyle) continue;
+  const xBoundaryPxByKey = new Map();
+  documentation.primaryBreaks.forEach((value) => {
+    const px = Math.max(0, Math.min(paintWidthPx, Math.round((value / Math.max(1e-6, documentation.primarySpanMm)) * paintWidthPx)));
+    xBoundaryPxByKey.set(getDocumentationCoordinateKey(value), px);
+  });
+  const yBoundaryPxByKey = new Map();
+  documentation.yEdges.forEach((value) => {
+    const px = Math.max(0, Math.min(paintHeightPx, Math.round((value / Math.max(1e-6, documentation.zSpanMm)) * paintHeightPx)));
+    yBoundaryPxByKey.set(getDocumentationCoordinateKey(value), px);
+  });
 
-      if (runStart !== -1) {
-        runs.push({
-          rowIndex,
-          startColumn: runStart,
-          endColumn: columnIndex - 1,
-          color: runStyle,
-        });
-        runStart = -1;
-        runStyle = null;
-      }
+  documentation.projectedPrimitives.forEach((primitive) => {
+    const x1 = xBoundaryPxByKey.get(getDocumentationCoordinateKey(primitive.x1));
+    const x2 = xBoundaryPxByKey.get(getDocumentationCoordinateKey(primitive.x2));
+    const y1 = yBoundaryPxByKey.get(getDocumentationCoordinateKey(primitive.y1));
+    const y2 = yBoundaryPxByKey.get(getDocumentationCoordinateKey(primitive.y2));
+    if (![x1, x2, y1, y2].every(Number.isFinite)) return;
+    const widthPx = Math.max(0, x2 - x1);
+    const heightPx = Math.max(0, y2 - y1);
+    if (!widthPx || !heightPx) return;
 
-      if (runStart === -1 && cellStyle) {
-        runStart = columnIndex;
-        runStyle = cellStyle;
-      }
+    if (
+      primitive.shadedColorStart &&
+      primitive.shadedColorEnd &&
+      primitive.shadedColorStart !== primitive.shadedColorEnd &&
+      widthPx > 1
+    ) {
+      const gradient = fillContext.createLinearGradient(x1, y1, x2, y1);
+      gradient.addColorStop(0, primitive.shadedColorStart);
+      gradient.addColorStop(1, primitive.shadedColorEnd);
+      fillContext.fillStyle = gradient;
+    } else {
+      fillContext.fillStyle = primitive.shadedColor;
+    }
+
+    fillContext.fillRect(x1, y1, widthPx, heightPx);
+  });
+
+  context.save();
+  context.imageSmoothingEnabled = false;
+  context.drawImage(
+    fillCanvas,
+    originX,
+    originY,
+    documentation.primarySpanMm * scale,
+    documentation.zSpanMm * scale
+  );
+  context.restore();
+}
+
+function mergeOrthogonalSegments(segments) {
+  if (!Array.isArray(segments) || !segments.length) return [];
+
+  const horizontalGroups = new Map();
+  const verticalGroups = new Map();
+
+  segments.forEach((segment) => {
+    if (!segment) return;
+    if (segment.y1 === segment.y2) {
+      const y = segment.y1;
+      const start = Math.min(segment.x1, segment.x2);
+      const end = Math.max(segment.x1, segment.x2);
+      if (!horizontalGroups.has(y)) horizontalGroups.set(y, []);
+      horizontalGroups.get(y).push({ x1: start, x2: end, y1: y, y2: y });
+      return;
+    }
+    if (segment.x1 === segment.x2) {
+      const x = segment.x1;
+      const start = Math.min(segment.y1, segment.y2);
+      const end = Math.max(segment.y1, segment.y2);
+      if (!verticalGroups.has(x)) verticalGroups.set(x, []);
+      verticalGroups.get(x).push({ x1: x, x2: x, y1: start, y2: end });
     }
   });
 
-  return runs;
+  const merged = [];
+
+  horizontalGroups.forEach((group) => {
+    group.sort((a, b) => a.x1 - b.x1 || a.x2 - b.x2);
+    let active = null;
+    group.forEach((segment) => {
+      if (!active) {
+        active = { ...segment };
+        return;
+      }
+      if (segment.x1 <= active.x2) {
+        active.x2 = Math.max(active.x2, segment.x2);
+        return;
+      }
+      merged.push(active);
+      active = { ...segment };
+    });
+    if (active) merged.push(active);
+  });
+
+  verticalGroups.forEach((group) => {
+    group.sort((a, b) => a.y1 - b.y1 || a.y2 - b.y2);
+    let active = null;
+    group.forEach((segment) => {
+      if (!active) {
+        active = { ...segment };
+        return;
+      }
+      if (segment.y1 <= active.y2) {
+        active.y2 = Math.max(active.y2, segment.y2);
+        return;
+      }
+      merged.push(active);
+      active = { ...segment };
+    });
+    if (active) merged.push(active);
+  });
+
+  return merged;
 }
 
 function paintPlanRenderPane(context, width, height, foundation) {
@@ -1732,13 +2362,14 @@ function paintPlanRenderPane(context, width, height, foundation) {
 
 function paintDirectionalRenderPane(context, width, height, foundation) {
   const { request } = foundation;
-  const directionalGrid = buildDirectionalRenderGrid(foundation);
-  if (!directionalGrid || !directionalGrid.paintedCellCount) return false;
+  const documentation = buildDirectionalVectorDocumentation(foundation);
+  const outlineEffect = cloneRenderOutlineEffect(state.renderSettings?.outlineEffect);
+  if (!documentation || !documentation.paintedCellCount) return false;
 
-  const primarySpanMm = directionalGrid.primarySpanMm;
-  const minZ = directionalGrid.minZ;
-  const maxZ = directionalGrid.maxZ;
-  const zSpan = directionalGrid.zSpan;
+  const primarySpanMm = documentation.primarySpanMm;
+  const minZ = documentation.minZ;
+  const maxZ = documentation.maxZ;
+  const zSpan = documentation.zSpanMm;
   const paddingX = 18;
   const paddingY = 18;
   const scale = Math.min((width - paddingX * 2) / primarySpanMm, (height - paddingY * 2) / zSpan);
@@ -1746,7 +2377,7 @@ function paintDirectionalRenderPane(context, width, height, foundation) {
 
   const originX = (width - primarySpanMm * scale) * 0.5;
   const originY = (height - zSpan * scale) * 0.5;
-  const toCanvasY = (zMm) => originY + (maxZ - zMm) * scale;
+  const zeroLineY = maxZ;
 
   drawRenderPaneBackdrop(context, width, height);
 
@@ -1754,10 +2385,9 @@ function paintDirectionalRenderPane(context, width, height, foundation) {
     context.save();
     context.strokeStyle = "rgba(20, 24, 28, 0.14)";
     context.lineWidth = 1;
-    const zeroY = toCanvasY(0);
     context.beginPath();
-    context.moveTo(originX, zeroY);
-    context.lineTo(originX + primarySpanMm * scale, zeroY);
+    context.moveTo(originX, originY + zeroLineY * scale);
+    context.lineTo(originX + primarySpanMm * scale, originY + zeroLineY * scale);
     context.stroke();
     context.restore();
   }
@@ -1769,34 +2399,26 @@ function paintDirectionalRenderPane(context, width, height, foundation) {
   context.strokeRect(originX, originY, primarySpanMm * scale, zSpan * scale);
   context.restore();
 
-  const nearestVisibleDepthStep = getDirectionalGridNearestVisibleDepthStep(
-    directionalGrid.grid,
-    request.directionConfig?.frontBoundary
-  );
-  const paintCanvas = document.createElement("canvas");
-  paintCanvas.width = directionalGrid.columnCount;
-  paintCanvas.height = directionalGrid.rowCount;
-  const paintContext = paintCanvas.getContext("2d");
-  if (!paintContext) return false;
+  paintDirectionalDocumentationFills(context, documentation, originX, originY, scale);
 
-  buildDirectionalRenderGridRuns(directionalGrid.grid, (cell) => {
-    if (!cell) return null;
-    const depthOffset =
-      request.directionConfig?.frontBoundary === "min"
-        ? cell.depthStep - nearestVisibleDepthStep
-        : nearestVisibleDepthStep - cell.depthStep;
-    return applyRenderDepthShading(cell.color, depthOffset, state.renderSettings);
-  }).forEach((run) => {
-    paintContext.save();
-    paintContext.fillStyle = run.color;
-    paintContext.fillRect(run.startColumn, run.rowIndex, run.endColumn - run.startColumn + 1, 1);
-    paintContext.restore();
-  });
-
-  context.save();
-  context.imageSmoothingEnabled = false;
-  context.drawImage(paintCanvas, originX, originY, primarySpanMm * scale, zSpan * scale);
-  context.restore();
+  if (outlineEffect.enabled) {
+    context.save();
+    context.translate(originX, originY);
+    context.scale(scale, scale);
+    const outlineSegments = mergeOrthogonalSegments([
+      ...documentation.massBoundarySegments,
+      ...documentation.depthTransitionSegments,
+      ...documentation.vertexBoundarySegments,
+    ]);
+    strokeDirectionalDocumentationSegments(
+      context,
+      outlineSegments,
+      outlineEffect.color,
+      outlineEffect.thickness,
+      scale
+    );
+    context.restore();
+  }
 
   return true;
 }
@@ -3117,6 +3739,20 @@ function applyRenderSettingsDraft() {
     state.renderSettingsDraft.depthEffect.strength = sanitizeRenderDepthStrength(
       renderDepthStrengthValue.value,
       state.renderSettingsDraft.depthEffect.strength
+    );
+  }
+
+  if (renderOutlineColorInput) {
+    state.renderSettingsDraft.outlineEffect.color = sanitizeColorValue(
+      renderOutlineColorInput.value,
+      state.renderSettingsDraft.outlineEffect.color
+    );
+  }
+
+  if (renderOutlineWidthInput) {
+    state.renderSettingsDraft.outlineEffect.thickness = sanitizeRenderOutlineThickness(
+      renderOutlineWidthInput.value,
+      state.renderSettingsDraft.outlineEffect.thickness
     );
   }
 
@@ -8347,12 +8983,58 @@ for (const button of renderDepthModeButtons) {
   });
 }
 
+for (const button of renderOutlineButtons) {
+  button.addEventListener("click", () => {
+    if (!state.renderSettingsDraft) return;
+    state.renderSettingsDraft.outlineEffect.enabled = button.dataset.renderOutline === "on";
+    syncRenderSettingsMenu();
+  });
+}
+
 if (renderDepthStrengthDecrease) {
   renderDepthStrengthDecrease.addEventListener("click", () => {
     if (!state.renderSettingsDraft || !state.renderSettingsDraft.depthEffect.enabled) return;
     state.renderSettingsDraft.depthEffect.strength = sanitizeRenderDepthStrength(
       state.renderSettingsDraft.depthEffect.strength - 0.01,
       state.renderSettingsDraft.depthEffect.strength
+    );
+    syncRenderSettingsMenu();
+  });
+}
+
+if (renderOutlineColorInput) {
+  renderOutlineColorInput.addEventListener("input", () => {
+    if (!state.renderSettingsDraft || !state.renderSettingsDraft.outlineEffect.enabled) return;
+    state.renderSettingsDraft.outlineEffect.color = sanitizeColorValue(
+      renderOutlineColorInput.value,
+      state.renderSettingsDraft.outlineEffect.color
+    );
+  });
+
+  renderOutlineColorInput.addEventListener("change", () => {
+    if (!state.renderSettingsDraft || !state.renderSettingsDraft.outlineEffect.enabled) return;
+    state.renderSettingsDraft.outlineEffect.color = sanitizeColorValue(
+      renderOutlineColorInput.value,
+      state.renderSettingsDraft.outlineEffect.color
+    );
+    syncRenderSettingsMenu();
+  });
+}
+
+if (renderOutlineWidthInput) {
+  renderOutlineWidthInput.addEventListener("input", () => {
+    if (!state.renderSettingsDraft || !state.renderSettingsDraft.outlineEffect.enabled) return;
+    state.renderSettingsDraft.outlineEffect.thickness = sanitizeRenderOutlineThickness(
+      renderOutlineWidthInput.value,
+      state.renderSettingsDraft.outlineEffect.thickness
+    );
+  });
+
+  renderOutlineWidthInput.addEventListener("change", () => {
+    if (!state.renderSettingsDraft || !state.renderSettingsDraft.outlineEffect.enabled) return;
+    state.renderSettingsDraft.outlineEffect.thickness = sanitizeRenderOutlineThickness(
+      renderOutlineWidthInput.value,
+      state.renderSettingsDraft.outlineEffect.thickness
     );
     syncRenderSettingsMenu();
   });

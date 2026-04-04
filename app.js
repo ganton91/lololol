@@ -2414,6 +2414,16 @@ function paintDirectionalDocumentationFills(context, documentation, originX, ori
   context.restore();
 }
 
+function pointInGeometryFill(geometry, x, y) {
+  return pointInShapeFill({ geometry }, x, y);
+}
+
+function getDocumentationSegmentKey(segment) {
+  const startKey = `${scaleCoordinateToClipperInt(segment.x1)}:${scaleCoordinateToClipperInt(segment.y1)}`;
+  const endKey = `${scaleCoordinateToClipperInt(segment.x2)}:${scaleCoordinateToClipperInt(segment.y2)}`;
+  return startKey < endKey ? `${startKey}|${endKey}` : `${endKey}|${startKey}`;
+}
+
 function mergeOrthogonalSegments(segments) {
   if (!Array.isArray(segments) || !segments.length) return [];
 
@@ -2480,10 +2490,304 @@ function mergeOrthogonalSegments(segments) {
   return merged;
 }
 
-function paintPlanRenderPane(context, width, height, foundation) {
+function collectPlanDocumentationComponents(foundation) {
   const { request, intersectingEntries } = foundation;
-  const boxWidth = request.frame.widthMm;
-  const boxHeight = request.frame.heightMm;
+  const widthMm = request?.frame?.widthMm || 0;
+  const heightMm = request?.frame?.heightMm || 0;
+  const components = [];
+
+  intersectingEntries.forEach((entry) => {
+    entry.localSourceComponents.forEach((sourceComponent, sourceIndex) => {
+      const geometry = deepCopyGeometry(sourceComponent.localGeometry);
+      if (!geometry.length) return;
+
+      components.push({
+        componentKey: `${entry.layerId}:${sourceComponent.sourceShapeKey}:${sourceIndex}`,
+        layerId: entry.layerId,
+        sourceShapeKey: sourceComponent.sourceShapeKey,
+        fillColor: sanitizeColorValue(entry.fillColor, "#93c5fd"),
+        baseElevationMm: entry.clippedBaseElevationMm,
+        topElevationMm: entry.clippedTopElevationMm,
+        stackOrderIndex: entry.stackOrderIndex,
+        geometry,
+        bounds: getGeometryBounds(geometry),
+      });
+    });
+  });
+
+  return {
+    widthMm,
+    heightMm,
+    components,
+  };
+}
+
+function getPlanVisibleDepthMm(component, frontBoundary = "max") {
+  return frontBoundary === "max" ? component.topElevationMm : component.baseElevationMm;
+}
+
+function comparePlanDocumentationComponentPriority(a, b, frontBoundary = "max") {
+  const depthA = getPlanVisibleDepthMm(a, frontBoundary);
+  const depthB = getPlanVisibleDepthMm(b, frontBoundary);
+  const depthDelta = depthA - depthB;
+  if (Math.abs(depthDelta) > 1e-6) {
+    return frontBoundary === "max" ? depthB - depthA : depthA - depthB;
+  }
+
+  const orderDelta = b.stackOrderIndex - a.stackOrderIndex;
+  if (orderDelta !== 0) return orderDelta;
+  if (a.componentKey === b.componentKey) return 0;
+  return a.componentKey < b.componentKey ? -1 : 1;
+}
+
+function findPlanVisiblePrimitiveAtPoint(primitives, x, y, ignoredComponentKey = null) {
+  const point = { x, y };
+  for (const primitive of primitives) {
+    if (!primitive || primitive.componentKey === ignoredComponentKey) continue;
+    if (!pointInRect(point, primitive.bounds, 1e-6)) continue;
+    if (pointInGeometryFill(primitive.geometry, x, y)) return primitive;
+  }
+  return null;
+}
+
+function classifyPlanVisiblePrimitiveEdge(primitive, start, end, visiblePrimitives, documentationBounds) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const length = Math.hypot(dx, dy);
+  if (!(length > 1e-6)) return null;
+
+  const midpoint = {
+    x: quantizeCoordinate((start[0] + end[0]) * 0.5),
+    y: quantizeCoordinate((start[1] + end[1]) * 0.5),
+  };
+  const normal = { x: -dy / length, y: dx / length };
+  const maxSpan = Math.max(documentationBounds.widthMm, documentationBounds.heightMm);
+  let epsilon = Math.max(1e-4, Math.min(0.25, maxSpan * 0.004, length * 0.125));
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    const sampleA = {
+      x: quantizeCoordinate(midpoint.x + normal.x * epsilon),
+      y: quantizeCoordinate(midpoint.y + normal.y * epsilon),
+    };
+    const sampleB = {
+      x: quantizeCoordinate(midpoint.x - normal.x * epsilon),
+      y: quantizeCoordinate(midpoint.y - normal.y * epsilon),
+    };
+    const insideA = pointInGeometryFill(primitive.geometry, sampleA.x, sampleA.y);
+    const insideB = pointInGeometryFill(primitive.geometry, sampleB.x, sampleB.y);
+
+    if (insideA === insideB) {
+      epsilon *= 0.5;
+      continue;
+    }
+
+    const outsidePoint = insideA ? sampleB : sampleA;
+    const insideBounds =
+      outsidePoint.x >= -epsilon &&
+      outsidePoint.x <= documentationBounds.widthMm + epsilon &&
+      outsidePoint.y >= -epsilon &&
+      outsidePoint.y <= documentationBounds.heightMm + epsilon;
+    if (!insideBounds) return "mass";
+
+    const neighbor = findPlanVisiblePrimitiveAtPoint(
+      visiblePrimitives,
+      outsidePoint.x,
+      outsidePoint.y,
+      primitive.componentKey
+    );
+    if (!neighbor) return "mass";
+    if (isSameDirectionalDepth(primitive.depthMm, neighbor.depthMm)) return null;
+    return "depth";
+  }
+
+  return null;
+}
+
+function collectPlanDocumentationOutlineSegments(visiblePrimitives, documentationBounds) {
+  const massBoundarySegments = [];
+  const depthTransitionSegments = [];
+  const massKeys = new Set();
+  const depthKeys = new Set();
+
+  visiblePrimitives.forEach((primitive) => {
+    forEachRing(primitive.geometry, (ring) => {
+      for (let pointIndex = 0; pointIndex < ring.length; pointIndex += 1) {
+        const start = ring[pointIndex];
+        const end = ring[(pointIndex + 1) % ring.length];
+        const segment = {
+          x1: start[0],
+          y1: start[1],
+          x2: end[0],
+          y2: end[1],
+        };
+        const classification = classifyPlanVisiblePrimitiveEdge(
+          primitive,
+          start,
+          end,
+          visiblePrimitives,
+          documentationBounds
+        );
+        if (!classification) continue;
+
+        const segmentKey = getDocumentationSegmentKey(segment);
+        if (classification === "mass") {
+          if (massKeys.has(segmentKey)) continue;
+          massKeys.add(segmentKey);
+          massBoundarySegments.push(segment);
+          continue;
+        }
+
+        if (classification === "depth") {
+          if (depthKeys.has(segmentKey)) continue;
+          depthKeys.add(segmentKey);
+          depthTransitionSegments.push(segment);
+        }
+      }
+    });
+  });
+
+  return {
+    massBoundarySegments,
+    depthTransitionSegments,
+  };
+}
+
+function buildPlanVectorDocumentation(foundation) {
+  const { request } = foundation;
+  const directionConfig = request?.directionConfig;
+  const { widthMm, heightMm, components } = collectPlanDocumentationComponents(foundation);
+  if (!components.length || widthMm <= 1e-6 || heightMm <= 1e-6) return null;
+
+  const frontBoundary = directionConfig?.frontBoundary || "max";
+  const visiblePrimitives = [];
+  let coveredGeometry = [];
+
+  components
+    .slice()
+    .sort((a, b) => comparePlanDocumentationComponentPriority(a, b, frontBoundary))
+    .forEach((component) => {
+      const visibleGeometry = coveredGeometry.length
+        ? differenceGeometry(component.geometry, coveredGeometry)
+        : deepCopyGeometry(component.geometry);
+      if (!visibleGeometry.length || getGeometryArea(visibleGeometry) <= 1e-6) {
+        coveredGeometry = coveredGeometry.length
+          ? unionGeometryList([coveredGeometry, component.geometry])
+          : deepCopyGeometry(component.geometry);
+        return;
+      }
+
+      visiblePrimitives.push({
+        ...component,
+        geometry: visibleGeometry,
+        bounds: getGeometryBounds(visibleGeometry),
+        depthMm: getPlanVisibleDepthMm(component, frontBoundary),
+      });
+
+      coveredGeometry = coveredGeometry.length
+        ? unionGeometryList([coveredGeometry, component.geometry])
+        : deepCopyGeometry(component.geometry);
+    });
+
+  if (!visiblePrimitives.length) return null;
+
+  let nearestVisibleDepthMm = frontBoundary === "max" ? -Infinity : Infinity;
+  let farthestVisibleDepthMm = frontBoundary === "max" ? Infinity : -Infinity;
+  visiblePrimitives.forEach((primitive) => {
+    if (frontBoundary === "max") {
+      nearestVisibleDepthMm = Math.max(nearestVisibleDepthMm, primitive.depthMm);
+      farthestVisibleDepthMm = Math.min(farthestVisibleDepthMm, primitive.depthMm);
+    } else {
+      nearestVisibleDepthMm = Math.min(nearestVisibleDepthMm, primitive.depthMm);
+      farthestVisibleDepthMm = Math.max(farthestVisibleDepthMm, primitive.depthMm);
+    }
+  });
+
+  if (!Number.isFinite(nearestVisibleDepthMm)) nearestVisibleDepthMm = 0;
+  if (!Number.isFinite(farthestVisibleDepthMm)) farthestVisibleDepthMm = nearestVisibleDepthMm;
+
+  const fillPrimitives = visiblePrimitives.map((primitive) => {
+    const depthStrengthRatio = getDirectionalDepthStrengthRatio(
+      primitive.depthMm,
+      nearestVisibleDepthMm,
+      farthestVisibleDepthMm,
+      frontBoundary
+    );
+    return {
+      ...primitive,
+      shadedColor: applyRenderDepthShading(primitive.fillColor, depthStrengthRatio, state.renderSettings),
+    };
+  });
+
+  const { massBoundarySegments, depthTransitionSegments } = collectPlanDocumentationOutlineSegments(
+    fillPrimitives,
+    { widthMm, heightMm }
+  );
+
+  return {
+    widthMm,
+    heightMm,
+    nearestVisibleDepthMm,
+    farthestVisibleDepthMm,
+    fillPrimitives,
+    massBoundarySegments,
+    depthTransitionSegments,
+    outlineSegments: [...massBoundarySegments, ...depthTransitionSegments],
+  };
+}
+
+function paintPlanDocumentationFills(context, documentation, originX, originY, scale) {
+  if (!documentation?.fillPrimitives?.length) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const targetWidthPx = Math.max(1, Math.round(documentation.widthMm * scale * dpr));
+  const targetHeightPx = Math.max(1, Math.round(documentation.heightMm * scale * dpr));
+  const maxTargetPx = 8192;
+  const clampFactor = Math.min(1, maxTargetPx / Math.max(targetWidthPx, targetHeightPx));
+  const paintWidthPx = Math.max(1, Math.round(targetWidthPx * clampFactor));
+  const paintHeightPx = Math.max(1, Math.round(targetHeightPx * clampFactor));
+
+  const fillCanvas = document.createElement("canvas");
+  fillCanvas.width = paintWidthPx;
+  fillCanvas.height = paintHeightPx;
+  const fillContext = fillCanvas.getContext("2d");
+  if (!fillContext) return;
+
+  fillContext.clearRect(0, 0, paintWidthPx, paintHeightPx);
+  fillContext.imageSmoothingEnabled = false;
+
+  const toPixelGeometry = (geometry) =>
+    transformGeometry(geometry, (point) => ({
+      x: Math.max(0, Math.min(paintWidthPx, (point.x / Math.max(1e-6, documentation.widthMm)) * paintWidthPx)),
+      y: Math.max(0, Math.min(paintHeightPx, (point.y / Math.max(1e-6, documentation.heightMm)) * paintHeightPx)),
+    }));
+
+  documentation.fillPrimitives.forEach((primitive) => {
+    const pixelGeometry = toPixelGeometry(primitive.geometry);
+    fillContext.beginPath();
+    traceGeometryPath(fillContext, pixelGeometry);
+    fillContext.fillStyle = primitive.shadedColor;
+    fillContext.fill("evenodd");
+  });
+
+  context.save();
+  context.imageSmoothingEnabled = false;
+  context.drawImage(
+    fillCanvas,
+    originX,
+    originY,
+    documentation.widthMm * scale,
+    documentation.heightMm * scale
+  );
+  context.restore();
+}
+
+function paintPlanRenderPane(context, width, height, foundation) {
+  const documentation = buildPlanVectorDocumentation(foundation);
+  if (!documentation?.fillPrimitives?.length) return false;
+
+  const outlineEffect = cloneRenderOutlineEffect(state.renderSettings?.outlineEffect);
+  const boxWidth = documentation.widthMm;
+  const boxHeight = documentation.heightMm;
   if (boxWidth <= 1e-6 || boxHeight <= 1e-6) return false;
 
   const padding = 18;
@@ -2492,11 +2796,6 @@ function paintPlanRenderPane(context, width, height, foundation) {
 
   const offsetX = (width - boxWidth * scale) * 0.5;
   const offsetY = (height - boxHeight * scale) * 0.5;
-  const toCanvasGeometry = (geometry) =>
-    transformGeometry(geometry, (point) => ({
-      x: offsetX + point.x * scale,
-      y: offsetY + point.y * scale,
-    }));
 
   drawRenderPaneBackdrop(context, width, height);
 
@@ -2507,18 +2806,21 @@ function paintPlanRenderPane(context, width, height, foundation) {
   context.strokeRect(offsetX, offsetY, boxWidth * scale, boxHeight * scale);
   context.restore();
 
-  intersectingEntries.forEach((entry) => {
-    const geometry = toCanvasGeometry(entry.localGeometry);
+  paintPlanDocumentationFills(context, documentation, offsetX, offsetY, scale);
+
+  if (outlineEffect.enabled && documentation.outlineSegments.length) {
     context.save();
-    context.beginPath();
-    traceGeometryPath(context, geometry);
-    context.fillStyle = sanitizeColorValue(entry.fillColor, "#93c5fd");
-    context.fill("evenodd");
-    context.strokeStyle = "rgba(20, 24, 28, 0.24)";
-    context.lineWidth = 1;
-    context.stroke();
+    context.translate(offsetX, offsetY);
+    context.scale(scale, scale);
+    strokeDirectionalDocumentationSegments(
+      context,
+      documentation.outlineSegments,
+      outlineEffect.color,
+      outlineEffect.thickness,
+      scale
+    );
     context.restore();
-  });
+  }
 
   return true;
 }

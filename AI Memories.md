@@ -403,6 +403,7 @@ The current authoring panel behavior is:
 - The current render workspace shell is no longer placeholder-only:
   - it uses the external reference's `View` workspace interface much more literally as the base shell, including the layout controls, popout button, pane export buttons, and per-pane direction selector clusters
   - the `1 Side`, `2 Sides`, and `4 Sides` layout controls already work at the shell/grid-layout level
+  - the toolbar now also includes a per-`Rbox` `Sync Fit` toggle before `Open in New Window`; when enabled, the currently visible panes in that layout share the most restrictive auto-fit scale so they keep one common physical render scale, and when disabled they return to the current per-pane independent fit behavior
   - it now does display real render outputs in the panes, even though the full render/documentation/export stack is still incomplete
   - export buttons are still visually present but intentionally disabled until the shared documentation/export layer is opened
 - The left panel now includes a dedicated `Renders` section with:

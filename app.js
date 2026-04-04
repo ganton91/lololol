@@ -81,6 +81,7 @@ const renderPaneCanvases = renderPaneSlots.map((pane) => pane.querySelector(".re
 const renderPaneSectionButtonRows = renderPaneSlots.map((pane) => pane.querySelector(".render-pane-section-buttons"));
 const renderPaneExportButtons = Array.from(document.querySelectorAll("[data-render-export-slot][data-render-export-format]"));
 const renderPaneSelectorButtons = Array.from(document.querySelectorAll("[data-render-slot][data-render-direction]"));
+const renderSyncFitButton = document.getElementById("renderSyncFitButton");
 const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
 const settingsCellUnitButtons = Array.from(document.querySelectorAll("[data-settings-cell-unit]"));
 const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-settings-snap-mode]"));
@@ -108,6 +109,7 @@ const DEFAULT_RENDER_VOLUME = Object.freeze({
   baseElevationMm: 0,
   heightMm: 0,
 });
+const DEFAULT_RENDER_SYNC_FIT = false;
 const DEFAULT_LAYER_RENDER = Object.freeze({
   enabled: true,
   baseElevationMm: 0,
@@ -1034,6 +1036,10 @@ function cloneRenderPaneDirectionProfiles(profiles = null, fallbackDirections = 
   };
 }
 
+function cloneRenderSyncFit(value = null) {
+  return sanitizeSettingsToggle(value, DEFAULT_RENDER_SYNC_FIT);
+}
+
 function getRenderDirectionLabel(direction) {
   switch (direction) {
     case "bottomToTop":
@@ -1235,6 +1241,7 @@ function cloneRenderRecord(render) {
     id: render.id,
     name: render.name,
     visible: render.visible !== false,
+    syncFit: cloneRenderSyncFit(render.syncFit),
     boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
     volume: cloneRenderVolumeSettings(render.volume),
     sectionSettings: cloneRenderSectionSettings(render.sectionSettings),
@@ -1688,11 +1695,22 @@ function isRenderPanePainterImplemented(direction) {
   );
 }
 
-function getRenderPaneCanvasContext(canvasEl) {
+function getVisibleRenderPaneCount(layoutPreset = state.renderLayoutPreset) {
+  return layoutPreset === 2 ? 2 : layoutPreset === 4 ? 4 : 1;
+}
+
+function getRenderPaneViewportSize(canvasEl) {
   if (!canvasEl || !canvasEl.parentElement) return null;
   const width = canvasEl.parentElement.clientWidth;
   const height = canvasEl.parentElement.clientHeight;
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
+function getRenderPaneCanvasContext(canvasEl) {
+  const viewport = getRenderPaneViewportSize(canvasEl);
+  if (!viewport) return null;
+  const { width, height } = viewport;
 
   const dpr = window.devicePixelRatio || 1;
   const targetWidth = Math.max(1, Math.round(width * dpr));
@@ -1760,6 +1778,65 @@ function getDirectionalDepthStrengthRatio(depthMm, nearestVisibleDepthMm, farthe
       ? nearestVisibleDepthMm - depthMm
       : depthMm - nearestVisibleDepthMm;
   return Math.max(0, Math.min(1, depthOffsetMm / depthRangeMm));
+}
+
+function buildRenderPaneDocumentation(foundation) {
+  if (!foundation || foundation.status !== "ready") return null;
+  switch (foundation.request?.direction) {
+    case "plan":
+      return buildPlanVectorDocumentation(foundation);
+    case "bottomToTop":
+    case "leftToRight":
+    case "rightToLeft":
+    case "topToBottom":
+      return buildDirectionalVectorDocumentation(foundation);
+    default:
+      return null;
+  }
+}
+
+function isRenderPaneDocumentationPaintable(foundation, documentation) {
+  if (!foundation || foundation.status !== "ready" || !documentation) return false;
+  switch (foundation.request?.direction) {
+    case "plan":
+      return Array.isArray(documentation.fillPrimitives) && documentation.fillPrimitives.length > 0;
+    case "bottomToTop":
+    case "leftToRight":
+    case "rightToLeft":
+    case "topToBottom":
+      return documentation.paintedCellCount > 0;
+    default:
+      return false;
+  }
+}
+
+function getRenderPaneAutoFitScale(viewportWidth, viewportHeight, foundation, documentation) {
+  if (!foundation || !documentation) return null;
+  const availableWidth = viewportWidth - 36;
+  const availableHeight = viewportHeight - 36;
+  if (!(availableWidth > 0) || !(availableHeight > 0)) return null;
+
+  let contentWidthMm = 0;
+  let contentHeightMm = 0;
+  switch (foundation.request?.direction) {
+    case "plan":
+      contentWidthMm = documentation.widthMm;
+      contentHeightMm = documentation.heightMm;
+      break;
+    case "bottomToTop":
+    case "leftToRight":
+    case "rightToLeft":
+    case "topToBottom":
+      contentWidthMm = documentation.primarySpanMm;
+      contentHeightMm = documentation.zSpanMm;
+      break;
+    default:
+      return null;
+  }
+
+  if (!(contentWidthMm > 1e-6) || !(contentHeightMm > 1e-6)) return null;
+  const scale = Math.min(availableWidth / contentWidthMm, availableHeight / contentHeightMm);
+  return Number.isFinite(scale) && scale > 0 ? scale : null;
 }
 
 function getDirectionalAxisSpanMm(frame, axisId) {
@@ -2781,8 +2858,8 @@ function paintPlanDocumentationFills(context, documentation, originX, originY, s
   context.restore();
 }
 
-function paintPlanRenderPane(context, width, height, foundation) {
-  const documentation = buildPlanVectorDocumentation(foundation);
+function paintPlanRenderPane(context, width, height, foundation, documentationOverride = null, scaleOverride = null) {
+  const documentation = documentationOverride || buildPlanVectorDocumentation(foundation);
   if (!documentation?.fillPrimitives?.length) return false;
 
   const outlineEffect = cloneRenderOutlineEffect(state.renderSettings?.outlineEffect);
@@ -2791,7 +2868,8 @@ function paintPlanRenderPane(context, width, height, foundation) {
   if (boxWidth <= 1e-6 || boxHeight <= 1e-6) return false;
 
   const padding = 18;
-  const scale = Math.min((width - padding * 2) / boxWidth, (height - padding * 2) / boxHeight);
+  const autoScale = Math.min((width - padding * 2) / boxWidth, (height - padding * 2) / boxHeight);
+  const scale = Number.isFinite(scaleOverride) && scaleOverride > 0 ? scaleOverride : autoScale;
   if (!Number.isFinite(scale) || scale <= 0) return false;
 
   const offsetX = (width - boxWidth * scale) * 0.5;
@@ -2825,9 +2903,9 @@ function paintPlanRenderPane(context, width, height, foundation) {
   return true;
 }
 
-function paintDirectionalRenderPane(context, width, height, foundation) {
+function paintDirectionalRenderPane(context, width, height, foundation, documentationOverride = null, scaleOverride = null) {
   const { request } = foundation;
-  const documentation = buildDirectionalVectorDocumentation(foundation);
+  const documentation = documentationOverride || buildDirectionalVectorDocumentation(foundation);
   const outlineEffect = cloneRenderOutlineEffect(state.renderSettings?.outlineEffect);
   if (!documentation || !documentation.paintedCellCount) return false;
 
@@ -2837,7 +2915,8 @@ function paintDirectionalRenderPane(context, width, height, foundation) {
   const zSpan = documentation.zSpanMm;
   const paddingX = 18;
   const paddingY = 18;
-  const scale = Math.min((width - paddingX * 2) / primarySpanMm, (height - paddingY * 2) / zSpan);
+  const autoScale = Math.min((width - paddingX * 2) / primarySpanMm, (height - paddingY * 2) / zSpan);
+  const scale = Number.isFinite(scaleOverride) && scaleOverride > 0 ? scaleOverride : autoScale;
   if (!Number.isFinite(scale) || scale <= 0) return false;
 
   const originX = (width - primarySpanMm * scale) * 0.5;
@@ -2888,21 +2967,23 @@ function paintDirectionalRenderPane(context, width, height, foundation) {
   return true;
 }
 
-function paintImplementedRenderPane(canvasEl, foundation) {
+function paintImplementedRenderPane(canvasEl, foundation, options = {}) {
   if (!canvasEl || foundation?.status !== "ready") return false;
 
   const canvasContext = getRenderPaneCanvasContext(canvasEl);
   if (!canvasContext) return false;
 
   const { context, width, height } = canvasContext;
+  const documentation = options.documentation || null;
+  const scaleOverride = options.scaleOverride ?? null;
   switch (foundation.request.direction) {
     case "plan":
-      return paintPlanRenderPane(context, width, height, foundation);
+      return paintPlanRenderPane(context, width, height, foundation, documentation, scaleOverride);
     case "bottomToTop":
     case "leftToRight":
     case "rightToLeft":
     case "topToBottom":
-      return paintDirectionalRenderPane(context, width, height, foundation);
+      return paintDirectionalRenderPane(context, width, height, foundation, documentation, scaleOverride);
     default:
       return false;
   }
@@ -2911,6 +2992,45 @@ function paintImplementedRenderPane(canvasEl, foundation) {
 function renderRenderWorkspaceOutputs() {
   const activeRender = getActiveRenderRecord();
   const compiledScene = activeRender ? compileRenderScene() : null;
+  const visiblePaneCount = getVisibleRenderPaneCount();
+  const panePaintStates = new Array(renderPaneSlots.length).fill(null);
+  let sharedAutoFitScale = null;
+
+  if (activeRender) {
+    for (let slotIndex = 0; slotIndex < visiblePaneCount; slotIndex += 1) {
+      const direction = getRenderPaneDirection(slotIndex);
+      const canPaintDirection = isRenderPanePainterImplemented(direction);
+      const foundation = buildRenderPaneFoundation(activeRender, slotIndex, compiledScene);
+      const documentation =
+        canPaintDirection && foundation.status === "ready" ? buildRenderPaneDocumentation(foundation) : null;
+      const paintable = canPaintDirection && isRenderPaneDocumentationPaintable(foundation, documentation);
+      panePaintStates[slotIndex] = {
+        foundation,
+        documentation,
+        paintable,
+      };
+    }
+
+    if (activeRender.syncFit) {
+      const fitScales = [];
+      for (let slotIndex = 0; slotIndex < visiblePaneCount; slotIndex += 1) {
+        const paintState = panePaintStates[slotIndex];
+        if (!paintState?.paintable) continue;
+        const viewport = getRenderPaneViewportSize(renderPaneCanvases[slotIndex]);
+        if (!viewport) continue;
+        const fitScale = getRenderPaneAutoFitScale(
+          viewport.width,
+          viewport.height,
+          paintState.foundation,
+          paintState.documentation
+        );
+        if (Number.isFinite(fitScale) && fitScale > 0) {
+          fitScales.push(fitScale);
+        }
+      }
+      sharedAutoFitScale = fitScales.length ? Math.min(...fitScales) : null;
+    }
+  }
 
   renderPaneSlots.forEach((pane, slotIndex) => {
     const direction = getRenderPaneDirection(slotIndex);
@@ -2939,9 +3059,26 @@ function renderRenderWorkspaceOutputs() {
       return;
     }
 
-    const foundation = buildRenderPaneFoundation(activeRender, slotIndex, compiledScene);
-    const canPaint = isRenderPanePainterImplemented(direction) && foundation.status === "ready";
-    const painted = canPaint ? paintImplementedRenderPane(canvasEl, foundation) : false;
+    const paintState =
+      panePaintStates[slotIndex] ||
+      (() => {
+        const foundation = buildRenderPaneFoundation(activeRender, slotIndex, compiledScene);
+        const canPaintDirection = isRenderPanePainterImplemented(direction);
+        const documentation =
+          canPaintDirection && foundation.status === "ready" ? buildRenderPaneDocumentation(foundation) : null;
+        return {
+          foundation,
+          documentation,
+          paintable: canPaintDirection && isRenderPaneDocumentationPaintable(foundation, documentation),
+        };
+      })();
+    const foundation = paintState.foundation;
+    const painted = paintState.paintable
+      ? paintImplementedRenderPane(canvasEl, foundation, {
+          documentation: paintState.documentation,
+          scaleOverride: sharedAutoFitScale,
+        })
+      : false;
 
     if (painted) {
       if (canvasEl) canvasEl.classList.remove("hidden");
@@ -2998,8 +3135,14 @@ function syncRenderWorkspaceShell() {
   if (renderWorkspaceShell) {
     renderWorkspaceShell.setAttribute("aria-hidden", String(!activeRender));
   }
+  if (renderSyncFitButton) {
+    const syncFitEnabled = activeRender?.syncFit === true;
+    renderSyncFitButton.classList.toggle("active", syncFitEnabled);
+    renderSyncFitButton.setAttribute("aria-pressed", String(syncFitEnabled));
+    renderSyncFitButton.disabled = !activeRender;
+  }
 
-  const visiblePaneCount = state.renderLayoutPreset === 2 ? 2 : state.renderLayoutPreset === 4 ? 4 : 1;
+  const visiblePaneCount = getVisibleRenderPaneCount();
   for (const button of renderLayoutButtons) {
     button.classList.toggle("active", Number(button.dataset.renderLayout) === visiblePaneCount);
   }
@@ -3189,6 +3332,7 @@ function normalizeImportedRenderRecords(renders) {
           ? render.name.trim()
           : `Rbox ${index + 1}`,
       visible: render.visible !== false,
+      syncFit: cloneRenderSyncFit(render.syncFit),
       boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
       volume: cloneRenderVolumeSettings(render.volume),
       sectionSettings: cloneRenderSectionSettings(render.sectionSettings),
@@ -4391,6 +4535,7 @@ function createRenderRecord(options = {}) {
     id,
     name: typeof options.name === "string" && options.name.trim() ? options.name.trim() : fallbackName,
     visible: options.visible !== false,
+    syncFit: cloneRenderSyncFit(options.syncFit),
     boxGeometry: cloneRenderBoxGeometry(options.boxGeometry),
     volume: cloneRenderVolumeSettings(options.volume),
     sectionSettings: cloneRenderSectionSettings(options.sectionSettings),
@@ -7244,6 +7389,7 @@ function duplicateRender(renderId) {
   const duplicate = createRenderRecord({
     name: `${getRenderTabLabel(sourceRender)} copy`,
     visible: sourceRender.visible !== false,
+    syncFit: sourceRender.syncFit === true,
     boxGeometry: sourceRender.boxGeometry,
     volume: sourceRender.volume,
     sectionSettings: sourceRender.sectionSettings,
@@ -9789,6 +9935,15 @@ for (const button of renderLayoutButtons) {
     const nextPreset = sanitizeRenderLayoutPreset(button.dataset.renderLayout, state.renderLayoutPreset);
     if (state.renderLayoutPreset === nextPreset) return;
     state.renderLayoutPreset = nextPreset;
+    renderWorkspaceUi();
+  });
+}
+
+if (renderSyncFitButton) {
+  renderSyncFitButton.addEventListener("click", () => {
+    const activeRender = getActiveRenderRecord();
+    if (!activeRender) return;
+    activeRender.syncFit = !(activeRender.syncFit === true);
     renderWorkspaceUi();
   });
 }

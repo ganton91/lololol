@@ -1642,11 +1642,13 @@
         box-shadow: none;
       }
 
+      .render-layout-group:has(#renderSyncFitButton:hover:not(:disabled)),
       .render-layout-group:has(#renderPopoutButton:hover:not(:disabled)) {
         border-color: rgba(20, 24, 28, 0.18);
         background: rgba(255, 255, 255, 0.82);
       }
 
+      #renderSyncFitButton:hover:not(:disabled),
       #renderPopoutButton:hover:not(:disabled) {
         color: #161b21;
       }
@@ -1876,6 +1878,7 @@
                 <button class="render-layout-button" type="button" data-render-layout="4">4 Sides</button>
               </div>
               <div class="render-layout-group">
+                <button class="render-layout-button" type="button" id="renderSyncFitButton" aria-pressed="false">Sync Fit</button>
                 <button class="render-layout-button" type="button" id="renderPopoutButton">Open in New Window</button>
               </div>
             </div>

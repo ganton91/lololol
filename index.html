@@ -1518,6 +1518,14 @@
         gap: 8px;
       }
 
+      .render-layout-toolbar-actions {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
       .render-layout-group,
       .render-pane-selector {
         display: inline-flex;
@@ -1552,6 +1560,13 @@
 
       .render-layout-button {
         padding: 5px 7px;
+      }
+
+      .render-layout-toolbar-button {
+        padding: 8px 11px;
+        border-radius: 10px;
+        border: 1px solid rgba(20, 24, 28, 0.1);
+        background: #ffffff;
       }
 
       .render-layout-button:hover:not(:disabled),
@@ -1636,20 +1651,16 @@
         background: rgba(255, 255, 255, 0.82);
       }
 
-      #renderPopoutButton {
-        border: 0;
-        background: transparent;
-        box-shadow: none;
-      }
-
-      .render-layout-group:has(#renderSyncFitButton:hover:not(:disabled)),
-      .render-layout-group:has(#renderPopoutButton:hover:not(:disabled)) {
+      .render-layout-toolbar-button:hover:not(:disabled) {
+        color: #161b21;
         border-color: rgba(20, 24, 28, 0.18);
         background: rgba(255, 255, 255, 0.82);
       }
 
-      #renderSyncFitButton:hover:not(:disabled),
-      #renderPopoutButton:hover:not(:disabled) {
+      .render-layout-toolbar-button.active,
+      .render-layout-toolbar-button.active:hover:not(:disabled) {
+        background: rgba(17, 24, 39, 0.08);
+        border-color: rgba(20, 24, 28, 0.18);
         color: #161b21;
       }
 
@@ -1877,9 +1888,9 @@
                 <button class="render-layout-button" type="button" data-render-layout="2">2 Sides</button>
                 <button class="render-layout-button" type="button" data-render-layout="4">4 Sides</button>
               </div>
-              <div class="render-layout-group">
-                <button class="render-layout-button" type="button" id="renderSyncFitButton" aria-pressed="false">Sync Fit</button>
-                <button class="render-layout-button" type="button" id="renderPopoutButton">Open in New Window</button>
+              <div class="render-layout-toolbar-actions">
+                <button class="render-layout-button render-layout-toolbar-button" type="button" id="renderSyncFitButton" aria-pressed="false">Sync Fit</button>
+                <button class="render-layout-button render-layout-toolbar-button" type="button" id="renderPopoutButton">Open in New Window</button>
               </div>
             </div>
 

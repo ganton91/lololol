@@ -2522,17 +2522,20 @@ function renderWorkspaceSwitcher() {
   });
   workspaceSwitcher.appendChild(mainButton);
 
-  state.renders.forEach((renderRecord, index) => {
+  state.renders
+    .slice()
+    .reverse()
+    .forEach((renderRecord) => {
     const button = document.createElement("button");
     button.type = "button";
     const active = state.activeWorkspaceTab?.kind === "render" && state.activeWorkspaceTab.renderId === renderRecord.id;
     button.className = "workspace-switcher-button" + (active ? " active" : "");
-    button.textContent = getRenderTabLabel(renderRecord, index);
+    button.textContent = getRenderTabLabel(renderRecord);
     button.addEventListener("click", () => {
       setActiveWorkspaceTab({ kind: "render", renderId: renderRecord.id });
     });
     workspaceSwitcher.appendChild(button);
-  });
+    });
 }
 
 function syncRenderWorkspaceShell() {

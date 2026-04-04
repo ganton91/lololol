@@ -462,7 +462,8 @@ Layer order controls draw order. The active layer receives new geometry when the
   - card activation now targets `Main`-canvas `Rbox` transform mode instead of directly switching the bottom render-workspace tabs
   - clicking the already-active `Rbox` card deactivates all `Rbox` cards again
   - drag reordering for `Rbox` card order, which also controls bottom tab order
-  - newly committed `Rbox` records insert at the top of the list/tab order, while duplicated `Rbox` records insert immediately above their source render
+  - newly committed `Rbox` records insert at the top of the left-panel list, while duplicated `Rbox` records insert immediately above their source render
+  - the bottom pill switcher now displays `Rbox` tabs in reverse of that stored/list order, so newly created `Rbox` tabs appear farther to the right instead of immediately beside `Main`
 - `Render Box` authoring is now available on the `Main` canvas through `Draw > Rbox`:
   - it follows the same Draft Plane input rules as other draw shapes
   - it previews as a dashed no-fill rectangle/parallelogram outline

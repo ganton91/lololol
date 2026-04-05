@@ -81,6 +81,7 @@ const renderPaneCanvases = renderPaneSlots.map((pane) => pane.querySelector(".re
 const renderPaneSectionButtonRows = renderPaneSlots.map((pane) => pane.querySelector(".render-pane-section-buttons"));
 const renderPaneExportButtons = Array.from(document.querySelectorAll("[data-render-export-slot][data-render-export-format]"));
 const renderPaneSelectorButtons = Array.from(document.querySelectorAll("[data-render-slot][data-render-direction]"));
+const renderLivePreviewButton = document.getElementById("renderLivePreviewButton");
 const renderSyncFitButton = document.getElementById("renderSyncFitButton");
 const renderPopoutButton = document.getElementById("renderPopoutButton");
 const renderPopoutNotice = document.getElementById("renderPopoutNotice");
@@ -112,6 +113,7 @@ const DEFAULT_RENDER_VOLUME = Object.freeze({
   baseElevationMm: 0,
   heightMm: 0,
 });
+const DEFAULT_RENDER_LIVE_PREVIEW = false;
 const DEFAULT_RENDER_SYNC_FIT = false;
 const DEFAULT_LAYER_RENDER = Object.freeze({
   enabled: true,
@@ -324,6 +326,10 @@ function captureRenderPopoutMirrorPayload(renderId = getTrackedRenderPopoutId())
   if (renderId) {
     payload.workspace.activeWorkspaceTab = { kind: "render", renderId };
   }
+  const previewPayload = captureRenderPopoutPreviewPayload(renderId);
+  if (previewPayload) {
+    payload.renderPreview = previewPayload;
+  }
   return payload;
 }
 
@@ -376,6 +382,7 @@ function applyRenderPopoutMirrorPayload(payload) {
     return false;
   }
   applyImportedProject(normalizedProject, state.projectFileName);
+  applyRenderPopoutPreviewPayload(payload.renderPreview);
   const renderId = getTrackedRenderPopoutId();
   const renderRecord = renderId ? getRenderById(renderId) : null;
   if (!renderRecord) {
@@ -1108,6 +1115,10 @@ function syncRenderSettingsMenu() {
   }
 }
 
+function refreshRenderSettingsLivePreview() {
+  refreshRenderWorkspacePreview("render-settings-live-preview");
+}
+
 function createRenderBoxPropertiesDraft(renderId) {
   const renderRecord = getRenderById(renderId);
   if (!renderRecord) return null;
@@ -1342,6 +1353,10 @@ function cloneRenderSyncFit(value = null) {
   return sanitizeSettingsToggle(value, DEFAULT_RENDER_SYNC_FIT);
 }
 
+function cloneRenderLivePreview(value = null) {
+  return sanitizeSettingsToggle(value, DEFAULT_RENDER_LIVE_PREVIEW);
+}
+
 function cloneRenderLayoutPreset(value = null) {
   return sanitizeRenderLayoutPreset(value, 1);
 }
@@ -1549,6 +1564,7 @@ function cloneRenderRecord(render) {
     visible: render.visible !== false,
     layoutPreset: cloneRenderLayoutPreset(render.layoutPreset),
     paneDirectionProfiles: cloneRenderPaneDirectionProfiles(render.paneDirectionProfiles),
+    livePreview: cloneRenderLivePreview(render.livePreview),
     syncFit: cloneRenderSyncFit(render.syncFit),
     boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
     volume: cloneRenderVolumeSettings(render.volume),
@@ -1741,6 +1757,7 @@ function syncRenderWorkspaceStateFromRecord(renderRecord = getActiveRenderRecord
   state.renderPaneDirectionProfiles = nextPaneDirectionProfiles;
   renderRecord.layoutPreset = nextLayoutPreset;
   renderRecord.paneDirectionProfiles = cloneRenderPaneDirectionProfiles(nextPaneDirectionProfiles);
+  renderRecord.livePreview = cloneRenderLivePreview(renderRecord.livePreview);
   renderRecord.syncFit = cloneRenderSyncFit(renderRecord.syncFit);
   return layoutChanged || profilesChanged;
 }
@@ -1770,22 +1787,142 @@ function getLayerSourceShapesForRender(layerId) {
   return state.shapes.filter((shape) => shape.layerId === layerId).map((shape) => cloneShape(shape));
 }
 
-function compileRenderScene() {
+function isRenderLivePreviewEnabled(renderRecord = getActiveRenderRecord()) {
+  return !!renderRecord && cloneRenderLivePreview(renderRecord.livePreview) === true;
+}
+
+function cloneLayerSettingsDraft(draft = null) {
+  if (!isPlainObject(draft) || !Array.isArray(draft.drawings)) return null;
+  return {
+    drawings: draft.drawings.map((drawing) => ({
+      drawingId: typeof drawing?.drawingId === "string" ? drawing.drawingId : "",
+      name: typeof drawing?.name === "string" ? drawing.name : "",
+      collapsed: drawing?.collapsed === true,
+      items: Array.isArray(drawing?.items)
+        ? drawing.items.map((item) => ({
+            layerId: typeof item?.layerId === "string" ? item.layerId : "",
+            name: typeof item?.name === "string" ? item.name : "",
+            baseElevationMm: quantizeCoordinate(item?.baseElevationMm),
+            heightMm: Math.max(0, quantizeCoordinate(item?.heightMm)),
+          }))
+        : [],
+    })),
+  };
+}
+
+function isLayerSettingsRenderPreviewActive(renderRecord = getActiveRenderRecord()) {
+  if (!isRenderLivePreviewEnabled(renderRecord) || !state.layerSettingsDraft) return false;
+  return isRenderPopoutWindow() || isLayerSettingsMenuOpen();
+}
+
+function isRenderSettingsPreviewActive(renderRecord = getActiveRenderRecord()) {
+  if (!isRenderLivePreviewEnabled(renderRecord) || !state.renderSettingsDraft) return false;
+  return isRenderPopoutWindow() || isRenderSettingsMenuOpen();
+}
+
+function getEffectiveRenderSettings(renderRecord = getActiveRenderRecord()) {
+  return isRenderSettingsPreviewActive(renderRecord) ? state.renderSettingsDraft : state.renderSettings;
+}
+
+function getEffectiveLayerSettingsDraft(renderRecord = getActiveRenderRecord()) {
+  return isLayerSettingsRenderPreviewActive(renderRecord) ? state.layerSettingsDraft : null;
+}
+
+function refreshRenderWorkspacePreview(reason = "live-preview", options = {}) {
+  const activeRender = getActiveRenderRecord();
+  if (!activeRender) return false;
+  const force = options.force === true;
+  if (!force && !isRenderLivePreviewEnabled(activeRender)) return false;
+  renderWorkspaceUi();
+  render();
+  if (isRenderPopoutMainController() && renderPopoutSession.openRenderId === activeRender.id) {
+    syncTrackedRenderPopout(reason);
+  }
+  return true;
+}
+
+function captureRenderPopoutPreviewPayload(renderId = getTrackedRenderPopoutId()) {
+  const renderRecord = renderId ? getRenderById(renderId) : getActiveRenderRecord();
+  if (!renderRecord || !isRenderLivePreviewEnabled(renderRecord)) return null;
+
+  const previewPayload = {
+    renderId: renderRecord.id,
+  };
+
+  if (isLayerSettingsRenderPreviewActive(renderRecord)) {
+    previewPayload.layerSettingsDraft = cloneLayerSettingsDraft(state.layerSettingsDraft);
+  }
+  if (isRenderSettingsPreviewActive(renderRecord)) {
+    previewPayload.renderSettingsDraft = cloneRenderSettings(state.renderSettingsDraft);
+  }
+
+  return previewPayload.layerSettingsDraft || previewPayload.renderSettingsDraft ? previewPayload : null;
+}
+
+function applyRenderPopoutPreviewPayload(previewPayload) {
+  if (!isRenderPopoutWindow()) return;
+  const trackedRenderId = getTrackedRenderPopoutId();
+  if (!previewPayload || previewPayload.renderId !== trackedRenderId) {
+    state.layerSettingsDraft = null;
+    state.renderSettingsDraft = null;
+    return;
+  }
+
+  state.layerSettingsDraft = cloneLayerSettingsDraft(previewPayload.layerSettingsDraft);
+  state.renderSettingsDraft = previewPayload.renderSettingsDraft
+    ? cloneRenderSettings(previewPayload.renderSettingsDraft)
+    : null;
+}
+
+function compileRenderScene(renderRecord = getActiveRenderRecord()) {
   const entries = [];
-  const drawingsInUiOrder = state.drawingsUi.slice();
+  const layerSettingsDraft = getEffectiveLayerSettingsDraft(renderRecord);
+  const drawingsInUiOrder = layerSettingsDraft
+    ? layerSettingsDraft.drawings.map((drawing) => ({
+        id: drawing.drawingId,
+        name: drawing.name,
+      }))
+    : state.drawingsUi.slice();
   const drawingOrderIndexById = new Map(drawingsInUiOrder.map((drawing, index) => [drawing.id, index]));
+  const layerRenderDraftsById = new Map();
+  const visualLayerIdsByDrawingId = new Map();
+
+  if (layerSettingsDraft) {
+    layerSettingsDraft.drawings.forEach((drawing) => {
+      const visualItems = Array.isArray(drawing.items) ? drawing.items.slice() : [];
+      visualLayerIdsByDrawingId.set(
+        drawing.drawingId,
+        visualItems.map((item) => item.layerId)
+      );
+      visualItems.forEach((item) => {
+        layerRenderDraftsById.set(item.layerId, item);
+      });
+    });
+  }
 
   drawingsInUiOrder
     .slice()
     .reverse()
     .forEach((drawing) => {
       const drawingOrderIndex = drawingOrderIndexById.get(drawing.id) ?? 0;
-      const drawingLayers = getLayersForDrawingInStorageOrder(drawing.id);
+      const drawingLayers = visualLayerIdsByDrawingId.has(drawing.id)
+        ? visualLayerIdsByDrawingId
+            .get(drawing.id)
+            .slice()
+            .reverse()
+            .map((layerId) => getLayerById(layerId))
+            .filter(Boolean)
+        : getLayersForDrawingInStorageOrder(drawing.id);
       const layerCount = drawingLayers.length;
 
       drawingLayers.forEach((layer, storageOrderIndex) => {
         const layerOrderIndex = Math.max(0, layerCount - 1 - storageOrderIndex);
         const renderSettings = cloneLayerRenderSettings(layer.render);
+        const renderDraft = layerRenderDraftsById.get(layer.id);
+        if (renderDraft) {
+          renderSettings.baseElevationMm = quantizeCoordinate(renderDraft.baseElevationMm);
+          renderSettings.heightMm = Math.max(0, quantizeCoordinate(renderDraft.heightMm));
+        }
         if (renderSettings.enabled === false) return;
 
         const sourceShapesWorld = getLayerSourceShapesForRender(layer.id);
@@ -2691,9 +2828,9 @@ function buildDirectionalVectorDocumentation(foundation) {
       projectedPrimitives.push({
         ...cell,
         geometry: createDocumentationRectGeometry(cell.x1, cell.y1, cell.x2, cell.y2),
-        shadedColor: applyRenderDepthShading(cell.fillColor, depthStrengthRatioMid, state.renderSettings),
-        shadedColorStart: applyRenderDepthShading(cell.fillColor, depthStrengthRatioStart, state.renderSettings),
-        shadedColorEnd: applyRenderDepthShading(cell.fillColor, depthStrengthRatioEnd, state.renderSettings),
+        shadedColor: applyRenderDepthShading(cell.fillColor, depthStrengthRatioMid, getEffectiveRenderSettings()),
+        shadedColorStart: applyRenderDepthShading(cell.fillColor, depthStrengthRatioStart, getEffectiveRenderSettings()),
+        shadedColorEnd: applyRenderDepthShading(cell.fillColor, depthStrengthRatioEnd, getEffectiveRenderSettings()),
       });
     }
   }
@@ -3119,7 +3256,7 @@ function buildPlanVectorDocumentation(foundation) {
     );
     return {
       ...primitive,
-      shadedColor: applyRenderDepthShading(primitive.fillColor, depthStrengthRatio, state.renderSettings),
+      shadedColor: applyRenderDepthShading(primitive.fillColor, depthStrengthRatio, getEffectiveRenderSettings()),
     };
   });
 
@@ -3190,7 +3327,7 @@ function paintPlanRenderPane(context, width, height, foundation, documentationOv
   const documentation = documentationOverride || buildPlanVectorDocumentation(foundation);
   if (!documentation?.fillPrimitives?.length) return false;
 
-  const outlineEffect = cloneRenderOutlineEffect(state.renderSettings?.outlineEffect);
+  const outlineEffect = cloneRenderOutlineEffect(getEffectiveRenderSettings()?.outlineEffect);
   const boxWidth = documentation.widthMm;
   const boxHeight = documentation.heightMm;
   if (boxWidth <= 1e-6 || boxHeight <= 1e-6) return false;
@@ -3234,7 +3371,7 @@ function paintPlanRenderPane(context, width, height, foundation, documentationOv
 function paintDirectionalRenderPane(context, width, height, foundation, documentationOverride = null, scaleOverride = null) {
   const { request } = foundation;
   const documentation = documentationOverride || buildDirectionalVectorDocumentation(foundation);
-  const outlineEffect = cloneRenderOutlineEffect(state.renderSettings?.outlineEffect);
+  const outlineEffect = cloneRenderOutlineEffect(getEffectiveRenderSettings()?.outlineEffect);
   if (!documentation || !documentation.paintedCellCount) return false;
 
   const primarySpanMm = documentation.primarySpanMm;
@@ -3493,6 +3630,12 @@ function syncRenderWorkspaceShell() {
     renderSyncFitButton.setAttribute("aria-pressed", String(syncFitEnabled));
     renderSyncFitButton.disabled = !activeRender;
   }
+  if (renderLivePreviewButton) {
+    const livePreviewEnabled = activeRender?.livePreview === true;
+    renderLivePreviewButton.classList.toggle("active", livePreviewEnabled);
+    renderLivePreviewButton.setAttribute("aria-pressed", String(livePreviewEnabled));
+    renderLivePreviewButton.disabled = !activeRender || isRenderPopoutWindow();
+  }
   if (renderPopoutButton) {
     renderPopoutButton.textContent = isRenderPopoutWindow() ? "Close Window" : "Open in New Window";
     renderPopoutButton.disabled = !activeRender && !isRenderPopoutWindow();
@@ -3746,6 +3889,7 @@ function normalizeImportedRenderRecords(renders, workspaceFallback = null) {
         render.paneDirectionProfiles,
         fallbackPaneDirectionProfiles[cloneRenderLayoutPreset(render.layoutPreset ?? fallbackLayoutPreset)]
       ),
+      livePreview: cloneRenderLivePreview(render.livePreview),
       syncFit: cloneRenderSyncFit(render.syncFit),
       boxGeometry: cloneRenderBoxGeometry(render.boxGeometry),
       volume: cloneRenderVolumeSettings(render.volume),
@@ -4183,6 +4327,10 @@ function syncLayerSettingsUiMemoryFromDraft() {
   state.layerSettingsUi = nextMemory;
 }
 
+function refreshLayerSettingsLivePreview() {
+  refreshRenderWorkspacePreview("layer-settings-live-preview");
+}
+
 function getLayerSettingsGroupStartMm(group) {
   if (!group?.items?.length) return 0;
   return Math.min(...group.items.map((item) => item.baseElevationMm));
@@ -4337,7 +4485,10 @@ function clearLayerSettingsPointerDrag(commit = true) {
   clearLayerSettingsDropIndicatorClasses(".layer-settings-row");
   if (layerSettingsModal) layerSettingsModal.classList.remove("drag-reordering");
   state.layerSettingsPointerDrag = null;
-  if (shouldRerender) renderLayerSettingsModal();
+  if (shouldRerender) {
+    renderLayerSettingsModal();
+    refreshLayerSettingsLivePreview();
+  }
 }
 
 function beginLayerSettingsPointerDrag(event, row, dragInfo) {
@@ -4484,6 +4635,7 @@ function renderLayerSettingsModal(options = {}) {
       const parsedStartMm = parseLayerSettingsLengthInput(drawingStartInput.value, displayUnitId);
       if (parsedStartMm === null) return;
       shiftGroupStartByMm(parsedStartMm - getLayerSettingsGroupStartMm(group));
+      refreshLayerSettingsLivePreview();
     });
     const normalizeGroupStart = () => {
       const parsedStartMm = parseLayerSettingsLengthInput(drawingStartInput.value, displayUnitId);
@@ -4500,6 +4652,7 @@ function renderLayerSettingsModal(options = {}) {
       const parsedEndMm = parseLayerSettingsLengthInput(drawingEndInput.value, displayUnitId);
       if (parsedEndMm === null) return;
       shiftGroupStartByMm(parsedEndMm - getLayerSettingsGroupEndMm(group));
+      refreshLayerSettingsLivePreview();
     });
     const normalizeGroupEnd = () => {
       const parsedEndMm = parseLayerSettingsLengthInput(drawingEndInput.value, displayUnitId);
@@ -4586,6 +4739,7 @@ function renderLayerSettingsModal(options = {}) {
         endInput.value = formatLengthInputValue(item.baseElevationMm + item.heightMm, displayUnitId);
         drawingHeightDisplay.value = formatLengthInputValue(getLayerSettingsGroupHeightMm(group), displayUnitId);
         drawingEndInput.value = formatLengthInputValue(getLayerSettingsGroupEndMm(group), displayUnitId);
+        refreshLayerSettingsLivePreview();
       });
       const normalizeHeight = () => {
         const parsedHeightMm = parseLayerSettingsLengthInput(heightInput.value, displayUnitId);
@@ -4605,6 +4759,7 @@ function renderLayerSettingsModal(options = {}) {
         drawingHeightDisplay.value = formatLengthInputValue(getLayerSettingsGroupHeightMm(group), displayUnitId);
         drawingStartInput.value = formatLengthInputValue(getLayerSettingsGroupStartMm(group), displayUnitId);
         drawingEndInput.value = formatLengthInputValue(getLayerSettingsGroupEndMm(group), displayUnitId);
+        refreshLayerSettingsLivePreview();
       });
       const normalizeStart = () => {
         const parsedStartMm = parseLayerSettingsLengthInput(startInput.value, displayUnitId);
@@ -4624,6 +4779,7 @@ function renderLayerSettingsModal(options = {}) {
         drawingHeightDisplay.value = formatLengthInputValue(getLayerSettingsGroupHeightMm(group), displayUnitId);
         drawingStartInput.value = formatLengthInputValue(getLayerSettingsGroupStartMm(group), displayUnitId);
         drawingEndInput.value = formatLengthInputValue(getLayerSettingsGroupEndMm(group), displayUnitId);
+        refreshLayerSettingsLivePreview();
       });
       const normalizeEnd = () => {
         const parsedEndMm = parseLayerSettingsLengthInput(endInput.value, displayUnitId);
@@ -4767,10 +4923,14 @@ function openLayerSettingsModal() {
 function closeLayerSettingsModal() {
   clearLayerSettingsPointerDrag(false);
   if (!layerSettingsModal) return;
+  const shouldResetLivePreview = isLayerSettingsRenderPreviewActive();
   syncLayerSettingsUiMemoryFromDraft();
   layerSettingsModal.classList.add("hidden");
   state.layerSettingsDraft = null;
   syncModalBackdropVisibility();
+  if (shouldResetLivePreview) {
+    refreshRenderWorkspacePreview("layer-settings-live-preview-reset", { force: true });
+  }
 }
 
 function openRenderSettingsMenu() {
@@ -4789,9 +4949,13 @@ function openRenderSettingsMenu() {
 function closeRenderSettingsMenu() {
   if (!renderSettingsModal) return;
 
+  const shouldResetLivePreview = isRenderSettingsPreviewActive();
   renderSettingsModal.classList.add("hidden");
   state.renderSettingsDraft = null;
   syncModalBackdropVisibility();
+  if (shouldResetLivePreview) {
+    refreshRenderWorkspacePreview("render-settings-live-preview-reset", { force: true });
+  }
 }
 
 function openRenderBoxPropertiesModal(renderId) {
@@ -4989,6 +5153,7 @@ function createRenderRecord(options = {}) {
     visible: options.visible !== false,
     layoutPreset,
     paneDirectionProfiles,
+    livePreview: cloneRenderLivePreview(options.livePreview),
     syncFit: cloneRenderSyncFit(options.syncFit),
     boxGeometry: cloneRenderBoxGeometry(options.boxGeometry),
     volume: cloneRenderVolumeSettings(options.volume),
@@ -7860,6 +8025,7 @@ function duplicateRender(renderId) {
     visible: sourceRender.visible !== false,
     layoutPreset: sourceRender.layoutPreset,
     paneDirectionProfiles: sourceRender.paneDirectionProfiles,
+    livePreview: sourceRender.livePreview === true,
     syncFit: sourceRender.syncFit === true,
     boxGeometry: sourceRender.boxGeometry,
     volume: sourceRender.volume,
@@ -10204,6 +10370,7 @@ for (const button of renderDepthModeButtons) {
     state.renderSettingsDraft.depthEffect.mode = nextMode;
     state.renderSettingsDraft.depthEffect.enabled = nextMode !== "off";
     syncRenderSettingsMenu();
+    refreshRenderSettingsLivePreview();
   });
 }
 
@@ -10212,6 +10379,7 @@ for (const button of renderOutlineButtons) {
     if (!state.renderSettingsDraft) return;
     state.renderSettingsDraft.outlineEffect.enabled = button.dataset.renderOutline === "on";
     syncRenderSettingsMenu();
+    refreshRenderSettingsLivePreview();
   });
 }
 
@@ -10223,6 +10391,7 @@ if (renderDepthStrengthDecrease) {
       state.renderSettingsDraft.depthEffect.strength
     );
     syncRenderSettingsMenu();
+    refreshRenderSettingsLivePreview();
   });
 }
 
@@ -10233,6 +10402,7 @@ if (renderOutlineColorInput) {
       renderOutlineColorInput.value,
       state.renderSettingsDraft.outlineEffect.color
     );
+    refreshRenderSettingsLivePreview();
   });
 
   renderOutlineColorInput.addEventListener("change", () => {
@@ -10242,6 +10412,7 @@ if (renderOutlineColorInput) {
       state.renderSettingsDraft.outlineEffect.color
     );
     syncRenderSettingsMenu();
+    refreshRenderSettingsLivePreview();
   });
 }
 
@@ -10252,6 +10423,7 @@ if (renderOutlineWidthInput) {
       renderOutlineWidthInput.value,
       state.renderSettingsDraft.outlineEffect.thickness
     );
+    refreshRenderSettingsLivePreview();
   });
 
   renderOutlineWidthInput.addEventListener("change", () => {
@@ -10261,6 +10433,7 @@ if (renderOutlineWidthInput) {
       state.renderSettingsDraft.outlineEffect.thickness
     );
     syncRenderSettingsMenu();
+    refreshRenderSettingsLivePreview();
   });
 }
 
@@ -10272,6 +10445,7 @@ if (renderDepthStrengthIncrease) {
       state.renderSettingsDraft.depthEffect.strength
     );
     syncRenderSettingsMenu();
+    refreshRenderSettingsLivePreview();
   });
 }
 
@@ -10283,6 +10457,7 @@ if (renderDepthStrengthValue) {
       renderDepthStrengthValue.value,
       state.renderSettingsDraft.depthEffect.strength
     );
+    refreshRenderSettingsLivePreview();
   });
 
   renderDepthStrengthValue.addEventListener("change", () => {
@@ -10292,6 +10467,7 @@ if (renderDepthStrengthValue) {
       state.renderSettingsDraft.depthEffect.strength
     );
     syncRenderSettingsMenu();
+    refreshRenderSettingsLivePreview();
   });
 }
 
@@ -10444,6 +10620,22 @@ if (renderSyncFitButton) {
     if (!activeRender) return;
     activeRender.syncFit = !(activeRender.syncFit === true);
     renderWorkspaceUi();
+  });
+}
+
+if (renderLivePreviewButton) {
+  renderLivePreviewButton.addEventListener("click", () => {
+    if (isRenderPopoutWindow()) return;
+    const activeRender = getActiveRenderRecord();
+    if (!activeRender) return;
+    activeRender.livePreview = !(activeRender.livePreview === true);
+    renderWorkspaceUi();
+    if (!(activeRender.livePreview === true)) {
+      render();
+      if (isRenderPopoutMainController() && renderPopoutSession.openRenderId === activeRender.id) {
+        syncTrackedRenderPopout("live-preview-toggle");
+      }
+    }
   });
 }
 

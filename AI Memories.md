@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-04-05
+- Last updated: 2026-04-06
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -287,7 +287,7 @@ The current authoring panel behavior is:
 ### Current Task 1: Renders Subsystem
 
 - Task: design the application's new `Renders` subsystem from scratch, with `Render` / `Render Box` naming, global layer render properties, a `Main` tab plus per-render tabs, and a first rollout that focuses on UI before the deeper rendering engine.
-- Status: implementation is active. The UI shell, persistence scaffolding, `Rbox` authoring flow, layer/render settings editors, and the first real render-output/documentation path are now in place, but the subsystem is still not complete because `Plan` has not yet been unified onto the same documentation path and `DXF` export is not open yet.
+- Status: implementation is active. The UI shell, persistence scaffolding, `Rbox` authoring flow, layer/render settings editors, and the first real render-output/documentation path are now in place. `Plan` now enters the same top-level render-pane documentation orchestration as the directional panes, but the subsystem is still not complete because `DXF` export is not open yet and the render/documentation architecture still needs more stabilization around the intentional `Plan` vs side-view split.
 
 #### Locked Decisions
 
@@ -297,6 +297,7 @@ The current authoring panel behavior is:
 - The ordering of layers in the main canvas stack is separate from the ordering or grouping used when editing render-related layer properties.
 - Old per-view layer override behavior from the external example should not be carried over into this app.
 - Layer opacity should not be reintroduced as a render-layer control in the new system; if any old opacity logic is still present in the external example or dead code, it is not part of the intended render-properties model for this app.
+- `Plan` should remain its own render/documentation branch instead of being forced into the same output contract as the side views; a previous attempt to fully match the side-view path did not behave correctly, so the split is intentional.
 - The workspace direction is:
   - one `Main` tab for authoring on the main canvas
   - separate `Rbox` tabs (`Rbox 1`, `Rbox 2`, etc., or user-renamed equivalents) driven by the created render boxes
@@ -324,9 +325,8 @@ The current authoring panel behavior is:
 
 #### Immediate Focus
 
-- The immediate next step is to move `Plan` onto the same shared documentation/render path already used by the directional panes, so the render subsystem stops carrying two different output models.
-- Immediately after that, open real `DXF` export from that same shared documentation object so dimensions can be validated against the exact render output rather than against a separate export-only path.
-- After `Plan` and `DXF` are on the shared documentation model, continue into stronger section-aware/documentation-aware behavior before later zoom-oriented raster-backing polish.
+- The immediate next step is to open real `DXF` export from the current render documentation architecture without forcing `Plan` into the side-view contract, so dimensions can be validated against the exact render output rather than against a separate export-only path.
+- After `DXF` is open, continue into stronger section-aware/documentation-aware behavior and further stabilization of the intentional `Plan` / side-view split before later zoom-oriented raster-backing polish.
 
 #### Progress
 
@@ -480,12 +480,12 @@ The current authoring panel behavior is:
   - the non-plan panes now share one common directional painter instead of a one-off `Top to Bottom` implementation
   - `Bottom to Top`, `Left to Right`, and `Right to Left` now paint real first-pass canvas output too, using the active direction's own local-primary axis, front boundary, and mirrored/non-mirrored horizontal mapping
   - that shared directional painter no longer uses the old temporary raster/grid-derived boundary path; it now builds from a shared vector documentation object and only rasterizes at the final preview-display stage
-  - `Plan` remains a separate painter, because it is not the same kind of output as the directional elevation panes
+  - `Plan` now also enters the same top-level render-pane documentation orchestration as the directional panes, but it intentionally keeps its own plan-specific builder/painter contract because the earlier attempt to fully match the side-view path did not work correctly
 - The render workspace now also has a first real depth-aware shading pass:
   - the left-panel `Render Settings` button is no longer just a placeholder; it now opens a modal with reference-like `Depth Effect` controls (`Shadow`, `Fog`, `Off`) plus `Depth Strength`
   - those render settings now persist in the project workspace snapshot/import-export path instead of living only in transient UI state
   - the directional render painter now shades visible fills by normalizing each visible point across the current pane's nearest-to-farthest visible depth range, and `Depth Strength` now means the maximum tint amount applied at that farthest visible point (`100` = full black/white endpoint tint, `50` = half-strength endpoint tint)
-  - `Plan` still stays on its simpler fill path for now; the shared plan/documentation unification is still a later step
+  - `Plan` still stays on its simpler plan-specific fill path for now; only the top-level documentation orchestration is shared at this stage, not the full painter/export contract, and that split is currently intentional rather than just an unfinished merge step
   - a future refinement idea that should be kept in mind: keep the same global `nearest visible depth` model, but change the shading curve from a constant linear step-per-depth-step into a diminishing falloff so the first depth gaps darken more strongly and the farther-back gaps add progressively less darkening, instead of every depth step contributing the same amount forever
 - A new per-vertex outline-eligibility foundation now exists in the main geometry model:
   - each stored shape now carries `vertexOutlineEligibility` alongside its geometry
@@ -503,7 +503,6 @@ The current authoring panel behavior is:
   - the current on-screen fill preview is still rasterized at the end for display, but it is rasterized from the new vector documentation object through an offscreen paint buffer so the pane remains preview-friendly without changing the underlying source-of-truth model
   - this means the current directional panes are now documentation-first even though the browser still displays them through canvas pixels
 - The current locked next order for the render pipeline is now:
-  1. move `Plan` onto the same shared documentation/render path instead of keeping it on its older separate painter
-  2. open real `DXF` export from that same shared documentation object so dimensions can be validated against the exact render output
-  3. expand into stronger section-aware/documentation-aware behavior after the shared documentation path is stable across both side views and `Plan`
-  4. after the render/documentation logic is visually and structurally stable, add a higher-resolution offscreen raster backing path for on-screen panes too, more like the `Reference` view system, so later zoom/pan can behave like a raster image editor without making us lock the wrong render path too early
+  1. open real `DXF` export from the current render documentation architecture so dimensions can be validated against the exact render output
+  2. expand into stronger section-aware/documentation-aware behavior while preserving the intentional architectural split between `Plan` and the side views
+  3. after the render/documentation logic is visually and structurally stable, add a higher-resolution offscreen raster backing path for on-screen panes too, more like the `Reference` view system, so later zoom/pan can behave like a raster image editor without making us lock the wrong render path too early

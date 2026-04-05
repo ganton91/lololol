@@ -310,6 +310,14 @@ function ensureRenderPopoutChannel() {
         } catch {}
       }
     });
+  } else if (isRenderPopoutMainController()) {
+    channel.addEventListener("message", (event) => {
+      const message = isPlainObject(event.data) ? event.data : null;
+      if (!message) return;
+      if (message.type === "closed") {
+        clearTrackedRenderPopout(true);
+      }
+    });
   }
   renderPopoutSession.channel = channel;
   return channel;
@@ -355,6 +363,7 @@ function captureRenderPopoutLocalUiState() {
   return {
     layoutPreset: cloneRenderLayoutPreset(renderRecord.layoutPreset),
     paneDirectionProfiles: cloneRenderPaneDirectionProfiles(renderRecord.paneDirectionProfiles),
+    livePreview: cloneRenderLivePreview(renderRecord.livePreview),
     syncFit: cloneRenderSyncFit(renderRecord.syncFit),
   };
 }
@@ -366,10 +375,21 @@ function restoreRenderPopoutLocalUiState(localUiState) {
   if (!renderRecord) return;
   renderRecord.layoutPreset = cloneRenderLayoutPreset(localUiState.layoutPreset);
   renderRecord.paneDirectionProfiles = cloneRenderPaneDirectionProfiles(localUiState.paneDirectionProfiles);
+  renderRecord.livePreview = cloneRenderLivePreview(localUiState.livePreview);
   renderRecord.syncFit = cloneRenderSyncFit(localUiState.syncFit);
   state.activeWorkspaceTab = { kind: "render", renderId };
   state.activeRenderId = null;
   syncRenderWorkspaceStateFromRecord(renderRecord);
+}
+
+function getPersistedRenderPopoutMirrorPayload() {
+  if (!renderPopoutSession.snapshotKey) return null;
+  try {
+    const raw = localStorage.getItem(renderPopoutSession.snapshotKey);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
 }
 
 function applyRenderPopoutMirrorPayload(payload) {
@@ -382,7 +402,6 @@ function applyRenderPopoutMirrorPayload(payload) {
     return false;
   }
   applyImportedProject(normalizedProject, state.projectFileName);
-  applyRenderPopoutPreviewPayload(payload.renderPreview);
   const renderId = getTrackedRenderPopoutId();
   const renderRecord = renderId ? getRenderById(renderId) : null;
   if (!renderRecord) {
@@ -392,6 +411,7 @@ function applyRenderPopoutMirrorPayload(payload) {
     return false;
   }
   restoreRenderPopoutLocalUiState(localUiState);
+  applyRenderPopoutPreviewPayload(payload.renderPreview);
   renderWorkspaceUi();
   render();
   return true;
@@ -1832,10 +1852,14 @@ function refreshRenderWorkspacePreview(reason = "live-preview", options = {}) {
   const activeRender = getActiveRenderRecord();
   if (!activeRender) return false;
   const force = options.force === true;
-  if (!force && !isRenderLivePreviewEnabled(activeRender)) return false;
-  renderWorkspaceUi();
-  render();
-  if (isRenderPopoutMainController() && renderPopoutSession.openRenderId === activeRender.id) {
+  const shouldRenderMain = force || isRenderLivePreviewEnabled(activeRender);
+  const shouldSyncPopout = isRenderPopoutMainController() && renderPopoutSession.openRenderId === activeRender.id;
+  if (!shouldRenderMain && !shouldSyncPopout) return false;
+  if (shouldRenderMain) {
+    renderWorkspaceUi();
+    render();
+  }
+  if (shouldSyncPopout) {
     syncTrackedRenderPopout(reason);
   }
   return true;
@@ -1843,16 +1867,16 @@ function refreshRenderWorkspacePreview(reason = "live-preview", options = {}) {
 
 function captureRenderPopoutPreviewPayload(renderId = getTrackedRenderPopoutId()) {
   const renderRecord = renderId ? getRenderById(renderId) : getActiveRenderRecord();
-  if (!renderRecord || !isRenderLivePreviewEnabled(renderRecord)) return null;
+  if (!renderRecord) return null;
 
   const previewPayload = {
     renderId: renderRecord.id,
   };
 
-  if (isLayerSettingsRenderPreviewActive(renderRecord)) {
+  if (state.layerSettingsDraft && isLayerSettingsMenuOpen()) {
     previewPayload.layerSettingsDraft = cloneLayerSettingsDraft(state.layerSettingsDraft);
   }
-  if (isRenderSettingsPreviewActive(renderRecord)) {
+  if (state.renderSettingsDraft && isRenderSettingsMenuOpen()) {
     previewPayload.renderSettingsDraft = cloneRenderSettings(state.renderSettingsDraft);
   }
 
@@ -1862,6 +1886,12 @@ function captureRenderPopoutPreviewPayload(renderId = getTrackedRenderPopoutId()
 function applyRenderPopoutPreviewPayload(previewPayload) {
   if (!isRenderPopoutWindow()) return;
   const trackedRenderId = getTrackedRenderPopoutId();
+  const trackedRender = trackedRenderId ? getRenderById(trackedRenderId) : null;
+  if (!trackedRender || !isRenderLivePreviewEnabled(trackedRender)) {
+    state.layerSettingsDraft = null;
+    state.renderSettingsDraft = null;
+    return;
+  }
   if (!previewPayload || previewPayload.renderId !== trackedRenderId) {
     state.layerSettingsDraft = null;
     state.renderSettingsDraft = null;
@@ -3634,7 +3664,7 @@ function syncRenderWorkspaceShell() {
     const livePreviewEnabled = activeRender?.livePreview === true;
     renderLivePreviewButton.classList.toggle("active", livePreviewEnabled);
     renderLivePreviewButton.setAttribute("aria-pressed", String(livePreviewEnabled));
-    renderLivePreviewButton.disabled = !activeRender || isRenderPopoutWindow();
+    renderLivePreviewButton.disabled = !activeRender;
   }
   if (renderPopoutButton) {
     renderPopoutButton.textContent = isRenderPopoutWindow() ? "Close Window" : "Open in New Window";
@@ -4923,7 +4953,9 @@ function openLayerSettingsModal() {
 function closeLayerSettingsModal() {
   clearLayerSettingsPointerDrag(false);
   if (!layerSettingsModal) return;
-  const shouldResetLivePreview = isLayerSettingsRenderPreviewActive();
+  const shouldResetLivePreview =
+    !!state.layerSettingsDraft &&
+    (!!getActiveRenderRecord() && (isRenderLivePreviewEnabled() || (isRenderPopoutMainController() && !!renderPopoutSession.openRenderId)));
   syncLayerSettingsUiMemoryFromDraft();
   layerSettingsModal.classList.add("hidden");
   state.layerSettingsDraft = null;
@@ -4949,7 +4981,9 @@ function openRenderSettingsMenu() {
 function closeRenderSettingsMenu() {
   if (!renderSettingsModal) return;
 
-  const shouldResetLivePreview = isRenderSettingsPreviewActive();
+  const shouldResetLivePreview =
+    !!state.renderSettingsDraft &&
+    (!!getActiveRenderRecord() && (isRenderLivePreviewEnabled() || (isRenderPopoutMainController() && !!renderPopoutSession.openRenderId)));
   renderSettingsModal.classList.add("hidden");
   state.renderSettingsDraft = null;
   syncModalBackdropVisibility();
@@ -10625,16 +10659,27 @@ if (renderSyncFitButton) {
 
 if (renderLivePreviewButton) {
   renderLivePreviewButton.addEventListener("click", () => {
-    if (isRenderPopoutWindow()) return;
     const activeRender = getActiveRenderRecord();
     if (!activeRender) return;
     activeRender.livePreview = !(activeRender.livePreview === true);
     renderWorkspaceUi();
-    if (!(activeRender.livePreview === true)) {
-      render();
-      if (isRenderPopoutMainController() && renderPopoutSession.openRenderId === activeRender.id) {
-        syncTrackedRenderPopout("live-preview-toggle");
+
+    if (isRenderPopoutWindow()) {
+      if (activeRender.livePreview === true) {
+        const payload = getPersistedRenderPopoutMirrorPayload();
+        applyRenderPopoutPreviewPayload(payload?.renderPreview);
+      } else {
+        state.layerSettingsDraft = null;
+        state.renderSettingsDraft = null;
       }
+      renderWorkspaceUi();
+      render();
+      return;
+    }
+
+    render();
+    if (isRenderPopoutMainController() && renderPopoutSession.openRenderId === activeRender.id) {
+      syncTrackedRenderPopout("live-preview-toggle");
     }
   });
 }
@@ -10908,6 +10953,12 @@ window.addEventListener("keyup", (e) => {
 
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("beforeunload", () => {
+  if (isRenderPopoutWindow()) {
+    const channel = ensureRenderPopoutChannel();
+    if (channel) {
+      channel.postMessage({ type: "closed", renderId: getTrackedRenderPopoutId() });
+    }
+  }
   stopRenderPopoutCloseMonitor();
   closeRenderPopoutChannel();
 });

@@ -3514,6 +3514,9 @@ function syncRenderWorkspaceShell() {
   const externalizedInMain = !!activeRender && isRenderExternalized(activeRender.id);
   const popoutMissingTarget = isRenderPopoutWindow() && !activeRender;
   const showNotice = externalizedInMain || popoutMissingTarget;
+  if (renderWorkspaceShell) {
+    renderWorkspaceShell.classList.toggle("notice-mode", showNotice);
+  }
 
   if (renderLayoutToolbar) {
     renderLayoutToolbar.classList.toggle("hidden", externalizedInMain || popoutMissingTarget);

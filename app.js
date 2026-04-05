@@ -316,6 +316,10 @@ function ensureRenderPopoutChannel() {
       if (!message) return;
       if (message.type === "closed") {
         clearTrackedRenderPopout(true);
+        return;
+      }
+      if (message.type === "render-ui-state" && isPlainObject(message.payload)) {
+        applyRenderPopoutSharedUiState(message.payload);
       }
     });
   }
@@ -355,33 +359,6 @@ function clearPersistedRenderPopoutMirrorPayload() {
   } catch {}
 }
 
-function captureRenderPopoutLocalUiState() {
-  if (!isRenderPopoutWindow()) return null;
-  const renderId = getTrackedRenderPopoutId();
-  const renderRecord = renderId ? getRenderById(renderId) : null;
-  if (!renderRecord) return null;
-  return {
-    layoutPreset: cloneRenderLayoutPreset(renderRecord.layoutPreset),
-    paneDirectionProfiles: cloneRenderPaneDirectionProfiles(renderRecord.paneDirectionProfiles),
-    livePreview: cloneRenderLivePreview(renderRecord.livePreview),
-    syncFit: cloneRenderSyncFit(renderRecord.syncFit),
-  };
-}
-
-function restoreRenderPopoutLocalUiState(localUiState) {
-  if (!isRenderPopoutWindow() || !localUiState) return;
-  const renderId = getTrackedRenderPopoutId();
-  const renderRecord = renderId ? getRenderById(renderId) : null;
-  if (!renderRecord) return;
-  renderRecord.layoutPreset = cloneRenderLayoutPreset(localUiState.layoutPreset);
-  renderRecord.paneDirectionProfiles = cloneRenderPaneDirectionProfiles(localUiState.paneDirectionProfiles);
-  renderRecord.livePreview = cloneRenderLivePreview(localUiState.livePreview);
-  renderRecord.syncFit = cloneRenderSyncFit(localUiState.syncFit);
-  state.activeWorkspaceTab = { kind: "render", renderId };
-  state.activeRenderId = null;
-  syncRenderWorkspaceStateFromRecord(renderRecord);
-}
-
 function getPersistedRenderPopoutMirrorPayload() {
   if (!renderPopoutSession.snapshotKey) return null;
   try {
@@ -392,9 +369,61 @@ function getPersistedRenderPopoutMirrorPayload() {
   }
 }
 
+function captureRenderPopoutSharedUiState(renderRecord = getActiveRenderRecord()) {
+  if (!renderRecord) return null;
+  return {
+    renderId: renderRecord.id,
+    layoutPreset: cloneRenderLayoutPreset(renderRecord.layoutPreset),
+    paneDirectionProfiles: cloneRenderPaneDirectionProfiles(renderRecord.paneDirectionProfiles),
+    livePreview: cloneRenderLivePreview(renderRecord.livePreview),
+    syncFit: cloneRenderSyncFit(renderRecord.syncFit),
+  };
+}
+
+function applyRenderSharedUiStateToRecord(renderRecord, uiState) {
+  if (!renderRecord || !isPlainObject(uiState)) return false;
+  renderRecord.layoutPreset = cloneRenderLayoutPreset(uiState.layoutPreset ?? renderRecord.layoutPreset);
+  renderRecord.paneDirectionProfiles = cloneRenderPaneDirectionProfiles(
+    uiState.paneDirectionProfiles,
+    renderRecord.paneDirectionProfiles
+  );
+  renderRecord.livePreview = cloneRenderLivePreview(uiState.livePreview ?? renderRecord.livePreview);
+  renderRecord.syncFit = cloneRenderSyncFit(uiState.syncFit ?? renderRecord.syncFit);
+  return true;
+}
+
+function broadcastRenderPopoutSharedUiState(renderRecord = getActiveRenderRecord()) {
+  if (!isRenderPopoutWindow()) return false;
+  const payload = captureRenderPopoutSharedUiState(renderRecord);
+  if (!payload) return false;
+  const channel = ensureRenderPopoutChannel();
+  if (channel) {
+    channel.postMessage({ type: "render-ui-state", payload });
+  }
+  return true;
+}
+
+function applyRenderPopoutSharedUiState(uiState) {
+  if (!isRenderPopoutMainController() || !isPlainObject(uiState)) return false;
+  const renderId = typeof uiState.renderId === "string" ? uiState.renderId : renderPopoutSession.openRenderId;
+  if (!renderId || renderId !== renderPopoutSession.openRenderId) return false;
+  const renderRecord = getRenderById(renderId);
+  if (!renderRecord) return false;
+  applyRenderSharedUiStateToRecord(renderRecord, uiState);
+  if (
+    state.activeWorkspaceTab?.kind === "render" &&
+    state.activeWorkspaceTab.renderId === renderId
+  ) {
+    syncRenderWorkspaceStateFromRecord(renderRecord);
+  }
+  renderWorkspaceUi();
+  render();
+  syncTrackedRenderPopout("popout-ui-state");
+  return true;
+}
+
 function applyRenderPopoutMirrorPayload(payload) {
   if (!isRenderPopoutWindow()) return false;
-  const localUiState = captureRenderPopoutLocalUiState();
   let normalizedProject;
   try {
     normalizedProject = normalizeImportedProjectFile(payload);
@@ -410,7 +439,6 @@ function applyRenderPopoutMirrorPayload(payload) {
     renderWorkspaceUi();
     return false;
   }
-  restoreRenderPopoutLocalUiState(localUiState);
   applyRenderPopoutPreviewPayload(payload.renderPreview);
   renderWorkspaceUi();
   render();
@@ -1794,6 +1822,7 @@ function setRenderPaneDirection(slotIndex, direction) {
   state.renderPaneDirectionProfiles = nextProfiles;
   activeRender.paneDirectionProfiles = cloneRenderPaneDirectionProfiles(nextProfiles);
   renderWorkspaceUi();
+  broadcastRenderPopoutSharedUiState(activeRender);
   return true;
 }
 
@@ -10645,6 +10674,7 @@ for (const button of renderLayoutButtons) {
     state.renderLayoutPreset = nextPreset;
     activeRender.layoutPreset = nextPreset;
     renderWorkspaceUi();
+    broadcastRenderPopoutSharedUiState(activeRender);
   });
 }
 
@@ -10654,6 +10684,7 @@ if (renderSyncFitButton) {
     if (!activeRender) return;
     activeRender.syncFit = !(activeRender.syncFit === true);
     renderWorkspaceUi();
+    broadcastRenderPopoutSharedUiState(activeRender);
   });
 }
 
@@ -10674,6 +10705,7 @@ if (renderLivePreviewButton) {
       }
       renderWorkspaceUi();
       render();
+      broadcastRenderPopoutSharedUiState(activeRender);
       return;
     }
 

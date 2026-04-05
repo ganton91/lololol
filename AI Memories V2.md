@@ -33,3 +33,16 @@ Important: the following rules should always be read and remain in effect throug
 - Whenever a new feature adds project state that must persist, update the app's export/import flow for that feature as part of the same work.
 - During the current development phase, backward compatibility with older project files is not a goal when export/import changes are made for new features.
 - When an export/import change breaks compatibility with older project files, explicitly tell the user that compatibility was lost.
+
+## What The App Is
+
+`millimétré` is a browser-based 2.5D vector drafting / CAD tool focused on building geometry and turning it into design-documentation outputs.
+
+It is aimed at workflows where someone wants to author clean vector geometry, organize it spatially, and produce things like plans, views / elevations, drawings, and related documentation.
+
+Its geometry pipeline is based on vector and boolean operations, and the long-term goal is to grow into a lightweight browser-native design-documentation workflow.
+
+## Latest Update
+
+- Last updated: 2026-04-06
+- Latest change: created and started shaping `AI Memories V2` as a slimmer onboarding-focused replacement for the original `AI Memories`.

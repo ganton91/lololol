@@ -1840,6 +1840,16 @@ function isRenderLivePreviewEnabled(renderRecord = getActiveRenderRecord()) {
   return !!renderRecord && cloneRenderLivePreview(renderRecord.livePreview) === true;
 }
 
+function getRenderPreviewTargetRecord() {
+  if (isRenderPopoutMainController() && renderPopoutSession.openRenderId) {
+    return getRenderById(renderPopoutSession.openRenderId) || getActiveRenderRecord();
+  }
+  if (isRenderPopoutWindow()) {
+    return getRenderById(getTrackedRenderPopoutId());
+  }
+  return getActiveRenderRecord();
+}
+
 function cloneLayerSettingsDraft(draft = null) {
   if (!isPlainObject(draft) || !Array.isArray(draft.drawings)) return null;
   return {
@@ -1878,11 +1888,15 @@ function getEffectiveLayerSettingsDraft(renderRecord = getActiveRenderRecord()) 
 }
 
 function refreshRenderWorkspacePreview(reason = "live-preview", options = {}) {
-  const activeRender = getActiveRenderRecord();
-  if (!activeRender) return false;
+  const previewRender = getRenderPreviewTargetRecord();
+  if (!previewRender) return false;
   const force = options.force === true;
-  const shouldRenderMain = force || isRenderLivePreviewEnabled(activeRender);
-  const shouldSyncPopout = isRenderPopoutMainController() && renderPopoutSession.openRenderId === activeRender.id;
+  const activeRender = getActiveRenderRecord();
+  const shouldRenderMain =
+    !!activeRender &&
+    activeRender.id === previewRender.id &&
+    (force || isRenderLivePreviewEnabled(previewRender));
+  const shouldSyncPopout = isRenderPopoutMainController() && renderPopoutSession.openRenderId === previewRender.id;
   if (!shouldRenderMain && !shouldSyncPopout) return false;
   if (shouldRenderMain) {
     renderWorkspaceUi();
@@ -4982,9 +4996,11 @@ function openLayerSettingsModal() {
 function closeLayerSettingsModal() {
   clearLayerSettingsPointerDrag(false);
   if (!layerSettingsModal) return;
+  const previewRender = getRenderPreviewTargetRecord();
   const shouldResetLivePreview =
     !!state.layerSettingsDraft &&
-    (!!getActiveRenderRecord() && (isRenderLivePreviewEnabled() || (isRenderPopoutMainController() && !!renderPopoutSession.openRenderId)));
+    !!previewRender &&
+    (isRenderLivePreviewEnabled(previewRender) || (isRenderPopoutMainController() && !!renderPopoutSession.openRenderId));
   syncLayerSettingsUiMemoryFromDraft();
   layerSettingsModal.classList.add("hidden");
   state.layerSettingsDraft = null;
@@ -5010,9 +5026,11 @@ function openRenderSettingsMenu() {
 function closeRenderSettingsMenu() {
   if (!renderSettingsModal) return;
 
+  const previewRender = getRenderPreviewTargetRecord();
   const shouldResetLivePreview =
     !!state.renderSettingsDraft &&
-    (!!getActiveRenderRecord() && (isRenderLivePreviewEnabled() || (isRenderPopoutMainController() && !!renderPopoutSession.openRenderId)));
+    !!previewRender &&
+    (isRenderLivePreviewEnabled(previewRender) || (isRenderPopoutMainController() && !!renderPopoutSession.openRenderId));
   renderSettingsModal.classList.add("hidden");
   state.renderSettingsDraft = null;
   syncModalBackdropVisibility();

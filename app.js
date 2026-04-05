@@ -1167,6 +1167,20 @@ function refreshRenderSettingsLivePreview() {
   refreshRenderWorkspacePreview("render-settings-live-preview");
 }
 
+function refreshRenderBoxPropertiesLivePreview() {
+  refreshRenderWorkspacePreview("rbox-properties-live-preview");
+}
+
+function cloneRenderBoxPropertiesDraft(draft = null) {
+  if (!isPlainObject(draft)) return null;
+  return {
+    renderId: typeof draft.renderId === "string" ? draft.renderId : "",
+    name: typeof draft.name === "string" ? draft.name : "",
+    baseElevationMm: quantizeCoordinate(draft.baseElevationMm),
+    heightMm: Math.max(0, quantizeCoordinate(draft.heightMm)),
+  };
+}
+
 function createRenderBoxPropertiesDraft(renderId) {
   const renderRecord = getRenderById(renderId);
   if (!renderRecord) return null;
@@ -1662,6 +1676,28 @@ function getRenderVolumeRange(render) {
   };
 }
 
+function getEffectiveRenderVolumeRange(renderRecord) {
+  const previewDraft = state.renderBoxPropertiesDraft;
+  if (
+    renderRecord &&
+    isRenderLivePreviewEnabled(renderRecord) &&
+    previewDraft &&
+    previewDraft.renderId === renderRecord.id &&
+    (isRenderPopoutWindow() || isRenderBoxPropertiesModalOpen())
+  ) {
+    const startMm = quantizeCoordinate(previewDraft.baseElevationMm);
+    const heightMm = Math.max(0, quantizeCoordinate(previewDraft.heightMm));
+    const endMm = quantizeCoordinate(startMm + heightMm);
+    return {
+      baseElevationMm: startMm,
+      heightMm,
+      endMm,
+      hasExplicitRange: heightMm > 1e-6,
+    };
+  }
+  return getRenderVolumeRange(renderRecord);
+}
+
 function getActiveRenderRecord() {
   if (state.activeWorkspaceTab?.kind !== "render") return null;
   return state.renders.find((render) => render.id === state.activeWorkspaceTab.renderId) || null;
@@ -1922,8 +1958,13 @@ function captureRenderPopoutPreviewPayload(renderId = getTrackedRenderPopoutId()
   if (state.renderSettingsDraft && isRenderSettingsMenuOpen()) {
     previewPayload.renderSettingsDraft = cloneRenderSettings(state.renderSettingsDraft);
   }
+  if (state.renderBoxPropertiesDraft && isRenderBoxPropertiesModalOpen()) {
+    previewPayload.renderBoxPropertiesDraft = cloneRenderBoxPropertiesDraft(state.renderBoxPropertiesDraft);
+  }
 
-  return previewPayload.layerSettingsDraft || previewPayload.renderSettingsDraft ? previewPayload : null;
+  return previewPayload.layerSettingsDraft || previewPayload.renderSettingsDraft || previewPayload.renderBoxPropertiesDraft
+    ? previewPayload
+    : null;
 }
 
 function applyRenderPopoutPreviewPayload(previewPayload) {
@@ -1933,11 +1974,13 @@ function applyRenderPopoutPreviewPayload(previewPayload) {
   if (!trackedRender || !isRenderLivePreviewEnabled(trackedRender)) {
     state.layerSettingsDraft = null;
     state.renderSettingsDraft = null;
+    state.renderBoxPropertiesDraft = null;
     return;
   }
   if (!previewPayload || previewPayload.renderId !== trackedRenderId) {
     state.layerSettingsDraft = null;
     state.renderSettingsDraft = null;
+    state.renderBoxPropertiesDraft = null;
     return;
   }
 
@@ -1945,6 +1988,7 @@ function applyRenderPopoutPreviewPayload(previewPayload) {
   state.renderSettingsDraft = previewPayload.renderSettingsDraft
     ? cloneRenderSettings(previewPayload.renderSettingsDraft)
     : null;
+  state.renderBoxPropertiesDraft = cloneRenderBoxPropertiesDraft(previewPayload.renderBoxPropertiesDraft);
 }
 
 function compileRenderScene(renderRecord = getActiveRenderRecord()) {
@@ -2050,7 +2094,7 @@ function resolveRenderPaneRequest(renderRecord, slotIndex) {
   const directionConfig = getRenderDirectionConfig(direction);
   const frame = getRenderBoxLocalFrame(renderRecord);
   const clipGeometryWorld = frame ? [[frame.boxGeometry.map((point) => [point.x, point.y])]] : [];
-  const volumeRange = getRenderVolumeRange(renderRecord);
+  const volumeRange = getEffectiveRenderVolumeRange(renderRecord);
 
   return {
     slotIndex,
@@ -5058,9 +5102,18 @@ function openRenderBoxPropertiesModal(renderId) {
 function closeRenderBoxPropertiesModal() {
   if (!renderBoxPropertiesModal) return;
 
+  const previewRender = getRenderPreviewTargetRecord();
+  const shouldResetLivePreview =
+    !!state.renderBoxPropertiesDraft &&
+    !!previewRender &&
+    state.renderBoxPropertiesDraft.renderId === previewRender.id &&
+    (isRenderLivePreviewEnabled(previewRender) || (isRenderPopoutMainController() && !!renderPopoutSession.openRenderId));
   renderBoxPropertiesModal.classList.add("hidden");
   state.renderBoxPropertiesDraft = null;
   syncModalBackdropVisibility();
+  if (shouldResetLivePreview) {
+    refreshRenderWorkspacePreview("rbox-properties-live-preview-reset", { force: true });
+  }
 }
 
 function applyRenderBoxPropertiesDraft() {
@@ -10559,10 +10612,17 @@ if (renderBoxPropertiesHeightInput) {
     if (parsedHeightMm === null) return;
     state.renderBoxPropertiesDraft.heightMm = Math.max(0, parsedHeightMm);
     syncRenderBoxPropertiesModal();
+    refreshRenderBoxPropertiesLivePreview();
   });
 
-  renderBoxPropertiesHeightInput.addEventListener("change", syncRenderBoxPropertiesModal);
-  renderBoxPropertiesHeightInput.addEventListener("blur", syncRenderBoxPropertiesModal);
+  renderBoxPropertiesHeightInput.addEventListener("change", () => {
+    syncRenderBoxPropertiesModal();
+    refreshRenderBoxPropertiesLivePreview();
+  });
+  renderBoxPropertiesHeightInput.addEventListener("blur", () => {
+    syncRenderBoxPropertiesModal();
+    refreshRenderBoxPropertiesLivePreview();
+  });
 }
 
 if (renderBoxPropertiesStartInput) {
@@ -10572,10 +10632,17 @@ if (renderBoxPropertiesStartInput) {
     if (parsedStartMm === null) return;
     state.renderBoxPropertiesDraft.baseElevationMm = parsedStartMm;
     syncRenderBoxPropertiesModal();
+    refreshRenderBoxPropertiesLivePreview();
   });
 
-  renderBoxPropertiesStartInput.addEventListener("change", syncRenderBoxPropertiesModal);
-  renderBoxPropertiesStartInput.addEventListener("blur", syncRenderBoxPropertiesModal);
+  renderBoxPropertiesStartInput.addEventListener("change", () => {
+    syncRenderBoxPropertiesModal();
+    refreshRenderBoxPropertiesLivePreview();
+  });
+  renderBoxPropertiesStartInput.addEventListener("blur", () => {
+    syncRenderBoxPropertiesModal();
+    refreshRenderBoxPropertiesLivePreview();
+  });
 }
 
 if (renderBoxPropertiesEndInput) {
@@ -10585,10 +10652,17 @@ if (renderBoxPropertiesEndInput) {
     if (parsedEndMm === null) return;
     state.renderBoxPropertiesDraft.baseElevationMm = quantizeCoordinate(parsedEndMm - state.renderBoxPropertiesDraft.heightMm);
     syncRenderBoxPropertiesModal();
+    refreshRenderBoxPropertiesLivePreview();
   });
 
-  renderBoxPropertiesEndInput.addEventListener("change", syncRenderBoxPropertiesModal);
-  renderBoxPropertiesEndInput.addEventListener("blur", syncRenderBoxPropertiesModal);
+  renderBoxPropertiesEndInput.addEventListener("change", () => {
+    syncRenderBoxPropertiesModal();
+    refreshRenderBoxPropertiesLivePreview();
+  });
+  renderBoxPropertiesEndInput.addEventListener("blur", () => {
+    syncRenderBoxPropertiesModal();
+    refreshRenderBoxPropertiesLivePreview();
+  });
 }
 
 shapeSelect.addEventListener("change", (e) => {

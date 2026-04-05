@@ -67,6 +67,30 @@
         grid-template-rows: 48px 1fr;
       }
 
+      body.render-popout-window #app {
+        grid-template-rows: 1fr;
+      }
+
+      body.render-popout-window .topbar,
+      body.render-popout-window .layers-panel,
+      body.render-popout-window .workspace-switcher,
+      body.render-popout-window .canvas-stage,
+      body.render-popout-window .toolbar {
+        display: none !important;
+      }
+
+      body.render-popout-window .workspace-shell {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      body.render-popout-window .render-workspace-shell {
+        display: grid;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+      }
+
       .topbar {
         display: flex;
         align-items: center;
@@ -1724,6 +1748,8 @@
       }
 
       .render-popout-notice.hidden,
+      .render-layout-toolbar.hidden,
+      .render-output-grid.hidden,
       .render-pane.hidden,
       .render-pane-canvas.hidden,
       .render-pane-empty.hidden {

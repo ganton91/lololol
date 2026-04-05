@@ -82,6 +82,9 @@ const renderPaneSectionButtonRows = renderPaneSlots.map((pane) => pane.querySele
 const renderPaneExportButtons = Array.from(document.querySelectorAll("[data-render-export-slot][data-render-export-format]"));
 const renderPaneSelectorButtons = Array.from(document.querySelectorAll("[data-render-slot][data-render-direction]"));
 const renderSyncFitButton = document.getElementById("renderSyncFitButton");
+const renderPopoutButton = document.getElementById("renderPopoutButton");
+const renderPopoutNotice = document.getElementById("renderPopoutNotice");
+const renderLayoutToolbar = document.querySelector(".render-layout-toolbar");
 const settingsDisplayUnitButtons = Array.from(document.querySelectorAll("[data-settings-display-unit]"));
 const settingsCellUnitButtons = Array.from(document.querySelectorAll("[data-settings-cell-unit]"));
 const settingsSnapModeButtons = Array.from(document.querySelectorAll("[data-settings-snap-mode]"));
@@ -134,6 +137,12 @@ const DEFAULT_RENDER_SETTINGS = Object.freeze({
   depthEffect: DEFAULT_RENDER_DEPTH_EFFECT,
   outlineEffect: DEFAULT_RENDER_OUTLINE_EFFECT,
 });
+const RENDER_POPOUT_QUERY_PARAM = "renderPopout";
+const RENDER_POPOUT_RENDER_ID_QUERY_PARAM = "renderId";
+const RENDER_POPOUT_TOKEN_QUERY_PARAM = "token";
+const RENDER_POPOUT_WINDOW_NAME = "millimetre-render-popout";
+const RENDER_POPOUT_MIRROR_STORAGE_PREFIX = "millimetre-render-popout-snapshot:";
+const RENDER_POPOUT_CHANNEL_PREFIX = "millimetre-render-popout-channel:";
 const DEFAULT_SETTINGS = Object.freeze({
   displayUnit: "m",
   cellUnit: "cm",
@@ -254,6 +263,299 @@ const state = {
     pendingScreen: null,
   },
 };
+
+function isRenderPopoutWindow() {
+  return renderPopoutSession.mode === "popout";
+}
+
+function isRenderPopoutMainController() {
+  return renderPopoutSession.mode === "main";
+}
+
+function getTrackedRenderPopoutId() {
+  return isRenderPopoutWindow() ? renderPopoutSession.targetRenderId : renderPopoutSession.openRenderId;
+}
+
+function isRenderExternalized(renderId) {
+  if (isRenderPopoutWindow()) return false;
+  if (!renderId) return false;
+  return renderPopoutSession.openRenderId === renderId;
+}
+
+function generateRenderPopoutToken() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `rpop-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function ensureRenderPopoutChannel() {
+  if (!renderPopoutSession.channelName) return null;
+  if (renderPopoutSession.channel) return renderPopoutSession.channel;
+  if (typeof BroadcastChannel !== "function") return null;
+  const channel = new BroadcastChannel(renderPopoutSession.channelName);
+  if (isRenderPopoutWindow()) {
+    channel.addEventListener("message", (event) => {
+      const message = isPlainObject(event.data) ? event.data : null;
+      if (!message) return;
+      if (message.type === "mirror-state" && isPlainObject(message.payload)) {
+        applyRenderPopoutMirrorPayload(message.payload);
+        return;
+      }
+      if (message.type === "close-window") {
+        try {
+          window.close();
+        } catch {}
+      }
+    });
+  }
+  renderPopoutSession.channel = channel;
+  return channel;
+}
+
+function closeRenderPopoutChannel() {
+  if (!renderPopoutSession.channel) return;
+  renderPopoutSession.channel.close();
+  renderPopoutSession.channel = null;
+}
+
+function captureRenderPopoutMirrorPayload(renderId = getTrackedRenderPopoutId()) {
+  const payload = createProjectFilePayload();
+  if (renderId) {
+    payload.workspace.activeWorkspaceTab = { kind: "render", renderId };
+  }
+  return payload;
+}
+
+function persistRenderPopoutMirrorPayload(payload) {
+  if (!renderPopoutSession.snapshotKey) return;
+  try {
+    localStorage.setItem(renderPopoutSession.snapshotKey, JSON.stringify(payload));
+  } catch {}
+}
+
+function clearPersistedRenderPopoutMirrorPayload() {
+  if (!renderPopoutSession.snapshotKey) return;
+  try {
+    localStorage.removeItem(renderPopoutSession.snapshotKey);
+  } catch {}
+}
+
+function captureRenderPopoutLocalUiState() {
+  if (!isRenderPopoutWindow()) return null;
+  const renderId = getTrackedRenderPopoutId();
+  const renderRecord = renderId ? getRenderById(renderId) : null;
+  if (!renderRecord) return null;
+  return {
+    layoutPreset: cloneRenderLayoutPreset(renderRecord.layoutPreset),
+    paneDirectionProfiles: cloneRenderPaneDirectionProfiles(renderRecord.paneDirectionProfiles),
+    syncFit: cloneRenderSyncFit(renderRecord.syncFit),
+  };
+}
+
+function restoreRenderPopoutLocalUiState(localUiState) {
+  if (!isRenderPopoutWindow() || !localUiState) return;
+  const renderId = getTrackedRenderPopoutId();
+  const renderRecord = renderId ? getRenderById(renderId) : null;
+  if (!renderRecord) return;
+  renderRecord.layoutPreset = cloneRenderLayoutPreset(localUiState.layoutPreset);
+  renderRecord.paneDirectionProfiles = cloneRenderPaneDirectionProfiles(localUiState.paneDirectionProfiles);
+  renderRecord.syncFit = cloneRenderSyncFit(localUiState.syncFit);
+  state.activeWorkspaceTab = { kind: "render", renderId };
+  state.activeRenderId = null;
+  syncRenderWorkspaceStateFromRecord(renderRecord);
+}
+
+function applyRenderPopoutMirrorPayload(payload) {
+  if (!isRenderPopoutWindow()) return false;
+  const localUiState = captureRenderPopoutLocalUiState();
+  let normalizedProject;
+  try {
+    normalizedProject = normalizeImportedProjectFile(payload);
+  } catch {
+    return false;
+  }
+  applyImportedProject(normalizedProject, state.projectFileName);
+  const renderId = getTrackedRenderPopoutId();
+  const renderRecord = renderId ? getRenderById(renderId) : null;
+  if (!renderRecord) {
+    state.activeWorkspaceTab = { kind: "main" };
+    state.activeRenderId = null;
+    renderWorkspaceUi();
+    return false;
+  }
+  restoreRenderPopoutLocalUiState(localUiState);
+  renderWorkspaceUi();
+  render();
+  return true;
+}
+
+function startRenderPopoutCloseMonitor() {
+  if (!isRenderPopoutMainController()) return;
+  if (renderPopoutSession.monitorId) window.clearInterval(renderPopoutSession.monitorId);
+  renderPopoutSession.monitorId = window.setInterval(() => {
+    const trackedWindow = renderPopoutSession.windowRef;
+    if (!trackedWindow) return;
+    if (trackedWindow.closed) {
+      clearTrackedRenderPopout(false);
+    }
+  }, 500);
+}
+
+function stopRenderPopoutCloseMonitor() {
+  if (!renderPopoutSession.monitorId) return;
+  window.clearInterval(renderPopoutSession.monitorId);
+  renderPopoutSession.monitorId = null;
+}
+
+function clearTrackedRenderPopout(shouldRender = true) {
+  stopRenderPopoutCloseMonitor();
+  closeRenderPopoutChannel();
+  clearPersistedRenderPopoutMirrorPayload();
+  renderPopoutSession.windowRef = null;
+  renderPopoutSession.openRenderId = null;
+  renderPopoutSession.token = null;
+  renderPopoutSession.snapshotKey = null;
+  renderPopoutSession.channelName = null;
+  if (shouldRender) {
+    renderWorkspaceUi();
+    render();
+  }
+}
+
+function closeTrackedRenderPopout() {
+  if (!isRenderPopoutMainController() || !renderPopoutSession.openRenderId) return false;
+  const channel = ensureRenderPopoutChannel();
+  if (channel) {
+    channel.postMessage({ type: "close-window" });
+  }
+  try {
+    renderPopoutSession.windowRef?.close();
+  } catch {}
+  clearTrackedRenderPopout(true);
+  return true;
+}
+
+function openTrackedRenderPopout(renderId) {
+  if (!isRenderPopoutMainController()) return false;
+  const targetRender = getRenderById(renderId);
+  if (!targetRender) return false;
+  if (renderPopoutSession.openRenderId) {
+    closeTrackedRenderPopout();
+  }
+
+  const token = generateRenderPopoutToken();
+  renderPopoutSession.token = token;
+  renderPopoutSession.snapshotKey = getRenderPopoutSnapshotStorageKey(token);
+  renderPopoutSession.channelName = getRenderPopoutChannelName(token);
+  renderPopoutSession.openRenderId = renderId;
+  closeRenderPopoutChannel();
+
+  const snapshotPayload = captureRenderPopoutMirrorPayload(renderId);
+  persistRenderPopoutMirrorPayload(snapshotPayload);
+
+  const url = new URL(window.location.href);
+  url.searchParams.set(RENDER_POPOUT_QUERY_PARAM, "1");
+  url.searchParams.set(RENDER_POPOUT_RENDER_ID_QUERY_PARAM, renderId);
+  url.searchParams.set(RENDER_POPOUT_TOKEN_QUERY_PARAM, token);
+
+  const nextWindow = window.open(
+    url.toString(),
+    RENDER_POPOUT_WINDOW_NAME,
+    "popup=yes,width=1440,height=960,resizable=yes,scrollbars=no"
+  );
+  if (!nextWindow) {
+    clearTrackedRenderPopout(false);
+    renderWorkspaceUi();
+    render();
+    return false;
+  }
+
+  renderPopoutSession.windowRef = nextWindow;
+  ensureRenderPopoutChannel();
+  startRenderPopoutCloseMonitor();
+  renderWorkspaceUi();
+  render();
+  return true;
+}
+
+function syncTrackedRenderPopout(reason = "commit") {
+  if (!isRenderPopoutMainController() || !renderPopoutSession.openRenderId) return false;
+  const targetRender = getRenderById(renderPopoutSession.openRenderId);
+  if (!targetRender) {
+    closeTrackedRenderPopout();
+    return false;
+  }
+  const payload = captureRenderPopoutMirrorPayload(renderPopoutSession.openRenderId);
+  persistRenderPopoutMirrorPayload(payload);
+  const channel = ensureRenderPopoutChannel();
+  if (channel) {
+    channel.postMessage({
+      type: "mirror-state",
+      reason,
+      payload,
+    });
+  }
+  return true;
+}
+
+function getRenderPopoutSnapshotStorageKey(token) {
+  return `${RENDER_POPOUT_MIRROR_STORAGE_PREFIX}${String(token || "").trim()}`;
+}
+
+function getRenderPopoutChannelName(token) {
+  return `${RENDER_POPOUT_CHANNEL_PREFIX}${String(token || "").trim()}`;
+}
+
+function parseRenderPopoutRuntime() {
+  try {
+    const url = new URL(window.location.href);
+    const enabled = url.searchParams.get(RENDER_POPOUT_QUERY_PARAM) === "1";
+    const renderId = String(url.searchParams.get(RENDER_POPOUT_RENDER_ID_QUERY_PARAM) || "").trim();
+    const token = String(url.searchParams.get(RENDER_POPOUT_TOKEN_QUERY_PARAM) || "").trim();
+    if (!enabled || !renderId || !token) {
+      return {
+        enabled: false,
+        renderId: null,
+        token: null,
+        snapshotKey: null,
+        channelName: null,
+      };
+    }
+    return {
+      enabled: true,
+      renderId,
+      token,
+      snapshotKey: getRenderPopoutSnapshotStorageKey(token),
+      channelName: getRenderPopoutChannelName(token),
+    };
+  } catch {
+    return {
+      enabled: false,
+      renderId: null,
+      token: null,
+      snapshotKey: null,
+      channelName: null,
+    };
+  }
+}
+
+const renderPopoutRuntime = parseRenderPopoutRuntime();
+const renderPopoutSession = {
+  mode: renderPopoutRuntime.enabled ? "popout" : "main",
+  targetRenderId: renderPopoutRuntime.renderId,
+  token: renderPopoutRuntime.token,
+  snapshotKey: renderPopoutRuntime.snapshotKey,
+  channelName: renderPopoutRuntime.channelName,
+  channel: null,
+  windowRef: null,
+  monitorId: null,
+  openRenderId: null,
+};
+
+if (renderPopoutRuntime.enabled) {
+  document.body.classList.add("render-popout-window");
+}
 
 const selectionStrokeColor = "#0ea5e9";
 const previewStrokeColor = "#0284c7";
@@ -3150,22 +3452,50 @@ function renderWorkspaceSwitcher() {
     });
 }
 
+function renderRenderPopoutNotice(activeRender, { message, buttonLabel = "Close Window" } = {}) {
+  if (!renderPopoutNotice) return;
+  renderPopoutNotice.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.textContent = message;
+  renderPopoutNotice.appendChild(title);
+
+  const actionButton = document.createElement("button");
+  actionButton.type = "button";
+  actionButton.className = "render-layout-button render-layout-toolbar-button";
+  actionButton.textContent = buttonLabel;
+  actionButton.addEventListener("click", () => {
+    if (isRenderPopoutWindow()) {
+      try {
+        window.close();
+      } catch {}
+      return;
+    }
+    closeTrackedRenderPopout();
+  });
+  renderPopoutNotice.appendChild(actionButton);
+}
+
 function syncRenderWorkspaceShell() {
   const validRenderIds = new Set(state.renders.map((render) => render.id));
   state.activeWorkspaceTab = cloneActiveWorkspaceTab(state.activeWorkspaceTab, validRenderIds);
 
   const activeRender = getActiveRenderRecord();
   if (canvasShell) {
-    canvasShell.classList.toggle("render-workspace-mode", !!activeRender);
+    canvasShell.classList.toggle("render-workspace-mode", !!activeRender || isRenderPopoutWindow());
   }
   if (renderWorkspaceShell) {
-    renderWorkspaceShell.setAttribute("aria-hidden", String(!activeRender));
+    renderWorkspaceShell.setAttribute("aria-hidden", String(!activeRender && !isRenderPopoutWindow()));
   }
   if (renderSyncFitButton) {
     const syncFitEnabled = activeRender?.syncFit === true;
     renderSyncFitButton.classList.toggle("active", syncFitEnabled);
     renderSyncFitButton.setAttribute("aria-pressed", String(syncFitEnabled));
     renderSyncFitButton.disabled = !activeRender;
+  }
+  if (renderPopoutButton) {
+    renderPopoutButton.textContent = isRenderPopoutWindow() ? "Close Window" : "Open in New Window";
+    renderPopoutButton.disabled = !activeRender && !isRenderPopoutWindow();
   }
 
   const visiblePaneCount = getVisibleRenderPaneCount();
@@ -3180,6 +3510,39 @@ function syncRenderWorkspaceShell() {
   renderPaneSlots.forEach((pane, index) => {
     pane.classList.toggle("hidden", index >= visiblePaneCount);
   });
+
+  const externalizedInMain = !!activeRender && isRenderExternalized(activeRender.id);
+  const popoutMissingTarget = isRenderPopoutWindow() && !activeRender;
+  const showNotice = externalizedInMain || popoutMissingTarget;
+
+  if (renderLayoutToolbar) {
+    renderLayoutToolbar.classList.toggle("hidden", externalizedInMain || popoutMissingTarget);
+  }
+  if (renderOutputGrid) {
+    renderOutputGrid.classList.toggle("hidden", showNotice);
+  }
+  if (renderPopoutNotice) {
+    renderPopoutNotice.classList.toggle("hidden", !showNotice);
+    if (showNotice) {
+      if (externalizedInMain) {
+        renderRenderPopoutNotice(activeRender, {
+          message: `${getRenderTabLabel(activeRender)} is open in another window.`,
+          buttonLabel: "Close Window",
+        });
+      } else if (popoutMissingTarget) {
+        renderRenderPopoutNotice(activeRender, {
+          message: "This Rbox is no longer available in the main window.",
+          buttonLabel: "Close Window",
+        });
+      }
+    } else {
+      renderPopoutNotice.innerHTML = "";
+    }
+  }
+
+  if (isRenderPopoutWindow()) {
+    document.title = activeRender ? `${getRenderTabLabel(activeRender)} | millimétré` : "Render Pop-out | millimétré";
+  }
 }
 
 function renderWorkspaceUi() {
@@ -3192,6 +3555,12 @@ function renderWorkspaceUi() {
   }
   renderWorkspaceSwitcher();
   syncRenderWorkspaceShell();
+  if (!isRenderPopoutWindow() && activeRender && isRenderExternalized(activeRender.id)) {
+    return;
+  }
+  if (isRenderPopoutWindow() && !activeRender) {
+    return;
+  }
   renderRenderWorkspaceOutputs();
 }
 
@@ -3665,6 +4034,39 @@ function applyImportedProject(normalizedProject, importedFileName = DEFAULT_PROJ
   renderLayersPanel();
   renderLiveRegistry();
   render();
+
+  if (isRenderPopoutMainController() && renderPopoutSession.openRenderId) {
+    const trackedRender = getRenderById(renderPopoutSession.openRenderId);
+    if (trackedRender) {
+      syncTrackedRenderPopout("import-project");
+    } else {
+      closeTrackedRenderPopout();
+    }
+  }
+}
+
+function initializeRenderPopoutWindowFromSnapshot() {
+  if (!isRenderPopoutWindow()) return false;
+  ensureRenderPopoutChannel();
+
+  let snapshotPayload = null;
+  try {
+    const rawPayload = renderPopoutSession.snapshotKey ? localStorage.getItem(renderPopoutSession.snapshotKey) : null;
+    snapshotPayload = rawPayload ? JSON.parse(rawPayload) : null;
+  } catch {
+    snapshotPayload = null;
+  }
+
+  if (isPlainObject(snapshotPayload)) {
+    applyRenderPopoutMirrorPayload(snapshotPayload);
+    return true;
+  }
+
+  state.activeWorkspaceTab = { kind: "main" };
+  state.activeRenderId = null;
+  renderWorkspaceUi();
+  render();
+  return false;
 }
 
 async function exportProjectToFile() {
@@ -4288,6 +4690,7 @@ function applyLayerSettingsDraft() {
 
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("layer-settings-apply");
 }
 
 function isAnyModalOpen() {
@@ -4428,6 +4831,7 @@ function applyRenderBoxPropertiesDraft() {
   renderLayersPanel();
   renderWorkspaceUi();
   render();
+  syncTrackedRenderPopout("rbox-properties-apply");
 }
 
 function applySettingsDraft() {
@@ -4475,6 +4879,7 @@ function applyRenderSettingsDraft() {
   syncRenderSettingsMenu();
   renderWorkspaceUi();
   render();
+  syncTrackedRenderPopout("render-settings-apply");
 }
 
 function updateCursor() {
@@ -5087,6 +5492,7 @@ function clearLeftPanelPointerDrag(commit = true) {
     if (mergeLayerIntoTarget(drag.layerId, drag.targetLayerId)) {
       renderLayersPanel();
       render();
+      syncTrackedRenderPopout("merge-layer");
       return;
     }
   }
@@ -5095,6 +5501,7 @@ function clearLeftPanelPointerDrag(commit = true) {
     if (moveLayerToDrawingTop(drag.layerId, drag.targetDrawingId)) {
       renderLayersPanel();
       render();
+      syncTrackedRenderPopout("move-layer-to-drawing");
       return;
     }
   }
@@ -5115,6 +5522,7 @@ function clearLeftPanelPointerDrag(commit = true) {
     }
     renderLayersPanel();
     render();
+    syncTrackedRenderPopout(`reorder-${drag.type}`);
     return;
   }
 
@@ -5290,6 +5698,9 @@ function endRenameRender(commit = true) {
   state.editingRenderInitialName = "";
   renderLayersPanel();
   renderWorkspaceUi();
+  if (commit && renderRecord) {
+    syncTrackedRenderPopout("rename-rbox");
+  }
 }
 
 function syncDrawSizeInput() {
@@ -6985,6 +7396,9 @@ function renderLayersPanel() {
         colorSwatch.style.setProperty("--layer-swatch-color", layer.fillColor);
         render();
       });
+      colorSwatchInput.addEventListener("change", () => {
+        syncTrackedRenderPopout("layer-color-change");
+      });
       colorSwatch.appendChild(colorSwatchInput);
 
       const main = document.createElement("div");
@@ -7064,6 +7478,7 @@ function renderLayersPanel() {
         layer.visible = !layer.visible;
         renderLayersPanel();
         render();
+        syncTrackedRenderPopout("toggle-layer-visibility");
       });
       inlineControls.appendChild(visibilityInline);
 
@@ -7117,6 +7532,9 @@ function renderLayersPanel() {
       opacitySlider.addEventListener("input", (event) => {
         layer.opacity = Math.max(0, Math.min(1, Number(event.target.value) / 100));
         render();
+      });
+      opacitySlider.addEventListener("change", () => {
+        syncTrackedRenderPopout("layer-opacity-change");
       });
 
       opacityField.appendChild(opacityLabel);
@@ -7376,6 +7794,7 @@ function addDrawing() {
   clearSelection();
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("add-drawing");
 }
 
 function addRender() {
@@ -7426,6 +7845,7 @@ function duplicateDrawing(drawingId) {
   clearSelection();
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("duplicate-drawing");
 }
 
 function duplicateRender(renderId) {
@@ -7446,6 +7866,7 @@ function duplicateRender(renderId) {
   const sourceIndex = state.renders.findIndex((render) => render.id === renderId);
   state.renders.splice(Math.max(0, sourceIndex), 0, duplicate);
   activateRenderBox(duplicate.id);
+  syncTrackedRenderPopout("duplicate-rbox");
 }
 
 function toggleDrawingVisibility(drawingId) {
@@ -7454,6 +7875,7 @@ function toggleDrawingVisibility(drawingId) {
   drawing.visible = drawing.visible === false;
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("toggle-drawing-visibility");
 }
 
 function toggleRenderVisibility(renderId) {
@@ -7462,6 +7884,7 @@ function toggleRenderVisibility(renderId) {
   renderRecord.visible = renderRecord.visible === false;
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("toggle-rbox-visibility");
 }
 
 function deleteDrawingById(drawingId) {
@@ -7503,9 +7926,13 @@ function deleteDrawingById(drawingId) {
   clearSelection();
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("delete-drawing");
 }
 
 function deleteRenderById(renderId) {
+  if (isRenderExternalized(renderId)) {
+    closeTrackedRenderPopout();
+  }
   const index = state.renders.findIndex((render) => render.id === renderId);
   if (index < 0) return;
 
@@ -7531,6 +7958,7 @@ function deleteRenderById(renderId) {
 
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("delete-rbox");
 }
 
 function duplicateLayer(layerId) {
@@ -7566,6 +7994,7 @@ function duplicateLayer(layerId) {
   clearSelection();
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("duplicate-layer");
 }
 
 function getLayerTopInsertionIndexForDrawing(drawingId) {
@@ -7664,6 +8093,7 @@ function addLayer(drawingId = getPrimaryDrawingUi().id) {
   clearSelection();
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("add-layer");
 }
 
 function deleteLayerById(layerId) {
@@ -7693,6 +8123,7 @@ function deleteLayerById(layerId) {
   clearSelection();
   renderLayersPanel();
   render();
+  syncTrackedRenderPopout("delete-layer");
 }
 
 function deleteActiveLayer() {
@@ -9407,6 +9838,7 @@ function finishDrag(e) {
     state.dragging = false;
     updateCursor();
     render();
+    syncTrackedRenderPopout("transform-rbox");
     return;
   }
 
@@ -9445,10 +9877,14 @@ function finishDrag(e) {
     }
 
     render();
+    if (affectedLayerIds.length) {
+      syncTrackedRenderPopout("transform-geometry");
+    }
     return;
   }
 
   if (state.tool === "draw") {
+    let didCommitRenderChange = false;
     if (isRenderBoxShapeType()) {
       const previewGeometry = cloneRenderBoxGeometry(state.pendingRenderBox?.boxGeometry);
       if (state.draftShape && !state.draftShape.small && previewGeometry.length === 4) {
@@ -9460,6 +9896,7 @@ function finishDrag(e) {
         state.renderSectionCollapsed = false;
         state.activeRenderId = renderRecord.id;
         renderLayersPanel();
+        didCommitRenderChange = true;
       }
     } else if (state.draftShape && !state.draftShape.small) {
       materializeActiveDraftAngleCandidateOnCommit();
@@ -9477,6 +9914,11 @@ function finishDrag(e) {
         if (shape) insertShapeToLayer(state.activeLayerId, shape);
       }
       renderLayersPanel();
+      didCommitRenderChange = true;
+    }
+
+    if (didCommitRenderChange) {
+      syncTrackedRenderPopout(isRenderBoxShapeType() ? "create-rbox" : "commit-draw");
     }
   }
 
@@ -9944,6 +10386,9 @@ if (layerFillInput) {
     renderLayersPanel();
     render();
   });
+  layerFillInput.addEventListener("change", () => {
+    syncTrackedRenderPopout("layer-color-change");
+  });
 }
 
 if (layerSectionToggle) {
@@ -9996,6 +10441,27 @@ if (renderSyncFitButton) {
     if (!activeRender) return;
     activeRender.syncFit = !(activeRender.syncFit === true);
     renderWorkspaceUi();
+  });
+}
+
+if (renderPopoutButton) {
+  renderPopoutButton.addEventListener("click", () => {
+    if (isRenderPopoutWindow()) {
+      try {
+        window.close();
+      } catch {}
+      return;
+    }
+
+    const activeRender = getActiveRenderRecord();
+    if (!activeRender) return;
+
+    if (isRenderExternalized(activeRender.id)) {
+      closeTrackedRenderPopout();
+      return;
+    }
+
+    openTrackedRenderPopout(activeRender.id);
   });
 }
 
@@ -10246,7 +10712,12 @@ window.addEventListener("keyup", (e) => {
 });
 
 window.addEventListener("resize", resizeCanvas);
+window.addEventListener("beforeunload", () => {
+  stopRenderPopoutCloseMonitor();
+  closeRenderPopoutChannel();
+});
 
+initializeRenderPopoutWindowFromSnapshot();
 updateZoomLabel();
 updateGridStatus();
 updateWorkplaneStatus();

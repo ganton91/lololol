@@ -4,7 +4,7 @@
 
 ## Project Snapshot
 
-- Last updated: 2026-04-04
+- Last updated: 2026-04-05
 - Project type: small browser-based CAD/drawing editor
 - Entry file: `index.html`
 - Main logic file: `app.js`
@@ -405,6 +405,11 @@ The current authoring panel behavior is:
   - the `1 Side`, `2 Sides`, and `4 Sides` layout controls already work at the shell/grid-layout level
   - each `Rbox` now carries its own render-workspace memory instead of sharing one global workspace profile, so layout choice (`1/2/4`), pane-direction choices, and `Sync Fit` state are remembered per render tab and each newly created `Rbox` starts from fresh defaults
   - the toolbar now also includes a per-`Rbox` `Sync Fit` toggle before `Open in New Window`; when enabled, the currently visible panes in that layout share the most restrictive auto-fit scale so they keep one common physical render scale, and when disabled they return to the current per-pane independent fit behavior
+  - `Open in New Window` now externalizes the current `Rbox` tab into a dedicated pop-out window; the pop-out keeps only the render-workspace UI (`1/2/4` layout, `Sync Fit`, pane selectors, render panes, and a `Close Window` button) while the main window hides that tab's local render controls/grid and shows a centered notice with its own `Close Window` action
+  - only one render pop-out is supported at a time in the current implementation
+  - the pop-out bootstraps from a local snapshot and then mirrors only committed/apply changes from the main window, not live pointermove/drag frames
+  - the current locked sync trigger model includes modal `Apply` actions, committed draw/boolean commits, geometry transforms on commit, layer/drawing duplicate-delete-reorder-merge commits, `Rbox` duplicate-delete-transform/property commits, import/apply replacement of the project, and immediate layer appearance commits such as visibility/color/opacity changes; more sync triggers may need to be added later as the render subsystem grows
+  - the pop-out keeps its own local render-tab UI state after opening, so `1/2/4`, pane-direction choices, and `Sync Fit` changed inside the pop-out do not write back into the main window's `Rbox` tab memory
   - it now does display real render outputs in the panes, even though the full render/documentation/export stack is still incomplete
   - export buttons are still visually present but intentionally disabled until the shared documentation/export layer is opened
 - The left panel now includes a dedicated `Renders` section with:

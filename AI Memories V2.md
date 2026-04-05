@@ -7,6 +7,7 @@ Important: the following rules should always be read and remain in effect throug
 ### Maintenance Rules
 
 - Keep this file updated automatically whenever the application's behavior, architecture, dependencies, or active task changes, and update the relevant section immediately when a feature changes the way the program works.
+- Every time this file is edited, update `Latest Update` with the current date and time plus a very brief note of the latest change. Keep that note extremely short.
 - Use clear headings.
 - Preserve existing decisions unless they were replaced.
 - This file should describe the real current behavior of the app, not plans disguised as facts.
@@ -44,5 +45,16 @@ Its geometry pipeline is based on vector and boolean operations, and the long-te
 
 ## Latest Update
 
-- Last updated: 2026-04-06 02:00 EEST
-- Latest change: created and started shaping `AI Memories V2` as a slimmer onboarding-focused replacement for the original `AI Memories`.
+- Last updated: 2026-04-06 02:04 EEST
+- Latest change: added `App Structure`.
+
+## App Structure
+
+- `index.html`: main application shell and DOM structure for the browser UI.
+- `app.js`: main runtime file; owns most app state, interaction flow, rendering flow, project persistence, and render-workspace behavior.
+- `draft-angle.js`: dedicated draft-angle / workplane subsystem, kept separate from `app.js`.
+- `package.json` / `package-lock.json`: minimal npm package metadata and dependency lockfile for the project.
+- `node_modules/`: installed dependencies, including the main geometry dependency used by the app.
+- `Reference Only/`: external comparison / research material; useful for study, but not part of the app's own source of truth.
+- `AI Memories.md`: older, more detailed memory file with broader historical context.
+- `AI Memories V2.md`: newer, slimmer onboarding-focused memory file intended to replace the original over time.

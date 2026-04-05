@@ -2,21 +2,14 @@
 
 ## Rules
 
-This section keeps only:
-- rules for maintaining this file
-- behavior/process rules for the AI
-- export-import rules that the AI must follow
-- task-handling rules for active work
-
-It does not describe how the app itself works.
+Important: the following rules should always be read and remain in effect throughout the whole session.
 
 ### Maintenance Rules
 
-- Keep this file updated automatically whenever the application's behavior, architecture, dependencies, or active task changes.
+- Keep this file updated automatically whenever the application's behavior, architecture, dependencies, or active task changes, and update the relevant section immediately when a feature changes the way the program works.
 - Use clear headings.
 - Preserve existing decisions unless they were replaced.
 - This file should describe the real current behavior of the app, not plans disguised as facts.
-- When a feature changes the way the program works, update the relevant architecture or behavior section immediately.
 
 ### Current Task Rules
 

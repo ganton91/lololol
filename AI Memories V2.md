@@ -45,8 +45,8 @@ Its geometry pipeline is based on vector and boolean operations, and the long-te
 
 ## Latest Update
 
-- Last updated: 2026-04-06 02:04 EEST
-- Latest change: added `App Structure`.
+- Last updated: 2026-04-06 02:12 EEST
+- Latest change: revised `Core Architecture`.
 
 ## App Structure
 
@@ -58,3 +58,13 @@ Its geometry pipeline is based on vector and boolean operations, and the long-te
 - `Reference Only/`: external comparison / research material; useful for study, but not part of the app's own source of truth.
 - `AI Memories.md`: older, more detailed memory file with broader historical context.
 - `AI Memories V2.md`: newer, slimmer onboarding-focused memory file intended to replace the original over time.
+
+## Core Architecture
+
+- The main authoring context is the canvas, where geometry is created against a drafting / workplane system while the underlying geometry stays stored in world space.
+- The canonical units model is `1 world unit = 1 mm`; stored geometry stays in that unit and display units are a formatting layer on top.
+- The drafting / workplane can move and rotate independently from stored geometry, and its angle-family logic is handled through the draft-angle subsystem in `draft-angle.js`.
+- The geometry pipeline is vector-first: shapes are stored as polygon / multipolygon data and boolean operations are handled through Clipper (`clipper2-ts`) rather than through a raster-mask workflow.
+- The authoring hierarchy is organized as `Drawings` containing `Layers`, and geometry is authored and merged at the layer level.
+- The documentation side is built as a separate render workspace driven by `Rbox` records; from there the app produces projected render outputs from clipped geometry plus the per-layer height / render settings.
+- Project persistence is based on a strict app-native JSON format that saves the real project state rather than a visual snapshot.

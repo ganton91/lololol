@@ -45,8 +45,8 @@ Its geometry pipeline is based on vector and boolean operations, and the long-te
 
 ## Latest Update
 
-- Last updated: 2026-04-06 02:42 EEST
-- Latest change: added state model section.
+- Last updated: 2026-04-06 02:53 EEST
+- Latest change: added missing core sections.
 
 ## App Structure
 
@@ -86,6 +86,33 @@ Its geometry pipeline is based on vector and boolean operations, and the long-te
 - Workplane-generated coordinates and Clipper boolean coordinates share the same `8`-decimal quantization policy so geometry enters boolean operations on one canonical precision grid.
 - Layer geometry is treated as merged vector output rebuilt from the shapes that belong to that layer.
 
+## Grid / Snap Model
+
+- The app has a user-facing cell model that drives visible grid spacing, snapping, rulers, and cell-based draw widths.
+- `Grid Snap` has two modes: `Adaptive` and `Locked`.
+- In `Adaptive`, the effective minimum cell is fixed to `1 mm`, and the visible grid plus rulers promote from that minimum through a zoom-adaptive `1-2-5` ladder.
+- In `Adaptive`, snapping and cell-based draw widths follow the currently promoted visible step rather than a separately stored larger cell.
+- In `Locked`, the effective cell comes from the configured `Cell Size` and its chosen display unit (`mm`, `cm`, or `m`); the rendered grid stays fixed to that cell while rulers can still promote adaptively from it.
+- In `Locked`, grid tiers fade by screen density instead of promoting to a coarser spacing, so overcrowded lines disappear progressively rather than switching to a new cell size.
+- The current default user-facing configuration is `Display Unit = m`, `Grid Snap = Adaptive`, and `Cell Size = 5 cm` as the fallback locked cell.
+
+## Draft-Angle Canonical Model
+
+- `draft-angle.js` owns the draft-angle store, family records, candidate state, active rotation state, lookup-table runtimes, and family/candidate matching logic.
+- The active workplane rotation is not modeled as a simple accumulated free-float angle; it is represented as a `family`, `candidate`, or fallback `free` mode plus an integer step identity.
+- The default canonical family covers `0..359` degree steps at `1deg` increments.
+- The current implementation uses lookup-table coefficients on the shared `8`-decimal grid, and transforms/render framing read the active lookup entry instead of recomputing trig ad hoc.
+- Workplane alignment can resolve either to an existing known family or to a temporary candidate family derived from a normalized direction vector.
+- A temporary candidate becomes a persistent dynamic family only after a committed draw or subtract operation under that regime; resetting the plane or leaving the regime without a commit discards it.
+
+## Vertex / Outline Provenance Model
+
+- Each stored shape carries `vertexOutlineEligibility` metadata alongside its geometry.
+- Straight/corner-authored geometry defaults its vertices to outline-eligible, while ellipse approximation vertices default to outline-ineligible.
+- That metadata survives duplicate/import-export/move paths and is propagated through current layer rebuild / boolean flows by coordinate-based provenance matching.
+- On the main canvas, outline-ineligible vertices render differently from eligible ones when corner markers are shown, so authored corners remain distinguishable from derived approximation points.
+- In directional renders, eligible vertices can contribute outline breaks only when they lie on the visible front profile of the same component.
+
 ## State / Persistence Model
 
 - The project uses a strict app-native JSON document model for export/import rather than saving a visual snapshot.
@@ -97,3 +124,59 @@ Its geometry pipeline is based on vector and boolean operations, and the long-te
 - Layer render properties are stored on the layer records themselves and travel through duplicate/import/export with the rest of the document state.
 - Whenever a feature adds meaningful project state, its export/import path should be updated as part of the same implementation.
 - Backward compatibility for older project-file schemas is currently not a goal when the saved model changes.
+
+## Authoring / Layer Model
+
+- The document hierarchy is `Drawings` containing `Layers`, with one active drawing and one active layer at a time.
+- New geometry is always created on the active layer.
+- Layer order controls paint order within a drawing, and drawing order controls higher-level canvas ordering across drawings.
+- Layers own the main authoring/display properties such as visibility, lock state, fill color, and the global render settings described elsewhere in this file.
+- Layer operations are real document operations rather than temporary UI sorting: layers can be reordered, duplicated, deleted, moved across drawings, and merged into another layer.
+- The model preserves a valid fallback active drawing/layer when layers or drawings are deleted.
+
+## Workspace Model
+
+- The app has one always-available `Main` workspace for authoring on the live canvas.
+- Each committed `Rbox` creates a corresponding render workspace tab; render tabs are therefore driven one-to-one by persistent render records.
+- `Add Rbox` does not create an empty render immediately; it arms `Draw > Rbox` on `Main`, and the render record/tab is created only when the box is actually committed.
+- `Main` remains the place where geometry and render boxes are authored or transformed; the render tabs are for documentation/render output, not for replacing the main drawing surface.
+- The bottom workspace switcher is the main navigation boundary between authoring and render contexts.
+- Each `Rbox` keeps its own render-workspace memory, including layout mode, pane-direction choices, and related per-render workspace settings, rather than sharing one global render workspace profile.
+- The render workspace supports both embedded use in the main window and one externalized pop-out window for the active `Rbox`, while still treating that pop-out as the same underlying render tab state rather than a separate document.
+- `Rbox` card activation in the left panel is distinct from render-tab viewing: card activation is used for `Rbox` transform/editing behavior on `Main`, while workspace tabs control which authoring/render surface is currently open.
+
+## Main Canvas Display Model
+
+- The main canvas render stack separates the always-visible `World` axes from the draft-canvas overlay.
+- `World` axes remain visible underneath scene content as the stable world reference, independent from whether the draft canvas is shown.
+- The draft canvas (`Grid` plus draft-plane axes) is shown only while `Draw` is active; in `Select`, it is hidden while the `World` axes remain visible.
+- In `Draw`, regular layer geometry renders below the draft canvas, and the active layer's emphasized outline/corners are then redrawn on top for readability.
+- Layer outlines and corner markers are controlled by global settings, and `Corners` depends on `Outline`.
+- The active layer in `Draw` is a deliberate exception: its emphasized drafting outline/corners remain visible even if the general outline/corner settings are off.
+- Selection highlighting is drawn by tracing the selected shape geometry.
+
+## Render Subsystem
+
+- The render subsystem starts from a compiled render-scene pass built from current drawings, layer order, merged layer geometry, and the global render settings stored on layers.
+- Each render pane resolves a normalized render request against the active `Rbox`, using that box's local frame and clipped scene geometry as the basis for output.
+- `Plan` and the directional panes share the same top-level render-pane orchestration, but they do not share the same internal builder/painter contract.
+- `Plan` keeps its own plan-specific builder/painter path and currently paints clipped local geometry in the `Rbox` frame using layer fill colors.
+- The non-plan directional panes share one common directional documentation/painter path for `Top to Bottom`, `Bottom to Top`, `Left to Right`, and `Right to Left`.
+- The directional render path is documentation-first: it builds a vector documentation object from projected/clipped scene geometry, visible-surface winner selection, primary breakpoints, and elevation bands before rasterizing only for preview display.
+- Directional depth shading is driven by global render settings (`Depth Effect`, `Depth Strength`) and is applied across the current pane's visible depth range rather than as per-layer manual tinting.
+- Directional outlines are also global render settings and are derived from visible mass/silhouette boundaries, depth transitions, and eligible visible profile vertices.
+- Render settings and layer render settings are edited as global controls outside individual `Rbox` records, while `Rbox` records own only render-local properties such as box geometry, visibility, and vertical extent.
+
+## Critical Interaction Model
+
+- `Draw` and `Select` are the two main editing modes; drawing creates geometry on the active layer, while selection works on whole merged shapes rather than on unmerged primitive drafts.
+- In `Draw`, left click adds geometry and right click uses the current draw shape as subtraction geometry against the active layer's merged vector result.
+- New geometry is authored in draft/workplane space and committed into world-space layer geometry, after which the affected layer is rebuilt through the boolean pipeline.
+- In `Select`, hit selection and marquee selection both operate against stored merged shapes; multi-selection can be moved together and affected layers are rebuilt after the move.
+- Selection marquee direction matters: right-drag selects enclosed shapes only, while left-drag selects enclosed-or-intersecting shapes.
+- Holding `Shift` modifies selection membership for both click and marquee interactions instead of replacing the current selection.
+- Holding `Space` temporarily suspends the normal draw/select interaction and enters drafting-transforms mode without permanently switching tools.
+- While `Space` is held, mouse wheel rotates the active workplane through exact family/candidate step positions, middle drag moves the workplane origin, and left drag aligns the workplane direction from a chosen start point.
+- Workplane alignment is magnetic rather than purely freehand: nearby geometry can snap the chosen points, but the resulting direction is still derived from the resolved start/end points and may resolve either to an existing family or to a temporary candidate regime.
+- Resetting the workplane restores the world-aligned plane rather than modifying stored geometry; the workplane is an input/render frame, not the canonical geometry itself.
+- `Rbox` transform activation on `Main` temporarily suspends regular layer authoring interactions without changing the user's underlying base tool, so render-box editing behaves like its own temporary interaction mode.

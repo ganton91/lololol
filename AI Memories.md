@@ -105,7 +105,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, layer
 - Render output is documentation-first: panes compile from the current drawings, render-layer settings, merged geometry, and the active `Rbox` frame; non-plan directional panes share one vector documentation path, while `Plan` keeps its own builder/painter contract under the same top-level orchestration.
 - Directional panes now support depth-aware shading and a global outline pass built from silhouette, depth-transition, and eligible-vertex breaks.
 - When an `Rbox` has `heightMm > 0`, side renders use its explicit `Start -> End` vertical range; when `heightMm = 0`, they currently fall back to auto-height from intersecting geometry.
-- Export controls are already present in the render workspace shell, but real `DXF` export is still the remaining unfinished step.
+- Export controls are already present in the render workspace shell, but real `DXF` export is not implemented yet.
 
 ### Draft Angle Model
 
@@ -288,10 +288,10 @@ The current authoring panel behavior is:
 
 ## Current Task
 
-### Current Task 1: Render Export And Documentation Stabilization
+### Current Task 1: Section Behavior And Documentation Stabilization
 
-- Task: finish the remaining render export and documentation-stabilization work for the `Renders` subsystem.
-- Status: active. The broader `Renders` subsystem is now treated as established behavior and has been moved into the permanent sections above. The remaining open work is the real export path plus the next round of section-aware/documentation-aware stabilization.
+- Task: build the remaining section behavior and documentation-stabilization work for the `Renders` subsystem, then return to the real export path afterward.
+- Status: active. The broader `Renders` subsystem is now treated as established behavior and has been moved into the permanent sections above. The immediate open work is section-aware/documentation-aware behavior, with real export remaining as a later follow-up rather than the next implementation step.
 
 #### Task Rule
 
@@ -299,6 +299,6 @@ The current authoring panel behavior is:
 
 #### Immediate Focus
 
-- Open real `DXF` export from the current documentation-first render architecture so dimensions can be validated against the same render output the workspace already shows.
-- Continue into stronger section-aware/documentation-aware behavior while preserving the intentional `Plan` / side-view split.
-- After that logic is stable, add a higher-resolution offscreen raster backing path for on-screen panes.
+- Build the actual `Section Behavior` from the current documentation-first render architecture while preserving the intentional `Plan` / side-view split.
+- Continue into stronger section-aware/documentation-aware behavior once that section logic is in place.
+- After that logic is stable, return to real `DXF` export and then add a higher-resolution offscreen raster backing path for on-screen panes.

@@ -45,8 +45,8 @@ Its geometry pipeline is based on vector and boolean operations, and the long-te
 
 ## Latest Update
 
-- Last updated: 2026-04-06 02:53 EEST
-- Latest change: added missing core sections.
+- Last updated: 2026-04-06 02:59 EEST
+- Latest change: added `Known Bugs`.
 
 ## App Structure
 
@@ -180,3 +180,12 @@ Its geometry pipeline is based on vector and boolean operations, and the long-te
 - Workplane alignment is magnetic rather than purely freehand: nearby geometry can snap the chosen points, but the resulting direction is still derived from the resolved start/end points and may resolve either to an existing family or to a temporary candidate regime.
 - Resetting the workplane restores the world-aligned plane rather than modifying stored geometry; the workplane is an input/render frame, not the canonical geometry itself.
 - `Rbox` transform activation on `Main` temporarily suspends regular layer authoring interactions without changing the user's underlying base tool, so render-box editing behaves like its own temporary interaction mode.
+
+## Known Bugs
+
+### 1. Non-Orthogonal Draft-Plane Re-Align / Diagonal Canonicalization Bug
+
+- Status: open.
+- Symptom: when the workplane is aligned onto a diagonal shape that was not originally drawn inside that family, newly drawn geometry in the resulting family is not perfectly orthonormal with the original diagonal shape, which can create small misalignments and spurious vertices during boolean interactions.
+- Root cause: the current draft-angle family lookup entries quantize stored `cos/sin` coefficients to the shared `8`-decimal precision. That quantization is small in world terms but large enough at Clipper integer scale to make edges that should be exactly parallel or collinear land slightly off.
+- Rejected fix path: increasing the collinear simplification epsilon was tested and did not solve this bug in practice.

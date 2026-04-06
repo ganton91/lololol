@@ -25,7 +25,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, layer
 - The old floating layers widget is gone; the primary authoring sidebar is now a left-side panel with `Drawings`, nested card-based `Layers`, a `Renders` section, and fixed bottom `Layer Settings` / `Render Settings` triggers.
 - The canvas shell now includes four drafting rulers plus all four corner blocks around an inset live viewport.
 - The bottom workspace switcher now includes one always-visible `Main` tab plus dynamic `Rbox` tabs that open the render workspace.
-- `index.html` now also contains centered modal shells for app settings, the export-download notice, `Rbox Properties`, `Layer Settings`, and `Render Settings`, all sharing the same backdrop/modal language.
+- `index.html` now also contains centered modal shells for app settings, import/export flows, and render-related editors, all sharing the same backdrop/modal language.
 - `app.js` reads those DOM elements and drives the whole interaction loop.
 - The app still runs as a plain browser project without a bundler.
 - The preferred project direction is to remain compatible with plain browser deployment through native ES modules and static hosting (for example GitHub Pages or similar simple web hosting) without requiring a build step just to run the app.
@@ -101,9 +101,8 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, layer
   - `volume` with `baseElevationMm` and `heightMm`
   - `sectionSettings` with `{ z: [], x: [], y: [] }`
 - Render-related layer behavior is global layer-owned data; the current model has no per-render layer overrides, no per-render layer order overrides, and no render opacity control.
-- The render workspace currently supports `1 Side`, `2 Sides`, and `4 Sides` layouts, per-render pane-direction memory, `Live Preview`, `Sync Fit`, and a single supported pop-out window that externalizes the active `Rbox` tab.
-- Render panes compile from the current drawings, render-layer settings, merged geometry, and the active `Rbox` frame.
-- Non-plan directional panes now build from a shared vector documentation object and rasterize only at the final preview stage; `Plan` shares the same top-level orchestration but intentionally keeps its own plan-specific builder/painter contract.
+- The render workspace keeps per-render layout/pane state and supports preview, sync-fit, and a single externalized pop-out window for the active `Rbox` tab.
+- Render output is documentation-first: panes compile from the current drawings, render-layer settings, merged geometry, and the active `Rbox` frame; non-plan directional panes share one vector documentation path, while `Plan` keeps its own builder/painter contract under the same top-level orchestration.
 - Directional panes now support depth-aware shading and a global outline pass built from silhouette, depth-transition, and eligible-vertex breaks.
 - When an `Rbox` has `heightMm > 0`, side renders use its explicit `Start -> End` vertical range; when `heightMm = 0`, they currently fall back to auto-height from intersecting geometry.
 - Export controls are already present in the render workspace shell, but real `DXF` export is still the remaining unfinished step.
@@ -125,13 +124,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, layer
 
 - The app now supports project export and import through a strict app-native JSON project file format with `app = millimetre` and a single supported `version = 1`.
 - Export/import is based on the app's real project state, not on a lossy visual snapshot.
-- Export preserves the stable reopenable project state, including:
-  - drawing/layer/shape document state (`drawingsUi`, `layers`, `shapes`, `activeDrawingId`, `activeLayerId`, `nextDrawingId`, `nextLayerId`, `nextShapeId`)
-  - render document state (`renders`, `nextRenderId`)
-  - tool/workspace state (`tool`, `shapeType`, `drawSize`, `stripCellWidth`, `activeWorkspaceTab`)
-  - render workspace snapshot state, including current `renderSettings`, per-render workspace memory, and render-layer modal UI memory
-  - app settings/state (`layerSectionCollapsed`, `settings`, `draftOrigin`, `camera`, stable `selection.shapeIds`)
-  - draft-angle snapshot state (`nextFamilyId`, `familyRecords`, `candidateRecord`, `activeState`)
+- Export preserves the stable reopenable project state, including drawing/layer/shape document state, render document state, tool/workspace state, render-workspace snapshot state, app settings/camera/selection state, and the draft-angle snapshot state.
 - Shape `bounds` are treated as derived data and are recomputed on import instead of being trusted from the file.
 - Render records are normalized on import/export to `id`, `name`, `visible`, quantized world-space `boxGeometry`, `volume`, and `sectionSettings`.
 - Import is strict and does not attempt backward compatibility or migration for unsupported versions or schemas.
@@ -139,12 +132,8 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, layer
 - During the current development phase, backward compatibility with older project files is not a goal when export/import changes are made for new features.
 - When an export/import change breaks compatibility with older project files, explicitly tell the user that compatibility was lost.
 - Import replaces the current project only after an explicit confirmation step.
-- The app remembers the current project filename in runtime state:
-  - importing a file adopts that imported filename as the next export suggestion
-  - exporting through the save picker updates the remembered export filename to the chosen save name
-- When the browser supports `showSaveFilePicker`, export uses it so the user can choose the destination folder directly.
-- When the browser does not support `showSaveFilePicker`, export falls back to the browser's normal JSON download flow using the remembered filename as the suggested download name.
-- That fallback path shows a dedicated informational modal only the first time it is used in the current page session, explaining that direct save-to-folder support is unavailable in the current browser.
+- The app remembers the current project filename in runtime state, updating it from imports and save-picker exports.
+- Export prefers `showSaveFilePicker` when available and otherwise falls back to a normal JSON download using the remembered filename, with a one-time notice that direct save-to-folder support is unavailable in the current browser.
 
 ### Layer Model
 
@@ -210,7 +199,7 @@ The current authoring panel behavior is:
 - While the square-brush axis choice is still undecided after `Shift` is pressed, the stroke holds at the lock anchor instead of recording free diagonal points, so the first committed constrained segment does not leave a diagonal stub.
 - `Square Brush` remembers the previous brush point between strokes, so starting a new square-brush stroke with `Shift` can continue immediately from that remembered point.
 - Square Brush accumulates live vector draft geometry while dragging and commits the final stroke into the active layer on pointer release.
-- In `Draw`, the drafting rulers now show live cyan/red capsule indicators derived from the same snapped preview source as the canvas preview: idle non-brush tools collapse to a dot-like capsule at the snap point, drag operations expand the capsule to the live draft-space extent on each axis, and idle `Square Brush` shows its footprint rather than only its center.
+- In `Draw`, the drafting rulers mirror the active snap preview and drag extent.
 - Zoom is currently clamped between a minimum of `0.02` and a maximum of `50`.
 - The app maintains a workplane with separate `origin` and canonical draft-angle state, independent from stored geometry.
 - Existing geometry is displayed relative to the current workplane, while the visible grid remains horizontal and vertical on screen.
@@ -220,16 +209,10 @@ The current authoring panel behavior is:
 - Wheel-based workplane rotation no longer accumulates float angle drift: returning by the same number of wheel steps restores the exact same derived plane angle, which prevents post-rotate seams caused by near-zero residual rotation.
 - Known-family transforms, candidate-family transforms, and world-content canvas rendering all use the same active canonical `cos/sin` coefficients.
 - While `Space` is held, the normal draw/select interaction is temporarily suspended and the pointer is used for drafting transformations instead.
-- `Space + Left Drag` workplane alignment can start and end anywhere in space, but nearby geometry acts like a magnetic snap target.
-- During `Space + Left Drag`, corners can capture from slightly farther away than edges, and corner snaps use a different preview marker from edge snaps.
-- During `Space + Left Drag`, the initial `mousedown` start/origin snap now allows only `corner` or `free` placement; `edge` snapping is intentionally disabled for the start point to avoid the known edge-origin instability.
-- During an active `Space + Left Drag`, the dragged end point still allows full `corner`, `edge`, or `free` snapping, so edge direction pickup remains available at release.
-- During `Space + Left Drag`, if there is no nearby geometry, the preview and resulting alignment still use the free pointer position instead of forcing a snap.
-- During an active `Space + Left Drag`, the align preview now draws a faint infinite dashed cross through the chosen start/origin point, with one axis parallel to the current align direction and the other perpendicular to it.
-- During `Space + Left Drag`, snapping affects only the chosen start/end points; the resulting alignment direction is always derived from the raw point-to-point `end - start` vector of those resolved endpoints.
-- During `Space + Left Drag`, the raw pointer now magnetizes to a narrow fixed-width screen-space corridor around configurable angular increments of the current active workplane; the `Align Snap` setting currently supports `Off`, `15deg`, `30deg`, `45deg`, and `90deg`.
-- During `Space + Left Drag`, geometry snaps still take precedence over magnetic angle snaps: if the dragged end point is currently snapped to an `edge` or `corner`, that target is used directly and the magnetic align lattice is skipped.
-- When that magnetic align snap engages, it is constrained strictly to the current active family: the preview and commit no longer search other families, and the resulting workplane calibration applies the corresponding step of the active family with the drag start point becoming the new origin.
+- `Space + Left Drag` workplane alignment can start and end anywhere in space, with nearby geometry acting as a magnetic snap target.
+- The start/origin snap allows only `corner` or `free` placement, while the dragged end point can resolve to `corner`, `edge`, or `free`.
+- The resulting alignment direction is always derived from the resolved `end - start` vector of those chosen endpoints.
+- `Align Snap` supports `Off`, `15deg`, `30deg`, `45deg`, and `90deg`; geometry snaps take precedence over magnetic angle snaps, and magnetic angle snaps stay constrained to the current active family.
 - If an aligned direction matches a known family signature, the workplane re-enters that family; otherwise it activates or reuses a temporary unresolved candidate family for that direction regime.
 - The first committed draw or subtract operation while a candidate family is active materializes it into a persistent dynamic family; resetting the plane or leaving that regime without a commit discards the temporary candidate.
 - Pressing `R` while `Space` is held resets the current workplane to the world-aligned plane, cancels any in-progress draft transform drag, and leaves drafting-transforms mode active as long as `Space` remains held.
@@ -250,7 +233,7 @@ The current authoring panel behavior is:
 - After subtractive drawing, the active layer is replaced with the resulting difference geometry instead of deleting whole merged objects by hit-test.
 - Before layer shapes are recreated, both boolean union results and subtractive difference results are passed through Clipper collinear simplification, so exact straight-line extra vertices can be removed from both additive and subtractive outcomes.
 - After moving selected geometry, the affected layer or layers are rebuilt again so intersections and merges stay correct.
-- Draft rulers now format labels in the active display unit rather than as raw cell indices, and they use adaptive label thinning/collision avoidance so labels stay readable at far zoom.
+- Draft rulers now format labels in the active display unit rather than as raw cell indices.
 - Hidden layers are not rendered.
 - Locked layers do not accept edits.
 - The `Drawings` add button creates a real new drawing with a default layer inside it and makes that drawing/layer active.
@@ -313,7 +296,6 @@ The current authoring panel behavior is:
 #### Task Rule
 
 - For this remaining render work, always write and agree on a clear step-by-step implementation plan before making code changes.
-- Before each substantial render/export step, use the `Reference Only` folder as required research input, but keep any implementation app-native in naming and architecture.
 
 #### Immediate Focus
 

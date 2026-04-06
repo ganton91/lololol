@@ -14,7 +14,7 @@
 
 This application is a single-page 2D vector drawing tool that opens directly from `index.html` in the browser. The UI is defined in `index.html`, while the application logic lives in `app.js`.
 
-The editor supports drawing, selecting, moving, erasing, zooming, panning, and layer management. Every new shape drawn into a layer is merged into that layer with boolean union logic.
+The editor supports drawing, selecting, moving, erasing, zooming, panning, layer management, and a separate render workspace driven by committed `Render Box` records. Every new shape drawn into a layer is merged into that layer with boolean union logic.
 
 ## Current Architecture
 
@@ -22,10 +22,10 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 
 - `index.html` contains the fixed `millimétré` top bar, the left-side `Drawings` panel, the canvas shell, the bottom workspace/tab switcher, and the app's centered modal shells.
 - The top bar currently includes the brand shell, `Settings`, `Export`, and `Import` controls, visual-only `Undo` / `Redo` placeholders, and compact live status readouts for grid/workplane state on the right.
-- The old floating layers widget is gone; the primary authoring sidebar is now a left-side `Drawings` panel with nested card-based `Layers`.
+- The old floating layers widget is gone; the primary authoring sidebar is now a left-side panel with `Drawings`, nested card-based `Layers`, a `Renders` section, and fixed bottom `Layer Settings` / `Render Settings` triggers.
 - The canvas shell now includes four drafting rulers plus all four corner blocks around an inset live viewport.
-- `index.html` now also contains a centered settings modal shell with a backdrop for unit, snapping, and canvas edge/corner display configuration.
-- `index.html` now also contains an export-download notice modal that shares the same centered modal language and shared backdrop behavior.
+- The bottom workspace switcher now includes one always-visible `Main` tab plus dynamic `Rbox` tabs that open the render workspace.
+- `index.html` now also contains centered modal shells for app settings, the export-download notice, `Rbox Properties`, `Layer Settings`, and `Render Settings`, all sharing the same backdrop/modal language.
 - `app.js` reads those DOM elements and drives the whole interaction loop.
 - The app still runs as a plain browser project without a bundler.
 - The preferred project direction is to remain compatible with plain browser deployment through native ES modules and static hosting (for example GitHub Pages or similar simple web hosting) without requiring a build step just to run the app.
@@ -89,6 +89,26 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - In `Draw`, the active layer is a deliberate exception: its outline and corner markers always render with the preview blue emphasis even if the general `Outline` or `Corners` settings are off, and that emphasized pass sits back on top of the draft canvas for readability.
 - Selection highlighting is drawn by tracing the selected shape geometries.
 
+### Renders Subsystem
+
+- The app now has a first-class `Renders` subsystem built around `Render` / `Render Box` naming.
+- `Main` remains the authoring workspace, while each committed `Rbox` creates one persistent render record and one matching bottom-tab workspace.
+- A render record currently stores:
+  - `id`
+  - `name`
+  - `visible`
+  - quantized world-space `boxGeometry`
+  - `volume` with `baseElevationMm` and `heightMm`
+  - `sectionSettings` with `{ z: [], x: [], y: [] }`
+- Render boxes are authored on the `Main` canvas but reviewed through separate `Rbox` workspace tabs.
+- Render-related layer behavior is global layer-owned data; the current model has no per-render layer overrides, no per-render layer order overrides, and no render opacity control.
+- The render workspace currently supports `1 Side`, `2 Sides`, and `4 Sides` layouts, per-render pane-direction memory, `Live Preview`, `Sync Fit`, and a single supported pop-out window that externalizes the active `Rbox` tab.
+- Render panes compile from the current drawings, render-layer settings, merged geometry, and the active `Rbox` frame.
+- Non-plan directional panes now build from a shared vector documentation object and rasterize only at the final preview stage; `Plan` shares the same top-level orchestration but intentionally keeps its own plan-specific builder/painter contract.
+- Directional panes now support depth-aware shading and a global outline pass built from silhouette, depth-transition, and eligible-vertex breaks.
+- When an `Rbox` has `heightMm > 0`, side renders use its explicit `Start -> End` vertical range; when `heightMm = 0`, they currently fall back to auto-height from intersecting geometry.
+- Export controls are already present in the render workspace shell, but real `DXF` export is still the remaining unfinished step.
+
 ### Draft Angle Model
 
 - Draft-angle logic is now split more cleanly: `draft-angle.js` owns the draft-angle store, family records, candidate state, active rotation state, lookup-table runtimes, and family/candidate matching, while `app.js` owns only the workplane origin and the pointer/snap interaction that feeds directions into that store.
@@ -107,25 +127,14 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, and l
 - The app now supports project export and import through a strict app-native JSON project file format with `app = millimetre` and a single supported `version = 1`.
 - Export/import is based on the app's real project state, not on a lossy visual snapshot.
 - Export preserves the stable reopenable project state, including:
-  - `drawingsUi`
-  - `layers`
-  - `shapes`
-  - `activeDrawingId`
-  - `activeLayerId`
-  - `nextDrawingId`
-  - `nextLayerId`
-  - `nextShapeId`
-  - current `tool`
-  - current `shapeType`
-  - current size controls (`drawSize` and `stripCellWidth`)
-  - `layerSectionCollapsed`
-  - `renderSettings`
-  - `settings`
-  - `draftOrigin`
-  - `camera`
-  - stable selection membership via `selection.shapeIds`
+  - drawing/layer/shape document state (`drawingsUi`, `layers`, `shapes`, `activeDrawingId`, `activeLayerId`, `nextDrawingId`, `nextLayerId`, `nextShapeId`)
+  - render document state (`renders`, `nextRenderId`)
+  - tool/workspace state (`tool`, `shapeType`, `drawSize`, `stripCellWidth`, `activeWorkspaceTab`)
+  - render workspace snapshot state, including current `renderSettings`, per-render workspace memory, and render-layer modal UI memory
+  - app settings/state (`layerSectionCollapsed`, `settings`, `draftOrigin`, `camera`, stable `selection.shapeIds`)
   - draft-angle snapshot state (`nextFamilyId`, `familyRecords`, `candidateRecord`, `activeState`)
 - Shape `bounds` are treated as derived data and are recomputed on import instead of being trusted from the file.
+- Render records are normalized on import/export to `id`, `name`, `visible`, quantized world-space `boxGeometry`, `volume`, and `sectionSettings`.
 - Import is strict and does not attempt backward compatibility or migration for unsupported versions or schemas.
 - Whenever a new feature adds project state that must persist, update the app's export/import flow for that feature as part of the same work.
 - During the current development phase, backward compatibility with older project files is not a goal when export/import changes are made for new features.
@@ -147,8 +156,15 @@ Each layer currently has:
 - `visible`
 - `locked`
 - `fillColor`
+- `render`, with:
+  - `enabled`
+  - `baseElevationMm`
+  - `heightMm`
+  - `role`
 
 Layer order controls draw order. The active layer receives new geometry when the user draws.
+
+Render settings are global layer-owned data shared by all `Rbox` tabs. New layers currently default to `render.enabled = true`, `render.baseElevationMm = 0`, `render.heightMm = 0`, and `render.role = null`.
 
 The current authoring panel behavior is:
 
@@ -160,9 +176,10 @@ The current authoring panel behavior is:
 
 ### Tools And Interaction
 
-- `Draw`: creates rectangle, ellipse, strip, or square-brush geometry with left click, and subtracts with the same geometry modes using right click.
+- `Draw`: creates rectangle, ellipse, strip, square-brush geometry, or `Rbox` authoring boxes on the `Main` canvas. Right click subtraction applies only to the geometry modes.
 - `Draw` size controls for `Stroke Rect` and `Square Brush` are expressed in whole visible grid cells.
 - `Select`: selects and moves one or more whole merged shapes.
+- Activating an `Rbox` card enters a separate move-only render-box transform mode on `Main` without changing the underlying base tool.
 - `S`: switches to `Select`.
 - Pressing `Escape` while `Draw` is active switches to `Select`.
 - `Mouse wheel`: zooms at cursor position.
@@ -242,6 +259,14 @@ The current authoring panel behavior is:
 - A newly added layer now inserts directly above the current active layer in that drawing instead of always being created at the very top of the stack.
 - Drawing drag reorder updates actual canvas paint order across drawings.
 - Layer drag reorder updates actual paint order within the drawing, and layer drag can also move a layer into another drawing or merge it into another layer while preserving the target layer's properties.
+- `Add Rbox` arms `Draw > Rbox` on `Main` instead of creating an empty render record.
+- `Rbox` drawing follows the same Draft Plane input rules as the other draw shapes, previews as a strong-orange dashed no-fill box, and creates the render record only on commit.
+- Committed `Rboxes` render on `Main` as strong-orange overlays with a rotated name label and side initials.
+- While an `Rbox` is active, normal layer draw/select interaction is suspended, draw-only preview helpers stay hidden, the current `Rbox` is move-only, and `Escape` deactivates it without rewriting the underlying base tool.
+- The render workspace remembers layout and pane choices per `Rbox`, supports `Live Preview` and `Sync Fit`, and can externalize the active `Rbox` tab into one dedicated pop-out window.
+- Render panes compile from render-enabled layer geometry clipped against the active `Rbox`.
+- When two directional render candidates land at the same visible depth, the current `Layer Settings` order is the tie-breaker.
+- Render workspace export controls are still disabled until `DXF` export is implemented.
 
 ## Dependency Notes
 
@@ -284,225 +309,18 @@ The current authoring panel behavior is:
 
 ## Current Task
 
-### Current Task 1: Renders Subsystem
+### Current Task 1: Render Export And Documentation Stabilization
 
-- Task: design the application's new `Renders` subsystem from scratch, with `Render` / `Render Box` naming, global layer render properties, a `Main` tab plus per-render tabs, and a first rollout that focuses on UI before the deeper rendering engine.
-- Status: implementation is active. The UI shell, persistence scaffolding, `Rbox` authoring flow, layer/render settings editors, and the first real render-output/documentation path are now in place. `Plan` now enters the same top-level render-pane documentation orchestration as the directional panes, but the subsystem is still not complete because `DXF` export is not open yet and the render/documentation architecture still needs more stabilization around the intentional `Plan` vs side-view split.
-
-#### Locked Decisions
-
-- In this app, use `Render` instead of `View`, and `Render Box` instead of `View Box`.
-- The current app has no existing live render subsystem; this work should be treated as a fresh architecture and UI build rather than as a refactor of an already-working render module.
-- Render-related layer properties should be global layer settings that apply to all render boxes, not per-render overrides.
-- The ordering of layers in the main canvas stack is separate from the ordering or grouping used when editing render-related layer properties.
-- Old per-view layer override behavior from the external example should not be carried over into this app.
-- Layer opacity should not be reintroduced as a render-layer control in the new system; if any old opacity logic is still present in the external example or dead code, it is not part of the intended render-properties model for this app.
-- `Plan` should remain its own render/documentation branch instead of being forced into the same output contract as the side views; a previous attempt to fully match the side-view path did not behave correctly, so the split is intentional.
-- The workspace direction is:
-  - one `Main` tab for authoring on the main canvas
-  - separate `Rbox` tabs (`Rbox 1`, `Rbox 2`, etc., or user-renamed equivalents) driven by the created render boxes
-- The initial rollout should prioritize UI structure, naming, tabs, and render-box management before the full final render engine behavior.
-- Future support for measurements and scenes is still expected, but they are not part of the first render-system rollout and should not block the initial `Renders` work.
-- The first-pass placement for global render controls is now:
-  - `Render Layers` should live in the lower area of the left panel as a global editor, not inside individual `Rbox` cards
-  - `Render Settings` should also live in the lower area of the left panel for now, instead of staying inside the general app `Settings`
-  - render-specific controls kept on the `Rbox` side should be limited to properties owned by the render itself, such as section-related `Rbox` properties
-
-#### Planned Render Model Direction
-
-- A render should be defined primarily by its own stored render-box bounds and render-specific metadata such as name, visibility, and section-related settings.
-- Global layer render properties are expected to live on the layer records themselves rather than inside each render.
-- The main drawing canvas should remain the authoring surface, while renders should be presented through a separate render workspace/tab system.
-- The goal is to achieve the same user-facing outcome studied in the external example, but through app-native architecture and naming that fit this project's current geometry model.
-- Keep a small allowance in the model direction for future inter-layer render relationships beyond basic per-layer height settings, such as targeted trim/cutter behavior between selected layers or derived connection geometry between specific layer pairs; this is future scope only and should not complicate the first render-system rollout.
+- Task: open real `DXF` export from the current render documentation architecture without forcing `Plan` into the side-view contract, then continue with the next stabilization pass around the intentional `Plan` / side-view split.
+- Status: active. The broader `Renders` subsystem is now treated as established behavior and has been moved into the permanent sections above. The remaining open work is the real export path plus the next round of section-aware/documentation-aware stabilization.
 
 #### Task Rule
 
-- For this `Renders` task specifically, always write and agree on a clear step-by-step implementation plan before making any code changes.
-- Do not begin coding this subsystem from ad-hoc intuition; each substantial phase should first be broken into explicit steps so the implementation direction stays aligned.
-- For this `Renders` task specifically, the `Reference Only` folder should be treated as required research input before each substantial implementation step, even if the user does not restate that request each time.
-- That reference should be used only to study intended behavior, user flow, and useful UI/render-system patterns; any implementation carried into this app must be rewritten in app-native terms so it stays fully compatible with this project's own architecture, naming, and constraints.
+- For this remaining render work, always write and agree on a clear step-by-step implementation plan before making code changes.
+- Before each substantial render/export step, use the `Reference Only` folder as required research input, but keep any implementation app-native in naming and architecture.
 
 #### Immediate Focus
 
-- The immediate next step is to open real `DXF` export from the current render documentation architecture without forcing `Plan` into the side-view contract, so dimensions can be validated against the exact render output rather than against a separate export-only path.
-- After `DXF` is open, continue into stronger section-aware/documentation-aware behavior and further stabilization of the intentional `Plan` / side-view split before later zoom-oriented raster-backing polish.
-
-#### Progress
-
-- The staged implementation plan for the `Renders` subsystem is now locked as:
-  1. document and lock the `Renders` data model v1 in `AI Memories`
-  2. add non-visual app-state and project-persistence scaffolding for `renders`, `activeWorkspaceTab`, and layer render properties
-  3. build the `Main` / `Render` tab shell and tab-switching behavior without changing the main authoring canvas behavior
-  4. add render cards and basic create / rename / duplicate / delete / hide management in the workspace UI
-  5. add `Render Box` authoring on the `Main` canvas and bind each committed box to its `Render` tab
-  6. add the initial render workspace surface and placeholder render outputs driven by stored render boxes
-  7. add global layer render-properties editing UI
-  8. expand into deeper render engine behavior, section behavior, and later measurements/scenes integration in follow-up stages
-- The `Renders` data model v1 is now locked around the following project-state additions:
-  - top-level persistent project state should add:
-    - `renders`: ordered array of render records, where array order defines render-tab order
-    - `nextRenderId`
-    - `activeWorkspaceTab`: either `{ kind: "main" }` or `{ kind: "render", renderId }`
-  - top-level runtime-only UI state should add:
-    - `activeRenderId`
-    - `renderTransformDrag`
-    - `pendingRenderBox`
-    - `editingRenderId`
-    - `editingRenderNameDraft`
-- Each committed render record should store:
-  - `id`
-  - `name`
-  - `visible`
-  - `boxGeometry`: ordered world-space corner points for the committed `Render Box`, stored in quantized millimeter coordinates so Draft Plane orientation is preserved after commit
-  - `volume`: per-render vertical extent settings with `baseElevationMm` and `heightMm`, so each `Rbox` can later act as a full render prism instead of only a 2D footprint
-  - `sectionSettings`: `{ z: [], x: [], y: [] }` reserved for future render-local section definitions
-- `Render` tabs should be driven one-to-one by committed render records.
-- `Render Box` authoring now happens through a dedicated `Rbox` draw tool inside the existing `Draw` tool family.
-- `Add Rbox` should not create an empty render record immediately; instead it should arm `Draw > Rbox` on the `Main` canvas, and the committed drag should create the new render record/card.
-- Unfinished drag state should stay in `pendingRenderBox` instead of creating half-finished render records.
-- Render-box geometry should be stored in world coordinates, not draft-space coordinates, so it stays stable when the workplane origin or angle changes while still preserving the Draft Plane-oriented rectangle the user drew.
-- Global layer render properties are now defined as layer-owned data rather than render-owned overrides. Each layer should gain a `render` object with:
-  - `enabled`
-  - `baseElevationMm`
-  - `heightMm`
-  - optional future-facing `role` field reserved for later inter-layer render relationships
-- Existing layer fields keep their current responsibilities:
-  - `visible` remains the main-canvas authoring visibility control
-  - `opacity` remains the current general layer UI property and is not part of the new render-properties model
-  - main-canvas layer order remains independent from any future render-properties editing presentation
-- Explicit `Renders` v1 exclusions are now:
-  - no per-render `layerConfigs`
-  - no per-render `layerOrder`
-  - no render-specific opacity control
-  - no measurements or scenes integration in the first rollout
-  - no multi-pane or pop-out render workspace in the first rollout
-- The app state and project-file scaffolding now include:
-  - top-level runtime state for `renders`, `nextRenderId`, `activeWorkspaceTab`, `activeRenderId`, `renderTransformDrag`, `pendingRenderBox`, `editingRenderId`, and `editingRenderNameDraft`
-  - layer-owned `render` settings stored directly on each layer record
-  - project export/import persistence for `document.renders`, `document.nextRenderId`, `workspace.activeWorkspaceTab`, and per-layer `render` settings
-- New layer records now default their render settings to:
-  - `enabled = true`
-  - `baseElevationMm = 0`
-  - `heightMm = 0`
-  - `role = null`
-- Render records are now normalized on import/export with:
-  - `id`
-  - `name`
-  - `visible`
-  - quantized world-space `boxGeometry`
-  - `sectionSettings`
-- The render scaffolding now participates in the current export/import round-trip for the current schema, without adding any backward-compatibility commitment for older pre-render project files.
-- The app now includes a first visible render-workspace shell:
-  - a bottom workspace switcher styled from the external reference pattern
-  - one always-visible `Main` tab
-  - dynamic `Rbox` tabs driven by `state.renders`
-  - a render workspace panel shell that opens when an `Rbox` tab becomes active
-  - the pane-direction choices are now remembered per workspace layout slide (`1 Side`, `2 Sides`, `4 Sides`) instead of sharing one global selector state across all three layouts
-- The bottom workspace switcher has now been tightened to use the external reference's light-theme visual language more literally, including its white surface, line color, muted/text values, active fill, and floating shadow.
-- The current render workspace shell is no longer placeholder-only:
-  - it uses the external reference's `View` workspace interface much more literally as the base shell, including the layout controls, popout button, pane export buttons, and per-pane direction selector clusters
-  - the `1 Side`, `2 Sides`, and `4 Sides` layout controls already work at the shell/grid-layout level
-  - each `Rbox` now carries its own render-workspace memory instead of sharing one global workspace profile, so layout choice (`1/2/4`), pane-direction choices, and `Sync Fit` state are remembered per render tab and each newly created `Rbox` starts from fresh defaults
-  - the toolbar now also includes a per-`Rbox` `Live Preview` trial toggle before `Sync Fit`; when enabled, draft edits in `Layer Settings`, `Render Settings`, and `Rbox Properties` preview directly in the active render workspace without `Apply`, while `Apply` still commits and `Close` without `Apply` resets the render back to the last committed state
-  - the toolbar now also includes a per-`Rbox` `Sync Fit` toggle before `Open in New Window`; when enabled, the currently visible panes in that layout share the most restrictive auto-fit scale so they keep one common physical render scale, and when disabled they return to the current per-pane independent fit behavior
-  - `Open in New Window` now externalizes the current `Rbox` tab into a dedicated pop-out window; the pop-out keeps only the render-workspace UI (`1/2/4` layout, `Sync Fit`, pane selectors, render panes, and a `Close Window` button) while the main window hides that tab's local render controls/grid and shows a centered notice with its own `Close Window` action
-  - only one render pop-out is supported at a time in the current implementation
-  - the pop-out bootstraps from a local snapshot and then mirrors committed/apply changes from the main window, not live pointermove/drag frames; live-preview drafts from the supported render modals are also mirrored while those modals are open
-  - the current locked sync trigger model includes modal `Apply` actions, committed draw/boolean commits, geometry transforms on commit, layer/drawing duplicate-delete-reorder-merge commits, `Rbox` duplicate-delete-transform/property commits, import/apply replacement of the project, and immediate layer appearance commits such as visibility/color/opacity changes; more sync triggers may need to be added later as the render subsystem grows
-  - the pop-out is now the same shared `Rbox` tab externalized into another window rather than a separate local-view variant, so `1/2/4`, pane-direction choices, `Sync Fit`, and `Live Preview` stay in one shared `Rbox` tab state whether the tab is visible in the main window or in the pop-out
-  - it now does display real render outputs in the panes, even though the full render/documentation/export stack is still incomplete
-  - export buttons are still visually present but intentionally disabled until the shared documentation/export layer is opened
-- The left panel now includes a dedicated `Renders` section with:
-  - a `Renders` section header that matches the app's own `Drawings` section pattern
-  - `Rbox` cards styled from the same top-level card system as `Drawings`
-  - basic rename / duplicate / hide / delete / reorder management for committed render records
-  - card activation now targets `Main`-canvas `Rbox` transform mode instead of directly switching the bottom render-workspace tabs
-  - clicking the already-active `Rbox` card deactivates all `Rbox` cards again
-  - drag reordering for `Rbox` card order, which also controls bottom tab order
-  - newly committed `Rbox` records insert at the top of the left-panel list, while duplicated `Rbox` records insert immediately above their source render
-  - the bottom pill switcher now displays `Rbox` tabs in reverse of that stored/list order, so newly created `Rbox` tabs appear farther to the right instead of immediately beside `Main`
-- `Render Box` authoring is now available on the `Main` canvas through `Draw > Rbox`:
-  - it follows the same Draft Plane input rules as other draw shapes
-  - it previews as a dashed no-fill rectangle/parallelogram outline
-  - while drawing, its ruler preview should use the same strong-orange render-box color rather than the default blue draw-preview color
-  - its pointer/snap preview should also use that same strong-orange render-box color rather than the default blue draw-preview color
-  - on commit it creates a new `Rbox` card/render record at the top of the list
-  - `Add Rbox` now acts as a shortcut that arms `Draw > Rbox` and returns focus to the `Main` workspace instead of creating an empty render immediately
-- Committed `Rboxes` now render on `Main` as strong-orange overlays with a small top-left name label inspired by the external reference.
-- That `Rbox` name label should anchor from the committed box's own draft-top-left corner with a small local offset and rotate parallel to the committed top edge, rather than using the screen-space bounding envelope, so rotated workplanes keep the label in the correct place.
-- Each committed `Rbox` side should also show its side initial (`T`, `R`, `B`, `L`) at the midpoint of the corresponding edge, rotated parallel to that edge, with a visible stroke gap behind the letter so the side label does not visually merge into the dashed line.
-- When an `Rbox` card is active:
-  - its transform controls open on `Main` independently of whether the underlying app tool is `Draw` or `Select`
-  - the current layer drawing/selection interactions are suspended without changing the underlying tool choice
-  - draw-only pointer previews and ruler previews should stay hidden while `Rbox` transform mode is active
-  - the active `Rbox` is currently move-only
-  - pressing `Escape` deactivates the active `Rbox` and closes the transform mode without rewriting the user's underlying base tool choice
-- Each `Rbox` card now also has an `Rbox Properties` button in its lower area, and that button opens a dedicated modal for per-render `Height`, `Start`, and `End`
-- Those `Rbox Properties` values now persist directly on the render record itself and survive duplicate/import/export, even though the render engine does not use that vertical render-prism extent yet
-- The non-plan directional render foundation now also respects the `Rbox` vertical range:
-  - when an `Rbox` has a positive `Height`, side renders clip layer prisms against that `Start → End` range in `Z` instead of borrowing the visible height only from the intersecting layer scene
-  - that same explicit `Rbox` `Start → End` range now becomes the displayed vertical extent of the side render, so empty space above or below the geometry can exist inside the rendered prism
-  - when an `Rbox` still has `Height = 0`, the current behavior intentionally falls back to the old auto-height mode so older/default render boxes do not collapse into a zero-height render
-  - a likely future refinement is to replace that implicit `Height = 0` fallback with an explicit `Clip to Geometry` render-volume option, probably default-on, so auto-height clipping becomes a named mode instead of being hidden behind zero height
-- The left panel now has a fixed bottom `Layer Settings` trigger outside the scroll area, and that trigger opens a dedicated render-layer modal instead of placing the editor inside the scrolling panel content.
-- That fixed `Layer Settings` trigger is now styled as a centered floating button rather than a full-width footer bar, while the footer surface itself blends back into the left-panel background without a separator line.
-- The same footer area now also includes a matching `Render Settings` button beside `Layer Settings`; it now opens a dedicated render-settings modal instead of acting as a placeholder.
-- Those two footer buttons are now sized down to fit side by side within the current left-panel width without clipping.
-- The first `Layer Settings` modal pass now follows the external reference much more literally while still omitting the fields we intentionally excluded:
-  - drawings are grouped separately inside the modal
-  - each drawing header shows computed `Height`, `Start`, and `End`
-  - each layer row currently exposes `Height`, `Start`, and `End`
-  - the modal currently reads and writes the global layer-owned `render.baseElevationMm` and `render.heightMm` settings through a draft/apply flow
-  - the modal now also supports reorder-only pointer drag for drawings and for layers within each drawing, using insertion indicators without preview/ghost cards
-  - that modal reorder path now mirrors the left panel more literally, with separate drawing and layer indicator updaters using the same `toIndex === fromIndex` no-op suppression pattern
-  - the modal scroll body now keeps a slightly larger bottom buffer so the final drawing-level `drag-insert-after` line stays visible above the action buttons instead of clipping at the very bottom edge
-  - each drawing group's inner layer stack also keeps extra bottom padding so the last layer-row insertion line has breathing room before the group edge
-  - the modal now uses a single top headings row that shows only `Height`, `Start`, and `End`; the repeated per-drawing headings row and the old inner `Layer` heading row have both been removed to free up space
-  - that single top headings row now keeps extra bottom margin so `Height / Start / End` does not sit too tightly against the first drawing card
-  - the `Height / Start / End` headings row now sits outside the scroll area as a frozen strip, while the modal body below it remains the only scrolling region
-  - `Apply` now commits both drawing order and per-drawing layer order from the modal draft, not just the numeric render fields
-  - the modal also now keeps dedicated UI memory for collapsed/open drawing groups and scroll position, and that memory is restored on reopen and included in the project workspace snapshot
-- The render workspace now has a first real Phase 1 engine foundation instead of hardcoded placeholder copy:
-  - render panes now read from a compiled render-scene pass derived from current drawings, layer order, merged layer geometry, and global layer render settings
-  - each pane now resolves a normalized render request against the active `Rbox`, including direction metadata and the `Rbox` local frame
-  - the workspace now computes real `Rbox` intersection awareness per pane by clipping render-enabled layer geometry against the committed render box
-  - pane titles and selector-button active states now update from runtime pane-direction state instead of staying static in the markup
-  - that pane-direction state is now stored per layout slide, so changing a pane in `1 Side` no longer rewrites the matching slot in `2 Sides` or `4 Sides`
-  - pane placeholder surfaces now show live derived summaries such as intersecting render-layer count, box dimensions, and elevation range for the active render box
-  - export buttons are intentionally disabled for now until the later phases add actual canvas/export output builders
-- The render workspace now also has a first real Phase 2 painter pass on top of that foundation:
-  - `Top to Bottom` and `Plan` panes now paint real first-pass canvas output instead of only summary copy whenever an active `Rbox` has intersecting render-enabled geometry
-  - the `Plan` painter currently draws clipped local geometry directly in the `Rbox` frame with the layer fill colors
-  - the first `Top to Bottom` painter started as a simplified projected x/z documentation view derived from the clipped local geometry and each layer's `baseElevationMm` / `heightMm`
-  - export buttons are still intentionally disabled, because the canvas/export builder layer is not finished yet
-- The render workspace now also has a first real Phase 3 directional generalization pass:
-  - the non-plan panes now share one common directional painter instead of a one-off `Top to Bottom` implementation
-  - `Bottom to Top`, `Left to Right`, and `Right to Left` now paint real first-pass canvas output too, using the active direction's own local-primary axis, front boundary, and mirrored/non-mirrored horizontal mapping
-  - that shared directional painter no longer uses the old temporary raster/grid-derived boundary path; it now builds from a shared vector documentation object and only rasterizes at the final preview-display stage
-  - `Plan` now also enters the same top-level render-pane documentation orchestration as the directional panes, but it intentionally keeps its own plan-specific builder/painter contract because the earlier attempt to fully match the side-view path did not work correctly
-- The render workspace now also has a first real depth-aware shading pass:
-  - the left-panel `Render Settings` button is no longer just a placeholder; it now opens a modal with reference-like `Depth Effect` controls (`Shadow`, `Fog`, `Off`) plus `Depth Strength`
-  - those render settings now persist in the project workspace snapshot/import-export path instead of living only in transient UI state
-  - the directional render painter now shades visible fills by normalizing each visible point across the current pane's nearest-to-farthest visible depth range, and `Depth Strength` now means the maximum tint amount applied at that farthest visible point (`100` = full black/white endpoint tint, `50` = half-strength endpoint tint)
-  - `Plan` still stays on its simpler plan-specific fill path for now; only the top-level documentation orchestration is shared at this stage, not the full painter/export contract, and that split is currently intentional rather than just an unfinished merge step
-  - a future refinement idea that should be kept in mind: keep the same global `nearest visible depth` model, but change the shading curve from a constant linear step-per-depth-step into a diminishing falloff so the first depth gaps darken more strongly and the farther-back gaps add progressively less darkening, instead of every depth step contributing the same amount forever
-- A new per-vertex outline-eligibility foundation now exists in the main geometry model:
-  - each stored shape now carries `vertexOutlineEligibility` alongside its geometry
-  - ellipse approximation vertices default to `false`, while authored straight/corner tools default to `true`
-  - in the main canvas, `false` vertices render in a mid gray while `true` vertices keep the normal outline color, so provenance is visible during editing
-  - that metadata now survives clone/duplicate/import-export/move paths and is also propagated through current layer rebuild / boolean flows with coordinate-based provenance matching
-- The directional panes now also have a first working global render-outline pass:
-  - `Render Settings` now include outline `On / Off`, outline color, and outline width
-  - the directional outline is currently built from three sources together: mass/silhouette boundaries, depth-transition boundaries, and eligible-vertex breaks
-  - eligible vertices only contribute outline breaks when they sit on the visible front profile of the same component, so hidden same-layer vertices are no longer allowed to force lines through the front surface
-  - the current directional outline logic is global and depth-aware; it does not intentionally create seams between same-depth surfaces, and when two visible candidates land at the same depth the current `Layer Settings` order is the tie-breaker, with the higher drawing/layer in that order winning the common rendered area
-- The non-plan directional panes have now moved off the old raster/grid-derived boundary path onto a shared vector documentation path:
-  - each directional pane now builds a documentation object from the clipped `Rbox` scene using projected component geometry, exact primary breakpoints, exact `Z` bands from layer elevations, and visible-surface winner selection
-  - the visible fill/shading logic now comes from that documentation object instead of from the old temporary column/row render grid
-  - the current on-screen fill preview is still rasterized at the end for display, but it is rasterized from the new vector documentation object through an offscreen paint buffer so the pane remains preview-friendly without changing the underlying source-of-truth model
-  - this means the current directional panes are now documentation-first even though the browser still displays them through canvas pixels
-- The current locked next order for the render pipeline is now:
-  1. open real `DXF` export from the current render documentation architecture so dimensions can be validated against the exact render output
-  2. expand into stronger section-aware/documentation-aware behavior while preserving the intentional architectural split between `Plan` and the side views
-  3. after the render/documentation logic is visually and structurally stable, add a higher-resolution offscreen raster backing path for on-screen panes too, more like the `Reference` view system, so later zoom/pan can behave like a raster image editor without making us lock the wrong render path too early
+- Open real `DXF` export from the current documentation-first render architecture so dimensions can be validated against the same render output the workspace already shows.
+- Continue into stronger section-aware/documentation-aware behavior while preserving the intentional `Plan` / side-view split.
+- After that logic is stable, add a higher-resolution offscreen raster backing path for on-screen panes.

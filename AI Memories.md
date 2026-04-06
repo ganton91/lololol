@@ -92,7 +92,7 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, layer
 ### Renders Subsystem
 
 - The app now has a first-class `Renders` subsystem built around `Render` / `Render Box` naming.
-- `Main` remains the authoring workspace, while each committed `Rbox` creates one persistent render record and one matching bottom-tab workspace.
+- `Main` remains the authoring workspace; render boxes are authored there, and each committed `Rbox` creates one persistent render record plus one matching bottom-tab workspace.
 - A render record currently stores:
   - `id`
   - `name`
@@ -100,7 +100,6 @@ The editor supports drawing, selecting, moving, erasing, zooming, panning, layer
   - quantized world-space `boxGeometry`
   - `volume` with `baseElevationMm` and `heightMm`
   - `sectionSettings` with `{ z: [], x: [], y: [] }`
-- Render boxes are authored on the `Main` canvas but reviewed through separate `Rbox` workspace tabs.
 - Render-related layer behavior is global layer-owned data; the current model has no per-render layer overrides, no per-render layer order overrides, and no render opacity control.
 - The render workspace currently supports `1 Side`, `2 Sides`, and `4 Sides` layouts, per-render pane-direction memory, `Live Preview`, `Sync Fit`, and a single supported pop-out window that externalizes the active `Rbox` tab.
 - Render panes compile from the current drawings, render-layer settings, merged geometry, and the active `Rbox` frame.
@@ -164,7 +163,7 @@ Each layer currently has:
 
 Layer order controls draw order. The active layer receives new geometry when the user draws.
 
-Render settings are global layer-owned data shared by all `Rbox` tabs. New layers currently default to `render.enabled = true`, `render.baseElevationMm = 0`, `render.heightMm = 0`, and `render.role = null`.
+New layers currently default to `render.enabled = true`, `render.baseElevationMm = 0`, `render.heightMm = 0`, and `render.role = null`.
 
 The current authoring panel behavior is:
 
@@ -262,11 +261,8 @@ The current authoring panel behavior is:
 - `Add Rbox` arms `Draw > Rbox` on `Main` instead of creating an empty render record.
 - `Rbox` drawing follows the same Draft Plane input rules as the other draw shapes, previews as a strong-orange dashed no-fill box, and creates the render record only on commit.
 - Committed `Rboxes` render on `Main` as strong-orange overlays with a rotated name label and side initials.
-- While an `Rbox` is active, normal layer draw/select interaction is suspended, draw-only preview helpers stay hidden, the current `Rbox` is move-only, and `Escape` deactivates it without rewriting the underlying base tool.
-- The render workspace remembers layout and pane choices per `Rbox`, supports `Live Preview` and `Sync Fit`, and can externalize the active `Rbox` tab into one dedicated pop-out window.
-- Render panes compile from render-enabled layer geometry clipped against the active `Rbox`.
+- While an `Rbox` is active, normal layer draw/select interaction is suspended, draw-only preview helpers stay hidden, and `Escape` deactivates it without rewriting the underlying base tool.
 - When two directional render candidates land at the same visible depth, the current `Layer Settings` order is the tie-breaker.
-- Render workspace export controls are still disabled until `DXF` export is implemented.
 
 ## Dependency Notes
 
@@ -311,7 +307,7 @@ The current authoring panel behavior is:
 
 ### Current Task 1: Render Export And Documentation Stabilization
 
-- Task: open real `DXF` export from the current render documentation architecture without forcing `Plan` into the side-view contract, then continue with the next stabilization pass around the intentional `Plan` / side-view split.
+- Task: finish the remaining render export and documentation-stabilization work for the `Renders` subsystem.
 - Status: active. The broader `Renders` subsystem is now treated as established behavior and has been moved into the permanent sections above. The remaining open work is the real export path plus the next round of section-aware/documentation-aware stabilization.
 
 #### Task Rule
